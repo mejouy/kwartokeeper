@@ -4,6 +4,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import Login from './pages/auth/Login';
 import OwnerRegister from './pages/auth/OwnerRegister';
 import PropertyWizard from './pages/onboarding/PropertyWizard';
+import RegisterSubUser from './pages/owner/RegisterSubUser';
 
 // Temporary Dashboard Placeholders (You can create real files for these in a future sprint)
 const OwnerDashboard = () => <div>Owner Dashboard</div>;
@@ -26,6 +27,9 @@ function App() {
         <Route path="/owner/dashboard" element={<OwnerDashboard />} />
         <Route path="/tenant/dashboard" element={<TenantDashboard />} />
         <Route path="/caretaker/dashboard" element={<CaretakerDashboard />} />
+
+        {/* Sub-user Registration */}
+        <Route path="/register-sub-user" element={<RegisterSubUser />} />
       </Routes>
     </Router>
   );
