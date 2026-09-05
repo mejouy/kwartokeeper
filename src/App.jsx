@@ -1,9 +1,11 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import Login from './pages/auth/Login';
 
-// Dummy components for your team to replace later
-const OwnerRegister = () => <div>Owner Registration Placeholder (Dev 2)</div>;
-const PropertyWizard = () => <div>Property Wizard Placeholder (Dev 3 & 4)</div>;
+// Import your actual files
+import Login from './pages/auth/Login';
+import OwnerRegister from './pages/auth/OwnerRegister';
+import PropertyWizard from './pages/onboarding/PropertyWizard';
+
+// Temporary Dashboard Placeholders (You can create real files for these in a future sprint)
 const OwnerDashboard = () => <div>Owner Dashboard</div>;
 const TenantDashboard = () => <div>Tenant Dashboard</div>;
 const CaretakerDashboard = () => <div>Caretaker Dashboard</div>;
