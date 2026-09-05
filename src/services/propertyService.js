@@ -28,14 +28,14 @@ export async function saveProperty(wizardData, rooms, ownerUid) {
 
   const propertyDoc = {
     ownerUid,
-    propertyName: wizardData.propertyName,
-    propertyType: wizardData.propertyType, // Dormitory | Apartment | Boarding House
+    propertyName: wizardData.propertyName || null,
+    propertyType: wizardData.propertyType || null, // Dormitory | Apartment | Boarding House
     address: {
-      street: wizardData.street,
-      barangay: wizardData.barangay,
-      cityMunicipality: wizardData.cityMunicipality,
+      street: wizardData.street || null,
+      barangay: wizardData.barangay || null,
+      cityMunicipality: wizardData.cityMunicipality || null,
     },
-    emergencyPhone: wizardData.emergencyPhone,
+    emergencyPhone: wizardData.emergencyPhone || null,
     coverPhotoUrl: wizardData.coverPhotoUrl || null,
     totalFloors: wizardData.totalFloors,
     amenities: wizardData.amenities || [],
