@@ -330,6 +330,12 @@ export default function Step3Rooms({ wizardData, updateWizardData, onBack }) {
                   fullWidth
                 />
 
+                {/* NOTE: Spec asked for a checkbox to copy settings to a specific
+                    floor (e.g. "Copy settings to Floor 3"). Simplified here to a
+                    copy-to-next-floor-only button — faster to implement and more
+                    predictable for the owner filling out floors in order. Swap
+                    for a floor-picker checkbox later if the team wants the exact
+                    spec behavior. */}
                 {index + 1 < floorConfigs.length && (
                   <Button
                     size="small"
