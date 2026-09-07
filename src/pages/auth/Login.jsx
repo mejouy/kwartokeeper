@@ -6,8 +6,13 @@ import {
   FormControlLabel, Checkbox, Divider
 } from '@mui/material';
 import { Visibility, VisibilityOff } from '@mui/icons-material';
-import { signInWithEmailAndPassword } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { 
+  signInWithEmailAndPassword, 
+  setPersistence, 
+  browserLocalPersistence, 
+  browserSessionPersistence 
+} from 'firebase/auth';
+import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
 
 export default function Login() {
@@ -27,20 +32,45 @@ export default function Login() {
     const password = data.get('password');
 
     try {
+      // 1. Configure session persistence based on "Remember Me"
+      await setPersistence(
+        auth, 
+        rememberMe ? browserLocalPersistence : browserSessionPersistence
+      );
+
+      // 2. Authenticate with Firebase Auth
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
+      // 3. Fetch user profile from Firestore
       const userDocRef = doc(db, 'users', user.uid);
       const userDoc = await getDoc(userDocRef);
 
       if (userDoc.exists()) {
         const userData = userDoc.data();
-        if (userData.role === 'owner') navigate('/owner/dashboard');
-        else if (userData.role === 'tenant') navigate('/tenant/dashboard');
-        else if (userData.role === 'caretaker') navigate('/caretaker/dashboard');
-        else setError('Invalid user role assigned.');
+
+        if (userData.role === 'owner') {
+          // Check if owner has already registered a property
+          const propertiesRef = collection(db, 'properties');
+          const q = query(propertiesRef, where('ownerId', '==', user.uid));
+          const propertySnap = await getDocs(q);
+
+          if (propertySnap.empty && !userData.hasProperty) {
+            // Redirect to PropertyWizard setup if no property registered yet
+            navigate('/setup');
+          } else {
+            navigate('/owner/dashboard');
+          }
+        } else if (userData.role === 'tenant') {
+          navigate('/tenant/dashboard');
+        } else if (userData.role === 'caretaker') {
+          navigate('/caretaker/dashboard');
+        } else {
+          setError('Invalid user role assigned.');
+        }
       } else {
-        navigate('/owner/dashboard'); 
+        // Fallback for new accounts without a user document yet
+        navigate('/setup'); 
       }
     } catch (err) {
       setError('Failed to log in. Please check your credentials.');
@@ -55,11 +85,11 @@ export default function Login() {
       component="main" 
       maxWidth="xs" 
       sx={{ 
-        minHeight: '100vh', // Allows scrolling on small screens
+        minHeight: '100vh',
         display: 'flex', 
         flexDirection: 'column', 
         justifyContent: 'center',
-        py: 6 // Adds padding at the top/bottom when scrolling
+        py: 6 
       }}
     >
       <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', mb: 3 }}>
@@ -69,7 +99,7 @@ export default function Login() {
           alt="KwartoKeeper Icon" 
           sx={{ height: 70, mb: 2 }} 
         />
-        <Typography variant="h5" align="center" color="text.primary" sx={{ fontWeight: 500, mb: 1 }}>
+        <Typography variant="h5" align="center" color="text.primary" sx={{ fontWeight: 600, mb: 1 }}>
           Welcome to KwartoKEEPER
         </Typography>
         <Typography variant="body2" color="text.secondary" align="center">
@@ -142,9 +172,9 @@ export default function Login() {
             mb: 3, 
             py: 1.5, 
             fontWeight: 'bold',
-            backgroundColor: '#ff4500', // Forces KwartoKeeper Orange
+            backgroundColor: 'primary.main',
             '&:hover': {
-              backgroundColor: '#e03d00', // Slightly darker orange on hover
+              backgroundColor: 'primary.dark',
             }
           }}
         >
