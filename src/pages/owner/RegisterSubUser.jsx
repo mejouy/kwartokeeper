@@ -11,7 +11,6 @@ import {
   Alert,
   CircularProgress,
   IconButton,
-  Grid,
   ToggleButton,
   ToggleButtonGroup,
 } from "@mui/material";
@@ -257,7 +256,7 @@ export default function RegisterSubUser() {
         </Alert>
       )}
 
-      <Paper elevation={0} variant="outlined" sx={{ p: 3 }}>
+      <Paper elevation={0} sx={{ p: 3, bgcolor: "background.default" }}>
         <Box component="form" onSubmit={handleSubmit} noValidate>
           <Typography variant="body2" sx={{ mb: 1 }}>
             Role
@@ -266,13 +265,24 @@ export default function RegisterSubUser() {
             value={role}
             exclusive
             onChange={(e, value) => value && setRole(value)}
-            sx={{ mb: 3 }}
+            sx={{
+              mb: 3,
+              "& .MuiToggleButton-root": {
+                px: 3,
+                fontWeight: 600,
+                "&.Mui-selected": {
+                  bgcolor: "primary.main",
+                  color: "#fff",
+                  "&:hover": { bgcolor: "primary.dark" },
+                },
+              },
+            }}
           >
             <ToggleButton value="tenant">Tenant</ToggleButton>
             <ToggleButton value="caretaker">Caretaker</ToggleButton>
           </ToggleButtonGroup>
 
-          <Typography variant="h3" sx={{ mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
             Personal &amp; Contact Information
           </Typography>
           <TextField
@@ -301,36 +311,32 @@ export default function RegisterSubUser() {
             onChange={handleChange("phone")}
           />
 
-          <Typography variant="h3" sx={{ mt: 3, mb: 2 }}>
+          <Typography variant="subtitle1" sx={{ mt: 3, mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
             Student / Government ID Details
           </Typography>
-          <Grid container spacing={2}>
-            <Grid item xs={6}>
-              <TextField
-                select
-                label="ID Type"
-                fullWidth
-                margin="normal"
-                value={form.idType}
-                onChange={handleChange("idType")}
-              >
-                {ID_TYPES.map((opt) => (
-                  <MenuItem key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </Grid>
-            <Grid item xs={6}>
-              <TextField
-                label="ID Number"
-                fullWidth
-                margin="normal"
-                value={form.idNumber}
-                onChange={handleChange("idNumber")}
-              />
-            </Grid>
-          </Grid>
+          <Box sx={{ display: "flex", gap: 2 }}>
+            <TextField
+              select
+              label="ID Type"
+              fullWidth
+              margin="normal"
+              value={form.idType}
+              onChange={handleChange("idType")}
+            >
+              {ID_TYPES.map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </MenuItem>
+              ))}
+            </TextField>
+            <TextField
+              label="ID Number"
+              fullWidth
+              margin="normal"
+              value={form.idNumber}
+              onChange={handleChange("idNumber")}
+            />
+          </Box>
           <Button variant="outlined" component="label" sx={{ mt: 1 }}>
             {idPhotoFile ? idPhotoFile.name : "Upload ID Photo"}
             <input
@@ -344,7 +350,7 @@ export default function RegisterSubUser() {
           {isTenant && (
             <>
               <Divider sx={{ my: 3 }} />
-              <Typography variant="h3" sx={{ mb: 2 }}>
+              <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
                 Room &amp; Bed Assignment
               </Typography>
               <TextField
@@ -400,38 +406,34 @@ export default function RegisterSubUser() {
               </TextField>
 
               <Divider sx={{ my: 3 }} />
-              <Typography variant="h3" sx={{ mb: 2 }}>
+              <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
                 Lease Terms &amp; Rent
               </Typography>
-              <Grid container spacing={2}>
-                <Grid item xs={6}>
-                  <TextField
-                    label="Lease Start Date"
-                    type="date"
-                    fullWidth
-                    margin="normal"
-                    InputLabelProps={{ shrink: true }}
-                    value={form.leaseStartDate}
-                    onChange={handleChange("leaseStartDate")}
-                  />
-                </Grid>
-                <Grid item xs={6}>
-                  <TextField
-                    select
-                    label="Lease Duration"
-                    fullWidth
-                    margin="normal"
-                    value={form.leaseDuration}
-                    onChange={handleChange("leaseDuration")}
-                  >
-                    {LEASE_DURATIONS.map((opt) => (
-                      <MenuItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                </Grid>
-              </Grid>
+              <Box sx={{ display: "flex", gap: 2 }}>
+                <TextField
+                  label="Lease Start Date"
+                  type="date"
+                  fullWidth
+                  margin="normal"
+                  InputLabelProps={{ shrink: true }}
+                  value={form.leaseStartDate}
+                  onChange={handleChange("leaseStartDate")}
+                />
+                <TextField
+                  select
+                  label="Lease Duration"
+                  fullWidth
+                  margin="normal"
+                  value={form.leaseDuration}
+                  onChange={handleChange("leaseDuration")}
+                >
+                  {LEASE_DURATIONS.map((opt) => (
+                    <MenuItem key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              </Box>
             </>
           )}
 
