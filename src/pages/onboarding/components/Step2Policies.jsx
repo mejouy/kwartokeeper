@@ -1,39 +1,58 @@
-import React from 'react';
-import {Box,Typography,Switch,Checkbox,FormControlLabel,FormGroup} from '@mui/material';
+import { Box, Typography, Switch, FormControlLabel, Checkbox } from '@mui/material';
 
 const labelStyle = {
-  fontSize: '0.9rem',
+  fontSize: '0.875rem',
   color: '#333',
   fontWeight: 500,
-  textAlign: 'right',
+  textAlign: { xs: 'left', sm: 'right' },
   whiteSpace: 'nowrap'
 };
 
-const amenitiesList = [
-  'Wi-Fi',
-  'Air Conditioning',
-  'CCTV',
-  'Shared Kitchen'
-];
+const inputStyle = {
+  backgroundColor: '#D9D9D9',
+  border: 'none',
+  outline: 'none',
+  padding: '8px 12px',
+  fontSize: '0.875rem',
+  borderRadius: '2px',
+  boxSizing: 'border-box'
+};
 
-export const Step2Policies = ({ wizardData, updateWizardData }) => {
-  const handleFloorsChange = (delta) => {
-    const newFloors = Math.max(1, wizardData.floors + delta);
-    updateWizardData({ floors: newFloors });
+const AMENITIES_LIST = ['Wi-Fi', 'Air Conditioning', 'CCTV', 'Shared Kitchen'];
+
+export const Step2Policies = ({ wizardData = {}, updateWizardData }) => {
+  // Floor counter handlers
+  const handleFloorChange = (delta) => {
+    const current = Number(wizardData.totalFloors) || 1;
+    const nextVal = Math.max(1, current + delta);
+    updateWizardData({ totalFloors: nextVal });
   };
 
+  // Text / Input change handler
+  const handleChange = (field) => (e) => {
+    updateWizardData({ [field]: e.target.value });
+  };
+
+  // Estimated rooms handler (prevents NaN)
+  const handleRoomsChange = (e) => {
+    const val = parseInt(e.target.value, 10);
+    updateWizardData({ estimatedRooms: isNaN(val) ? '' : val });
+  };
+
+  // Amenities Checkbox handler
   const handleAmenityToggle = (amenity) => {
-    const current = wizardData.amenities;
-    const updated = current.includes(amenity)
-      ? current.filter((a) => a !== amenity)
-      : [...current, amenity];
-    updateWizardData({ amenities: updated });
+    const currentList = Array.isArray(wizardData.amenities) ? wizardData.amenities : [];
+    if (currentList.includes(amenity)) {
+      updateWizardData({ amenities: currentList.filter((a) => a !== amenity) });
+    } else {
+      updateWizardData({ amenities: [...currentList, amenity] });
+    }
   };
 
   return (
-    <Box sx={{ width: '100%', maxWidth: 700, mx: 'auto', px: 2 }}>
-      {/* Header Info */}
-      <Box sx={{ mb: 4 }}>
+    <Box sx={{ width: '100%', maxWidth: 700, mx: 'auto', px: { xs: 1, sm: 2 } }}>
+      {/* Header */}
+      <Box sx={{ mb: 4, textAlign: 'left' }}>
         <Typography variant="caption" sx={{ color: '#888', display: 'block', mb: 0.5 }}>
           Step 2 of 3
         </Typography>
@@ -45,126 +64,127 @@ export const Step2Policies = ({ wizardData, updateWizardData }) => {
         </Typography>
       </Box>
 
-      {/* Form Fields */}
+      {/* Form Content */}
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-
-        {/* Floors & Total Rooms Row */}
-        <Box sx={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 3 }}>
-          {/* Number of Floors */}
+        
+        {/* Number of Floors & Estimated Total Rooms inline row */}
+        <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 3 }}>
+          
+          {/* Number of Floors with - / + Controls */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Typography sx={labelStyle}>Number of Floors:</Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-              <Typography
-                onClick={() => handleFloorsChange(-1)}
-                sx={{ cursor: 'pointer', fontSize: '1.2rem', fontWeight: 'bold', userSelect: 'none', px: 0.5 }}
-              >
-                ━
-              </Typography>
-              <Box
-                sx={{
-                  backgroundColor: '#D9D9D9',
-                  width: 80,
-                  height: 32,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.875rem',
-                  borderRadius: '2px'
-                }}
-              >
-                {wizardData.floors}
-              </Box>
-              <Typography
-                onClick={() => handleFloorsChange(1)}
-                sx={{ cursor: 'pointer', fontSize: '1.2rem', fontWeight: 'bold', userSelect: 'none', px: 0.5 }}
-              >
-                +
-              </Typography>
-            </Box>
+            <button
+              type="button"
+              onClick={() => handleFloorChange(-1)}
+              style={{
+                border: 'none',
+                background: 'none',
+                fontSize: '1.2rem',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                padding: '0 4px'
+              }}
+            >
+              −
+            </button>
+            <input
+              type="text"
+              readOnly
+              style={{
+                ...inputStyle,
+                width: '60px',
+                textAlign: 'center'
+              }}
+              value={Number(wizardData.totalFloors) || 1}
+            />
+            <button
+              type="button"
+              onClick={() => handleFloorChange(1)}
+              style={{
+                border: 'none',
+                background: 'none',
+                fontSize: '1.2rem',
+                fontWeight: 'bold',
+                cursor: 'pointer',
+                padding: '0 4px'
+              }}
+            >
+              +
+            </button>
           </Box>
 
           {/* Estimated Total Rooms */}
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, ml: 'auto' }}>
+          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
             <Typography sx={labelStyle}>Estimated Total Rooms:</Typography>
             <input
               type="number"
-              style={{
-                backgroundColor: '#D9D9D9',
-                border: 'none',
-                outline: 'none',
-                width: 70,
-                height: 32,
-                textAlign: 'center',
-                borderRadius: '2px',
-                fontSize: '0.875rem'
-              }}
-              value={wizardData.estimatedRooms}
-              onChange={(e) => updateWizardData({ estimatedRooms: Number(e.target.value) || '' })}
+              style={{ ...inputStyle, width: '80px' }}
+              value={wizardData.estimatedRooms ?? ''}
+              onChange={handleRoomsChange}
             />
           </Box>
         </Box>
 
         {/* Amenities Offered */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: '200px 1fr', alignItems: 'start', gap: 2 }}>
-          <Typography sx={{ ...labelStyle, pt: 0.5 }}>Amenities Offered:</Typography>
-          <FormGroup sx={{ gap: 0.5 }}>
-            {amenitiesList.map((amenity) => (
-              <FormControlLabel
-                key={amenity}
-                control={
-                  <Checkbox
-                    checked={wizardData.amenities.includes(amenity)}
-                    onChange={() => handleAmenityToggle(amenity)}
-                    size="small"
-                    sx={{
-                      p: 0.5,
-                      color: '#bbb',
-                      '&.Mui-checked': { color: '#555' }
-                    }}
-                  />
-                }
-                label={<Typography sx={{ fontSize: '0.875rem', color: '#333' }}>{amenity}</Typography>}
-              />
-            ))}
-          </FormGroup>
-        </Box>
-
-        {/* Curfew Policy Card Toggle */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: '200px 1fr', alignItems: 'center', gap: 2 }}>
-          <Typography sx={labelStyle}>Curfew Policy Card:</Typography>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-            <Switch
-              checked={wizardData.curfewEnabled}
-              onChange={(e) => updateWizardData({ curfewEnabled: e.target.checked })}
-              sx={{
-                '& .MuiSwitch-switchBase.Mui-checked': { color: '#000' },
-                '& .MuiSwitch-switchBase.Mui-checked + .MuiSwitch-track': { backgroundColor: '#000' }
-              }}
-            />
-            <Typography sx={{ fontSize: '0.875rem', color: '#333' }}>
-              Enable Curfew
-            </Typography>
+        <Box sx={{ display: 'flex', gap: 3, alignItems: 'flex-start' }}>
+          <Box sx={{ width: '130px', textAlign: 'right', pt: 0.5 }}>
+            <Typography sx={labelStyle}>Amenities Offered:</Typography>
+          </Box>
+          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 0.5 }}>
+            {AMENITIES_LIST.map((amenity) => {
+              const checked = Array.isArray(wizardData.amenities) && wizardData.amenities.includes(amenity);
+              return (
+                <FormControlLabel
+                  key={amenity}
+                  control={
+                    <Checkbox
+                      checked={checked}
+                      onChange={() => handleAmenityToggle(amenity)}
+                      size="small"
+                      sx={{
+                        p: 0.5,
+                        '&.Mui-checked': { color: '#444' }
+                      }}
+                    />
+                  }
+                  label={<Typography sx={{ fontSize: '0.875rem', color: '#333' }}>{amenity}</Typography>}
+                  sx={{ ml: -0.5, mb: 0 }}
+                />
+              );
+            })}
           </Box>
         </Box>
 
-        {/* Curfew Start Time */}
-        <Box sx={{ display: 'grid', gridTemplateColumns: '200px 1fr', alignItems: 'center', gap: 2 }}>
-          <Typography sx={labelStyle}>Curfew Start Time:</Typography>
+        {/* Curfew Policy Card Toggle */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box sx={{ width: '130px', textAlign: 'right' }}>
+            <Typography sx={labelStyle}>Curfew Policy Card:</Typography>
+          </Box>
+          <FormControlLabel
+            control={
+              <Switch
+                checked={Boolean(wizardData.curfewEnabled)}
+                onChange={(e) => updateWizardData({ curfewEnabled: e.target.checked })}
+                color="default"
+                size="small"
+              />
+            }
+            label={<Typography sx={{ fontSize: '0.875rem', color: '#333' }}>Enable Curfew</Typography>}
+            sx={{ ml: 0 }}
+          />
+        </Box>
+
+        {/* Curfew Start Time Input */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <Box sx={{ width: '130px', textAlign: 'right' }}>
+            <Typography sx={labelStyle}>Curfew Start Time:</Typography>
+          </Box>
           <input
             type="text"
             placeholder="e.g., 10:00 PM"
-            style={{
-              backgroundColor: '#D9D9D9',
-              border: 'none',
-              outline: 'none',
-              padding: '8px 12px',
-              fontSize: '0.875rem',
-              borderRadius: '2px',
-              width: '180px',
-              color: '#555'
-            }}
-            value={wizardData.curfewTime}
-            onChange={(e) => updateWizardData({ curfewTime: e.target.value })}
+            style={{ ...inputStyle, width: '160px' }}
+            value={wizardData.curfewTime || ''}
+            onChange={handleChange('curfewTime')}
           />
         </Box>
 
@@ -172,3 +192,5 @@ export const Step2Policies = ({ wizardData, updateWizardData }) => {
     </Box>
   );
 };
+
+export default Step2Policies;
