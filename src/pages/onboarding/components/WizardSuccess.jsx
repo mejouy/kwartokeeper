@@ -90,4 +90,8 @@ function MetricCard({ label, value }) {
       </CardContent>
     </Card>
   );
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> origin/feature/property-wizard
