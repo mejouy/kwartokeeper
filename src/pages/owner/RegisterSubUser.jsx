@@ -104,7 +104,9 @@ export default function RegisterSubUser() {
   const [loading, setLoading] = useState(false);
   const [loadingProperties, setLoadingProperties] = useState(true);
 
-  // Load the current Owner's properties (only needed for Tenant room assignment)
+  // Load the current Owner's properties for the "Select Property" dropdown.
+  // Rooms are embedded as an array field inside each property document —
+  // no separate subcollection query needed.
   useEffect(() => {
     if (!isTenant) {
       setLoadingProperties(false);
@@ -118,7 +120,7 @@ export default function RegisterSubUser() {
       try {
         const q = query(
           collection(db, "properties"),
-          where("ownerId", "==", auth.currentUser.uid)
+          where("ownerUid", "==", auth.currentUser.uid)
         );
         const snapshot = await getDocs(q);
         setProperties(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -131,29 +133,23 @@ export default function RegisterSubUser() {
     loadProperties();
   }, [isTenant]);
 
+  // Rooms come from the selected property's embedded `rooms` array —
+  // no extra Firestore call needed here.
   useEffect(() => {
-    async function loadRooms() {
-      if (!form.propertyId) {
-        setRooms([]);
-        return;
-      }
-      try {
-        const snapshot = await getDocs(
-          collection(db, "properties", form.propertyId, "rooms")
-        );
-        setRooms(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
-      } catch (err) {
-        setRooms([]);
-      }
-    }
-    if (isTenant) loadRooms();
-  }, [form.propertyId, isTenant]);
+    const selectedProperty = properties.find((p) => p.id === form.propertyId);
+    setRooms(selectedProperty?.rooms || []);
+  }, [form.propertyId, properties]);
 
   useEffect(() => {
-    const selectedRoom = rooms.find((r) => r.id === form.roomId);
+    const selectedRoom = rooms.find((r) => r.roomName === form.roomId);
     if (selectedRoom?.capacity) {
+      // Exclude beds already taken based on occupiedBeds count
+      const availableStart = (selectedRoom.occupiedBeds || 0) + 1;
       setBedOptions(
-        Array.from({ length: selectedRoom.capacity }, (_, i) => `Bed ${i + 1}`)
+        Array.from(
+          { length: selectedRoom.capacity - (selectedRoom.occupiedBeds || 0) },
+          (_, i) => `Bed ${availableStart + i}`
+        )
       );
     } else {
       setBedOptions([]);
@@ -370,7 +366,7 @@ export default function RegisterSubUser() {
               >
                 {properties.map((p) => (
                   <MenuItem key={p.id} value={p.id}>
-                    {p.name || p.id}
+                    {p.propertyName || p.id}
                   </MenuItem>
                 ))}
               </TextField>
@@ -384,8 +380,11 @@ export default function RegisterSubUser() {
                 disabled={!form.propertyId}
               >
                 {rooms.map((r) => (
-                  <MenuItem key={r.id} value={r.id}>
-                    {r.name || r.id}
+                  <MenuItem key={r.roomName} value={r.roomName}>
+                    {r.roomName} — Floor {r.floor} (
+                    {r.capacity - (r.occupiedBeds || 0)} bed
+                    {r.capacity - (r.occupiedBeds || 0) === 1 ? "" : "s"}{" "}
+                    available)
                   </MenuItem>
                 ))}
               </TextField>
@@ -415,7 +414,7 @@ export default function RegisterSubUser() {
                   type="date"
                   fullWidth
                   margin="normal"
-                  InputLabelProps={{ shrink: true }}
+                  slotProps={{ inputLabel: { shrink: true } }}
                   value={form.leaseStartDate}
                   onChange={handleChange("leaseStartDate")}
                 />
