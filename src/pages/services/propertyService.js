@@ -1,12 +1,25 @@
 // src/pages/services/propertyService.js
-import { db } from "../../config/firebase";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { auth, db, storage } from "../../config/firebase";
+import {
+  collection,
+  addDoc,
+  serverTimestamp,
+  doc,
+  getDoc,
+} from "firebase/firestore";
+import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+
+const normalizeText = (value) =>
+  typeof value === "string" ? value.trim() : "";
 
 /**
- * Placeholder for image uploads. Bypasses Firebase Storage to prevent CORS blocks on localhost.
+ * TEMPORARY DEV WORKAROUND:
+ * Photo uploads are deliberately disabled for now because the
+ * Firebase Storage / CORS path still needs work. Keep the setup flow
+ * usable while the UI/UX and property creation flow are being finished.
  */
 export const uploadPropertyPhoto = async (file, ownerUid) => {
-  console.warn("Firebase Storage upload bypassed locally.");
+  console.warn("Cover photo upload is intentionally disabled for now. Firebase Storage / CORS needs work.");
   return null;
 };
 
@@ -19,39 +32,65 @@ export const saveProperty = async (
   ownerUid = "",
   coverPhotoFile = null
 ) => {
+  const ownerUidFromAuth = auth.currentUser?.uid || "";
+  const callerOwnerUid = normalizeText(ownerUid);
+  const primaryOwnerUid = ownerUidFromAuth || callerOwnerUid;
+
+  let resolvedOwnerUid = primaryOwnerUid;
+  if (primaryOwnerUid) {
+    const userDocRef = doc(db, "users", primaryOwnerUid);
+    const userDoc = await getDoc(userDocRef);
+    if (userDoc.exists()) {
+      const userData = userDoc.data();
+      resolvedOwnerUid = normalizeText(userData?.uid) || primaryOwnerUid;
+    }
+  }
+
+  if (!resolvedOwnerUid) {
+    throw new Error(
+      "Missing ownerUid — make sure the owner is logged in before saving."
+    );
+  }
+
   // Safe total calculations
   const totalRooms = Array.isArray(rooms) ? rooms.length : 0;
   const totalBeds = Array.isArray(rooms)
     ? rooms.reduce((sum, room) => sum + (Number(room.capacity) || 0), 0)
     : 0;
 
-  // Handle address whether passed as an object or flat fields
-  const addressPayload =
-    typeof wizardData.address === "object" && wizardData.address !== null
-      ? {
-          street: wizardData.address.street?.trim() || null,
-          barangay: wizardData.address.barangay?.trim() || null,
-          cityMunicipality: wizardData.address.cityMunicipality?.trim() || null,
-          province: wizardData.address.province?.trim() || null,
-          region: wizardData.address.region?.trim() || null,
-        }
-      : {
-          street: wizardData.street?.trim() || wizardData.address?.trim() || null,
-          barangay: wizardData.barangay?.trim() || null,
-          cityMunicipality: wizardData.cityMunicipality?.trim() || null,
-          province: wizardData.province?.trim() || null,
-          region: wizardData.region?.trim() || null,
-        };
+  // Street comes from the Step-1 field named streetAddress in the wizard state.
+  const streetValue =
+    normalizeText(wizardData.streetAddress) ||
+    normalizeText(wizardData.street) ||
+    normalizeText(wizardData.address?.street) ||
+    normalizeText(wizardData.address);
+
+  const addressPayload = {
+    street: streetValue || null,
+    barangay: normalizeText(wizardData.barangay) || normalizeText(wizardData.address?.barangay) || null,
+    cityMunicipality:
+      normalizeText(wizardData.cityMunicipality) ||
+      normalizeText(wizardData.address?.cityMunicipality) ||
+      null,
+    province: normalizeText(wizardData.province) || normalizeText(wizardData.address?.province) || null,
+    region: normalizeText(wizardData.region) || normalizeText(wizardData.address?.region) || null,
+  };
+
+  // TEMPORARY DEV WORKAROUND:
+  // Deliberately persist null for the cover photo URL now.
+  // Firebase Storage / CORS mapping still needs work, and we want
+  // the UI/UX and property setup flow to continue without being blocked.
+  let uploadedCoverPhotoUrl = null;
 
   const propertyPayload = {
     // Basic Details
     propertyName:
-      wizardData.propertyName?.trim() ||
-      wizardData.name?.trim() ||
+      normalizeText(wizardData.propertyName) ||
+      normalizeText(wizardData.name) ||
       "Untitled Property",
     propertyType: wizardData.propertyType || "Dormitory",
-    emergencyPhone: wizardData.emergencyPhone?.trim() || null,
-    coverPhotoUrl: typeof wizardData.coverPhotoUrl === "string" ? wizardData.coverPhotoUrl : null,
+    emergencyPhone: normalizeText(wizardData.emergencyPhone) || null,
+    coverPhotoUrl: uploadedCoverPhotoUrl,
 
     // Hierarchical Address Details
     address: addressPayload,
@@ -69,7 +108,7 @@ export const saveProperty = async (
     rules: Array.isArray(wizardData.rules) ? wizardData.rules : [],
     curfew: {
       enabled: Boolean(wizardData.curfewEnabled),
-      startTime: wizardData.curfewTime || "10:00 PM",
+      startTime: wizardData.curfewTime || "22:00",
     },
 
     // Individual Room & Bed Schema
@@ -83,7 +122,7 @@ export const saveProperty = async (
     })),
 
     // Ownership & Timestamps
-    ownerUid: ownerUid || wizardData.ownerUid || "anonymous_owner",
+    ownerUid: resolvedOwnerUid,
     createdAt: serverTimestamp(),
   };
 

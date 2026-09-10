@@ -1,8 +1,7 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate, Link as RouterLink } from "react-router-dom";
 import {
   Box,
-  Paper,
   Typography,
   TextField,
   Button,
@@ -15,6 +14,66 @@ import {
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
+
+// Same facade motif as the login page, but with fewer windows lit — this is
+// a property being set up, not yet fully monitored. Deterministic pattern,
+// no reshuffling on render.
+const FACADE_ROWS = 6;
+const FACADE_COLS = 5;
+const LIT_PATTERN = [
+  0, 0, 1, 0, 0,
+  0, 0, 0, 0, 1,
+  0, 1, 0, 0, 0,
+  0, 0, 0, 1, 0,
+  1, 0, 0, 0, 0,
+  0, 0, 1, 0, 0,
+];
+
+function DormFacade() {
+  const windows = useMemo(() => {
+    const w = [];
+    const gap = 18;
+    const size = 34;
+    for (let row = 0; row < FACADE_ROWS; row++) {
+      for (let col = 0; col < FACADE_COLS; col++) {
+        const idx = row * FACADE_COLS + col;
+        w.push({
+          x: col * (size + gap),
+          y: row * (size + gap),
+          lit: LIT_PATTERN[idx] === 1,
+          size,
+        });
+      }
+    }
+    return w;
+  }, []);
+
+  const width = FACADE_COLS * (34 + 18) - 18;
+  const height = FACADE_ROWS * (34 + 18) - 18;
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      width="100%"
+      style={{ maxWidth: 300, display: "block" }}
+      role="img"
+      aria-label="Illustration of a dormitory building at night, with a few rooms lit"
+    >
+      {windows.map((win, i) => (
+        <rect
+          key={i}
+          x={win.x}
+          y={win.y}
+          width={win.size}
+          height={win.size}
+          rx={4}
+          fill={win.lit ? "#ff4500" : "rgba(202, 220, 246, 0.16)"}
+          opacity={win.lit ? 0.92 : 1}
+        />
+      ))}
+    </svg>
+  );
+}
 
 export default function OwnerRegister() {
   const navigate = useNavigate();
@@ -85,113 +144,172 @@ export default function OwnerRegister() {
   };
 
   return (
-    <Box
-      sx={{
-        minHeight: "100vh",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        p: 2,
-      }}
-    >
-      <Paper elevation={3} sx={{ p: 4, width: "100%", maxWidth: 440 }}>
-        <Typography variant="h1" sx={{ fontSize: "1.75rem", mb: 1 }}>
-          Create Owner Account
-        </Typography>
-        <Typography variant="body2" sx={{ mb: 3, color: "text.secondary" }}>
-          Set up your KwartoKeeper owner account to start managing your
-          properties.
-        </Typography>
+    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: { xs: "column", md: "row" } }}>
 
-        {error && (
-          <Alert severity="error" sx={{ mb: 2 }}>
-            {error}
-          </Alert>
-        )}
+      {/* Left panel — same identity as the login page, for continuity across the auth flow */}
+      <Box
+        sx={{
+          flex: { xs: "0 0 auto", md: "0 0 42%" },
+          bgcolor: "#202020",
+          color: "#ffffff",
+          display: "flex",
+          flexDirection: "column",
+          justifyContent: { xs: "flex-start", md: "center" },
+          alignItems: "flex-start",
+          px: { xs: 4, md: 8 },
+          py: { xs: 4, md: 0 },
+          gap: 4,
+        }}
+      >
+        <Box
+          component="img"
+          src="/KwartoKeeper-DarkMode-Icon.png"
+          alt="KwartoKeeper"
+          sx={{ height: 40, display: { xs: "none", md: "block" } }}
+        />
 
-        <Box component="form" onSubmit={handleSubmit} noValidate>
-          <TextField
-            label="Full Name"
-            fullWidth
-            required
-            margin="normal"
-            value={form.fullName}
-            onChange={handleChange("fullName")}
-          />
-          <TextField
-            label="Email"
-            type="email"
-            fullWidth
-            required
-            margin="normal"
-            value={form.email}
-            onChange={handleChange("email")}
-          />
-          <TextField
-            label="Phone Number"
-            type="tel"
-            fullWidth
-            required
-            margin="normal"
-            value={form.phone}
-            onChange={handleChange("phone")}
-          />
-          <TextField
-            label="Password"
-            type="password"
-            fullWidth
-            required
-            margin="normal"
-            value={form.password}
-            onChange={handleChange("password")}
-          />
-          <TextField
-            label="Confirm Password"
-            type="password"
-            fullWidth
-            required
-            margin="normal"
-            value={form.confirmPassword}
-            onChange={handleChange("confirmPassword")}
-          />
+        <Box sx={{ display: { xs: "none", md: "block" } }}>
+          <DormFacade />
+        </Box>
 
-          <FormControlLabel
-            sx={{ mt: 1 }}
-            control={
-              <Checkbox
-                checked={agreed}
-                onChange={(e) => setAgreed(e.target.checked)}
-              />
-            }
-            label={
-              <Typography variant="body2">
-                I agree to the Terms of Service and Privacy Policy
-              </Typography>
-            }
-          />
-
-          <Button
-            type="submit"
-            variant="contained"
-            fullWidth
-            size="large"
-            disabled={loading}
-            sx={{ mt: 2 }}
+        <Box>
+          <Typography
+            variant="h4"
+            sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, color: "#ffffff", lineHeight: 1.15, mb: 1.5 }}
           >
-            {loading ? (
-              <CircularProgress size={24} color="inherit" />
-            ) : (
-              "Create Owner Account"
-            )}
-          </Button>
+            Set up your property in minutes.
+          </Typography>
+          <Typography variant="body1" sx={{ color: "#cadcf6", maxWidth: 340 }}>
+            Create your owner account, then add rooms, tenants, and caretakers as your dormitory fills up.
+          </Typography>
+        </Box>
+      </Box>
 
-          <Box sx={{ textAlign: "center", mt: 2 }}>
-            <Link component={RouterLink} to="/login" variant="body2">
-              Back to Login
-            </Link>
+      {/* Right panel — the form */}
+      <Box
+        sx={{
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          px: 3,
+          py: { xs: 5, md: 6 },
+        }}
+      >
+        <Box sx={{ width: "100%", maxWidth: 380 }}>
+
+          <Typography variant="h5" color="text.primary" sx={{ fontWeight: 600, mb: 0.5 }}>
+            Create your owner account
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
+            Set up your KwartoKeeper account to start managing your properties.
+          </Typography>
+
+          {error && (
+            <Alert severity="error" sx={{ mb: 3 }}>
+              {error}
+            </Alert>
+          )}
+
+          <Box component="form" onSubmit={handleSubmit} noValidate>
+            <TextField
+              label="Full name"
+              fullWidth
+              required
+              margin="normal"
+              value={form.fullName}
+              onChange={handleChange("fullName")}
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              label="Email address"
+              type="email"
+              fullWidth
+              required
+              margin="normal"
+              value={form.email}
+              onChange={handleChange("email")}
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              label="Phone number"
+              type="tel"
+              fullWidth
+              required
+              margin="normal"
+              value={form.phone}
+              onChange={handleChange("phone")}
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              label="Password"
+              type="password"
+              fullWidth
+              required
+              margin="normal"
+              value={form.password}
+              onChange={handleChange("password")}
+              helperText="At least 6 characters"
+              sx={{ mb: 2 }}
+            />
+            <TextField
+              label="Confirm password"
+              type="password"
+              fullWidth
+              required
+              margin="normal"
+              value={form.confirmPassword}
+              onChange={handleChange("confirmPassword")}
+              sx={{ mb: 1 }}
+            />
+
+            <FormControlLabel
+              sx={{ mt: 1, mb: 1 }}
+              control={
+                <Checkbox
+                  checked={agreed}
+                  onChange={(e) => setAgreed(e.target.checked)}
+                  color="primary"
+                  size="small"
+                />
+              }
+              label={
+                <Typography variant="body2" color="text.secondary">
+                  I agree to the Terms of Service and Privacy Policy
+                </Typography>
+              }
+            />
+
+            <Button
+              type="submit"
+              variant="contained"
+              fullWidth
+              size="large"
+              disabled={loading}
+              sx={{
+                mt: 2,
+                mb: 3,
+                py: 1.5,
+                fontWeight: 600,
+                backgroundColor: "primary.main",
+                "&:hover": { backgroundColor: "primary.dark" },
+              }}
+            >
+              {loading ? (
+                <CircularProgress size={24} color="inherit" />
+              ) : (
+                "Create owner account"
+              )}
+            </Button>
+
+            <Box sx={{ textAlign: "center" }}>
+              <Link component={RouterLink} to="/login" variant="body2" underline="hover" color="text.secondary">
+                Back to log in
+              </Link>
+            </Box>
           </Box>
         </Box>
-      </Paper>
+      </Box>
     </Box>
   );
 }

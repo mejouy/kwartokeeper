@@ -109,8 +109,4 @@ export function computeSummary(rooms) {
   }, {});
 
   return { totalRooms, totalBeds, perFloorBreakdown };
-<<<<<<< HEAD
 }
-=======
-}
->>>>>>> origin/feature/property-wizard

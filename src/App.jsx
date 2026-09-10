@@ -5,6 +5,7 @@ import Login from './pages/auth/Login';
 import OwnerRegister from './pages/auth/OwnerRegister';
 import PropertyWizard from './pages/onboarding/PropertyWizard';
 import RegisterSubUser from './pages/owner/RegisterSubUser';
+import WizardSuccess from './pages/onboarding/components/WizardSuccess';
 
 // Temporary Dashboard Placeholders (You can create real files for these in a future sprint)
 const OwnerDashboard = () => <div>Owner Dashboard</div>;
@@ -24,6 +25,7 @@ function App() {
         
         {/* Onboarding & Dashboards */}
         <Route path="/setup" element={<PropertyWizard />} />
+        <Route path="/wizard-success" element={<WizardSuccess />} />
         <Route path="/owner/dashboard" element={<OwnerDashboard />} />
         <Route path="/tenant/dashboard" element={<TenantDashboard />} />
         <Route path="/caretaker/dashboard" element={<CaretakerDashboard />} />
