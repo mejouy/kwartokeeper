@@ -11,8 +11,6 @@ import {
   Alert,
   CircularProgress,
   IconButton,
-  ToggleButton,
-  ToggleButtonGroup,
 } from "@mui/material";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import { initializeApp, deleteApp, getApps } from "firebase/app";
@@ -21,14 +19,7 @@ import {
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
 } from "firebase/auth";
-import {
-  doc,
-  setDoc,
-  collection,
-  query,
-  where,
-  getDocs,
-} from "firebase/firestore";
+import { doc, setDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { auth, db, storage, firebaseConfig } from "../../config/firebase";
 
@@ -76,11 +67,8 @@ async function createSubUserWithoutSignOut(email, password) {
   }
 }
 
-export default function RegisterSubUser() {
+export default function RegisterTenant() {
   const navigate = useNavigate();
-
-  const [role, setRole] = useState("tenant"); // "tenant" | "caretaker"
-  const isTenant = role === "tenant";
 
   const [form, setForm] = useState({
     fullName: "",
@@ -108,10 +96,6 @@ export default function RegisterSubUser() {
   // Rooms are embedded as an array field inside each property document —
   // no separate subcollection query needed.
   useEffect(() => {
-    if (!isTenant) {
-      setLoadingProperties(false);
-      return;
-    }
     async function loadProperties() {
       if (!auth.currentUser) {
         setLoadingProperties(false);
@@ -131,7 +115,7 @@ export default function RegisterSubUser() {
       }
     }
     loadProperties();
-  }, [isTenant]);
+  }, []);
 
   // Rooms come from the selected property's embedded `rooms` array —
   // no extra Firestore call needed here.
@@ -188,34 +172,28 @@ export default function RegisterSubUser() {
       if (idPhotoFile) {
         const photoRef = ref(
           storage,
-          `sub-user-ids/${newUser.uid}-${idPhotoFile.name}`
+          `tenant-ids/${newUser.uid}-${idPhotoFile.name}`
         );
         await uploadBytes(photoRef, idPhotoFile);
         idPhotoUrl = await getDownloadURL(photoRef);
       }
 
-      const userDoc = {
+      await setDoc(doc(db, "users", newUser.uid), {
         uid: newUser.uid,
         name: form.fullName.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
-        role,
+        role: "tenant",
         idType: form.idType,
         idNumber: form.idNumber.trim(),
         idPhotoUrl,
+        propertyId: form.propertyId || null,
+        roomId: form.roomId || null,
+        bedId: form.bedId || null,
+        leaseStartDate: form.leaseStartDate || null,
+        leaseDuration: form.leaseDuration || null,
         createdAt: new Date().toISOString(),
-      };
-
-      // Room/bed/lease fields only apply to Tenants
-      if (isTenant) {
-        userDoc.propertyId = form.propertyId || null;
-        userDoc.roomId = form.roomId || null;
-        userDoc.bedId = form.bedId || null;
-        userDoc.leaseStartDate = form.leaseStartDate || null;
-        userDoc.leaseDuration = form.leaseDuration || null;
-      }
-
-      await setDoc(doc(db, "users", newUser.uid), userDoc);
+      });
 
       navigate(-1);
     } catch (err) {
@@ -239,7 +217,7 @@ export default function RegisterSubUser() {
           <ArrowBackIcon />
         </IconButton>
         <Typography variant="h1" sx={{ fontSize: "1.75rem" }}>
-          Register New {isTenant ? "Tenant" : "Caretaker"}
+          Register New Tenant
         </Typography>
         <Button onClick={() => navigate(-1)} disabled={loading}>
           Cancel
@@ -254,31 +232,17 @@ export default function RegisterSubUser() {
 
       <Paper elevation={0} sx={{ p: 3, bgcolor: "background.default" }}>
         <Box component="form" onSubmit={handleSubmit} noValidate>
-          <Typography variant="body2" sx={{ mb: 1 }}>
-            Role
-          </Typography>
-          <ToggleButtonGroup
-            value={role}
-            exclusive
-            onChange={(e, value) => value && setRole(value)}
+          <Typography
+            variant="subtitle1"
             sx={{
-              mb: 3,
-              "& .MuiToggleButton-root": {
-                px: 3,
-                fontWeight: 600,
-                "&.Mui-selected": {
-                  bgcolor: "primary.main",
-                  color: "#fff",
-                  "&:hover": { bgcolor: "primary.dark" },
-                },
-              },
+              mb: 2,
+              fontWeight: 700,
+              fontSize: "1rem",
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              color: "text.secondary",
             }}
           >
-            <ToggleButton value="tenant">Tenant</ToggleButton>
-            <ToggleButton value="caretaker">Caretaker</ToggleButton>
-          </ToggleButtonGroup>
-
-          <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
             Personal &amp; Contact Information
           </Typography>
           <TextField
@@ -307,7 +271,18 @@ export default function RegisterSubUser() {
             onChange={handleChange("phone")}
           />
 
-          <Typography variant="subtitle1" sx={{ mt: 3, mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
+          <Typography
+            variant="subtitle1"
+            sx={{
+              mt: 3,
+              mb: 2,
+              fontWeight: 700,
+              fontSize: "1rem",
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              color: "text.secondary",
+            }}
+          >
             Student / Government ID Details
           </Typography>
           <Box sx={{ display: "flex", gap: 2 }}>
@@ -343,103 +318,118 @@ export default function RegisterSubUser() {
             />
           </Button>
 
-          {isTenant && (
-            <>
-              <Divider sx={{ my: 3 }} />
-              <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
-                Room &amp; Bed Assignment
-              </Typography>
-              <TextField
-                select
-                label="Select Property"
-                fullWidth
-                margin="normal"
-                value={form.propertyId}
-                onChange={handleChange("propertyId")}
-                helperText={
-                  loadingProperties
-                    ? "Loading properties..."
-                    : properties.length === 0
-                    ? "No properties found yet."
-                    : ""
-                }
-              >
-                {properties.map((p) => (
-                  <MenuItem key={p.id} value={p.id}>
-                    {p.propertyName || p.id}
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                select
-                label="Select Room"
-                fullWidth
-                margin="normal"
-                value={form.roomId}
-                onChange={handleChange("roomId")}
-                disabled={!form.propertyId}
-              >
-                {rooms.map((r) => (
-                  <MenuItem key={r.roomName} value={r.roomName}>
-                    {r.roomName} — Floor {r.floor} (
-                    {r.capacity - (r.occupiedBeds || 0)} bed
-                    {r.capacity - (r.occupiedBeds || 0) === 1 ? "" : "s"}{" "}
-                    available)
-                  </MenuItem>
-                ))}
-              </TextField>
-              <TextField
-                select
-                label="Bed / Space ID"
-                fullWidth
-                margin="normal"
-                value={form.bedId}
-                onChange={handleChange("bedId")}
-                disabled={!form.roomId}
-              >
-                {bedOptions.map((bed) => (
-                  <MenuItem key={bed} value={bed}>
-                    {bed}
-                  </MenuItem>
-                ))}
-              </TextField>
+          <Divider sx={{ my: 3 }} />
+          <Typography
+            variant="subtitle1"
+            sx={{
+              mb: 2,
+              fontWeight: 700,
+              fontSize: "1rem",
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              color: "text.secondary",
+            }}
+          >
+            Room &amp; Bed Assignment
+          </Typography>
+          <TextField
+            select
+            label="Select Property"
+            fullWidth
+            margin="normal"
+            value={form.propertyId}
+            onChange={handleChange("propertyId")}
+            helperText={
+              loadingProperties
+                ? "Loading properties..."
+                : properties.length === 0
+                ? "No properties found yet."
+                : ""
+            }
+          >
+            {properties.map((p) => (
+              <MenuItem key={p.id} value={p.id}>
+                {p.propertyName || p.id}
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            label="Select Room"
+            fullWidth
+            margin="normal"
+            value={form.roomId}
+            onChange={handleChange("roomId")}
+            disabled={!form.propertyId}
+          >
+            {rooms.map((r) => (
+              <MenuItem key={r.roomName} value={r.roomName}>
+                {r.roomName} — Floor {r.floor} (
+                {r.capacity - (r.occupiedBeds || 0)} bed
+                {r.capacity - (r.occupiedBeds || 0) === 1 ? "" : "s"}{" "}
+                available)
+              </MenuItem>
+            ))}
+          </TextField>
+          <TextField
+            select
+            label="Bed / Space ID"
+            fullWidth
+            margin="normal"
+            value={form.bedId}
+            onChange={handleChange("bedId")}
+            disabled={!form.roomId}
+          >
+            {bedOptions.map((bed) => (
+              <MenuItem key={bed} value={bed}>
+                {bed}
+              </MenuItem>
+            ))}
+          </TextField>
 
-              <Divider sx={{ my: 3 }} />
-              <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
-                Lease Terms &amp; Rent
-              </Typography>
-              <Box sx={{ display: "flex", gap: 2 }}>
-                <TextField
-                  label="Lease Start Date"
-                  type="date"
-                  fullWidth
-                  margin="normal"
-                  slotProps={{ inputLabel: { shrink: true } }}
-                  value={form.leaseStartDate}
-                  onChange={handleChange("leaseStartDate")}
-                />
-                <TextField
-                  select
-                  label="Lease Duration"
-                  fullWidth
-                  margin="normal"
-                  value={form.leaseDuration}
-                  onChange={handleChange("leaseDuration")}
-                >
-                  {LEASE_DURATIONS.map((opt) => (
-                    <MenuItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </MenuItem>
-                  ))}
-                </TextField>
-              </Box>
-            </>
-          )}
+          <Divider sx={{ my: 3 }} />
+          <Typography
+            variant="subtitle1"
+            sx={{
+              mb: 2,
+              fontWeight: 700,
+              fontSize: "1rem",
+              textTransform: "uppercase",
+              letterSpacing: 0.5,
+              color: "text.secondary",
+            }}
+          >
+            Lease Terms &amp; Rent
+          </Typography>
+          <Box sx={{ display: "flex", gap: 2 }}>
+            <TextField
+              label="Lease Start Date"
+              type="date"
+              fullWidth
+              margin="normal"
+              slotProps={{ inputLabel: { shrink: true } }}
+              value={form.leaseStartDate}
+              onChange={handleChange("leaseStartDate")}
+            />
+            <TextField
+              select
+              label="Lease Duration"
+              fullWidth
+              margin="normal"
+              value={form.leaseDuration}
+              onChange={handleChange("leaseDuration")}
+            >
+              {LEASE_DURATIONS.map((opt) => (
+                <MenuItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </MenuItem>
+              ))}
+            </TextField>
+          </Box>
 
           <Alert severity="info" sx={{ mt: 3 }}>
-            {isTenant ? "The tenant" : "The caretaker"} will receive an email
-            at this address with a link to set their own password before
-            logging in.
+            The tenant will receive an email at this address with a link to
+            set their own password before logging in.
           </Alert>
 
           <Button
@@ -453,7 +443,7 @@ export default function RegisterSubUser() {
             {loading ? (
               <CircularProgress size={24} color="inherit" />
             ) : (
-              `Register ${isTenant ? "Tenant" : "Caretaker"}`
+              "Register Tenant"
             )}
           </Button>
         </Box>
