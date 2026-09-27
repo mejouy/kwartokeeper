@@ -30,7 +30,15 @@ import {
 import { saveProperty } from "../../services/propertyService";
 import { useAuth } from "../../../context/AuthContext";
 
-const CAPACITY_OPTIONS = [1, 2, 3, 4, 6, 8];
+const CAPACITY_OPTIONS = [1, 2, 3, 4, 6, 8, 10, 12];
+
+const ROOM_TYPES = [
+  "Bedspace",
+  "Studio-type",
+  "Solo / Single",
+  "Private / Shared",
+  "Custom",
+];
 
 const labelColStyle = {
   fontSize: "0.875rem",
@@ -56,25 +64,37 @@ function ordinal(n) {
   return num + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
 }
 
-// Counter control matching Step 2 styling
-function Counter({ value, onDecrement, onIncrement, decrementLabel, incrementLabel }) {
+const generateDefaultGroup = () => ({
+  id: Math.random().toString(36).substring(2, 10),
+  roomType: "Bedspace",
+  customRoomType: "",
+  numberOfRooms: 4,
+  capacityPerRoom: 4,
+  monthlyRate: 2500,
+});
+
+function Counter({ value, onDecrement, onIncrement, decrementLabel, incrementLabel, min = 1 }) {
+  const isMin = value <= min;
   return (
     <Box sx={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
       <IconButton
         size="small"
         onClick={onDecrement}
+        disabled={isMin}
         aria-label={decrementLabel}
         sx={{
           border: "1px solid",
-          borderColor: "divider",
+          borderColor: isMin ? "action.disabledBackground" : "divider",
           borderRadius: "4px",
-          color: "text.primary",
-          "&:hover": { borderColor: "primary.main", color: "primary.main" },
+          color: isMin ? "action.disabled" : "text.primary",
+          "&:hover": {
+            borderColor: isMin ? "action.disabledBackground" : "primary.main",
+            color: isMin ? "action.disabled" : "primary.main",
+          },
         }}
       >
         <RemoveIcon fontSize="small" />
       </IconButton>
-
       <Typography
         sx={{
           minWidth: 44,
@@ -84,11 +104,12 @@ function Counter({ value, onDecrement, onIncrement, decrementLabel, incrementLab
           bgcolor: "background.paper",
           borderRadius: "4px",
           py: 0.75,
+          border: "1px solid",
+          borderColor: "divider",
         }}
       >
         {value}
       </Typography>
-
       <IconButton
         size="small"
         onClick={onIncrement}
@@ -114,9 +135,7 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
   const totalFloors = Math.max(1, Number(wizardData?.totalFloors) || 1);
 
   const [namingPattern, setNamingPattern] = useState("floor");
-  const [configMode, setConfigMode] = useState(
-    totalFloors > 1 ? "perFloor" : "uniform"
-  );
+  const [configMode, setConfigMode] = useState(totalFloors > 1 ? "perFloor" : "uniform");
 
   const [uniform, setUniform] = useState({
     roomsPerFloor: 5,
@@ -127,27 +146,27 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
   const [floorConfigs, setFloorConfigs] = useState(() =>
     Array.from({ length: totalFloors }, (_, i) => ({
       floorNumber: i + 1,
-      numberOfRooms: 4,
-      capacityPerRoom: 4,
-      monthlyRate: 2500,
+      roomGroups: [generateDefaultGroup()],
     }))
   );
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
-  // Sync floorConfigs array dynamically if user went back to Step 2 and changed totalFloors
+  // Sync floor configs array whenever totalFloors in wizardData changes
   useEffect(() => {
     setFloorConfigs((prev) => {
       if (prev.length === totalFloors) return prev;
       if (prev.length < totalFloors) {
         const added = Array.from({ length: totalFloors - prev.length }, (_, i) => {
           const lastConfig = prev[prev.length - 1];
+          const copiedGroups = lastConfig?.roomGroups
+            ? lastConfig.roomGroups.map((g) => ({ ...g, id: Math.random().toString(36).substring(2, 10) }))
+            : [generateDefaultGroup()];
+            
           return {
             floorNumber: prev.length + i + 1,
-            numberOfRooms: lastConfig?.numberOfRooms || 4,
-            capacityPerRoom: lastConfig?.capacityPerRoom || 4,
-            monthlyRate: lastConfig?.monthlyRate || 2500,
+            roomGroups: copiedGroups,
           };
         });
         return [...prev, ...added];
@@ -156,26 +175,102 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
     });
   }, [totalFloors]);
 
-  // Derived rooms + live summary computation
+  // Derived generated rooms with robust safeguards against missing/NaN data
   const rooms = useMemo(() => {
-    if (configMode === "uniform") {
-      return buildUniformRooms({
-        totalFloors,
-        roomsPerFloor: Number(uniform.roomsPerFloor) || 0,
-        capacityPerRoom: Number(uniform.capacityPerRoom) || 0,
-        monthlyRate: Number(uniform.monthlyRate) || 0,
-        namingPattern,
-      });
+    try {
+      let generated = [];
+      if (configMode === "uniform") {
+        generated = buildUniformRooms({
+          totalFloors: Number(totalFloors) || 1,
+          roomsPerFloor: Math.max(0, Number(uniform.roomsPerFloor) || 0),
+          capacityPerRoom: Math.max(0, Number(uniform.capacityPerRoom) || 0),
+          monthlyRate: Math.max(0, Number(uniform.monthlyRate) || 0),
+          namingPattern,
+        });
+      } else {
+        // Deeply parse per-floor data and resolve custom room types
+        const safeFloorConfigs = floorConfigs.map((floor) => ({
+          ...floor,
+          roomGroups: floor.roomGroups.map((group) => {
+            const resolvedType =
+              group.roomType === "Custom"
+                ? group.customRoomType?.trim() || "Custom Room"
+                : group.roomType;
+
+            return {
+              ...group,
+              roomType: resolvedType,
+              numberOfRooms: Math.max(0, Number(group.numberOfRooms) || 0),
+              capacityPerRoom: Math.max(0, Number(group.capacityPerRoom) || 0),
+              monthlyRate: Math.max(0, Number(group.monthlyRate) || 0),
+            };
+          }),
+        }));
+        
+        generated = buildPerFloorRooms({ floorConfigs: safeFloorConfigs, namingPattern });
+      }
+      return generated || [];
+    } catch (err) {
+      console.error("Room generation utility failed:", err);
+      return [];
     }
-    return buildPerFloorRooms({ floorConfigs, namingPattern });
   }, [configMode, uniform, floorConfigs, namingPattern, totalFloors]);
 
-  const summary = useMemo(() => computeSummary(rooms), [rooms]);
+  // Live room & bed layout summary computation
+  const summary = useMemo(() => {
+    if (!rooms || rooms.length === 0) return null;
+    try {
+      let result = computeSummary(rooms);
+      
+      // Fallback calculation if utility returns unexpected schema
+      if (!result || !result.perFloorBreakdown || Object.keys(result.perFloorBreakdown).length === 0) {
+        const perFloorBreakdown = {};
+        let totalBeds = 0;
+        
+        rooms.forEach((room) => {
+          const fNum = room.floorNumber || room.floor || 1;
+          if (!perFloorBreakdown[fNum]) perFloorBreakdown[fNum] = { rooms: 0, beds: 0 };
+          const capacity = Number(room.capacity || room.capacityPerRoom || 0);
+          perFloorBreakdown[fNum].rooms += 1;
+          perFloorBreakdown[fNum].beds += capacity;
+          totalBeds += capacity;
+        });
 
-  const handleFloorFieldChange = (index, field, value) => {
+        result = { totalRooms: rooms.length, totalBeds, perFloorBreakdown };
+      }
+      return result;
+    } catch (err) {
+      console.error("Summary computation failed:", err);
+      return null;
+    }
+  }, [rooms]);
+
+  const handleGroupFieldChange = (floorIndex, groupIndex, field, value) => {
     setFloorConfigs((prev) => {
       const next = [...prev];
-      next[index] = { ...next[index], [field]: value };
+      const updatedGroups = [...next[floorIndex].roomGroups];
+      updatedGroups[groupIndex] = { ...updatedGroups[groupIndex], [field]: value };
+      next[floorIndex] = { ...next[floorIndex], roomGroups: updatedGroups };
+      return next;
+    });
+  };
+
+  const handleAddRoomGroup = (floorIndex) => {
+    setFloorConfigs((prev) => {
+      const next = [...prev];
+      next[floorIndex] = {
+        ...next[floorIndex],
+        roomGroups: [...next[floorIndex].roomGroups, generateDefaultGroup()],
+      };
+      return next;
+    });
+  };
+
+  const handleRemoveRoomGroup = (floorIndex, groupIndex) => {
+    setFloorConfigs((prev) => {
+      const next = [...prev];
+      const updatedGroups = next[floorIndex].roomGroups.filter((_, i) => i !== groupIndex);
+      next[floorIndex] = { ...next[floorIndex], roomGroups: updatedGroups };
       return next;
     });
   };
@@ -184,12 +279,13 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
     setFloorConfigs((prev) => {
       if (index + 1 >= prev.length) return prev;
       const next = [...prev];
-      const { numberOfRooms, capacityPerRoom, monthlyRate } = next[index];
+      const copiedGroups = next[index].roomGroups.map((g) => ({
+        ...g,
+        id: Math.random().toString(36).substring(2, 10),
+      }));
       next[index + 1] = {
         ...next[index + 1],
-        numberOfRooms,
-        capacityPerRoom,
-        monthlyRate,
+        roomGroups: copiedGroups,
       };
       return next;
     });
@@ -197,29 +293,54 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
 
   const handleGenerate = async () => {
     setError(null);
+
+    // Validation check before proceeding
+    if (!rooms || rooms.length === 0) {
+      setError("Please configure at least 1 room for your property.");
+      return;
+    }
+
     setSaving(true);
     try {
+      // 1. Strip undefined values from wizardData
+      const cleanWizardData = { ...wizardData };
+      Object.keys(cleanWizardData).forEach((key) => {
+        if (cleanWizardData[key] === undefined) delete cleanWizardData[key];
+      });
+
+      // 2. Prepare payload with sensible defaults
       const finalWizardData = {
-        propertyName: wizardData?.propertyName || wizardData?.name || "Untitled Property",
-        address: wizardData?.address || "",
-        totalFloors: Number(wizardData?.totalFloors) || totalFloors,
-        genderRestriction: wizardData?.genderRestriction || "coed",
-        amenities: wizardData?.amenities || [],
-        rules: wizardData?.rules || [],
-        description: wizardData?.description || "",
-        ...wizardData,
+        ...cleanWizardData,
+        propertyName: cleanWizardData.propertyName || cleanWizardData.name || "Untitled Property",
+        address: cleanWizardData.address || "",
+        totalFloors: Number(cleanWizardData.totalFloors) || totalFloors,
+        genderRestriction: cleanWizardData.genderRestriction || "coed",
+        amenities: cleanWizardData.amenities || [],
+        rules: cleanWizardData.rules || [],
+        description: cleanWizardData.description || "",
         namingPattern,
         configMode,
       };
 
       updateWizardData?.(finalWizardData);
 
-      const ownerUid = currentUser?.uid || wizardData?.ownerUid || "";
-      const coverPhotoFile = wizardData?.coverPhoto || null;
+      const ownerUid = currentUser?.uid || finalWizardData.ownerUid || "";
+      const coverPhotoFile = finalWizardData.coverPhoto || null;
+
+      // 3. Clean rooms array to prevent Firestore schema errors with undefined/NaN
+      const safeRooms = rooms.map((room) => {
+        const cleanRoom = { ...room };
+        Object.keys(cleanRoom).forEach((key) => {
+          if (cleanRoom[key] === undefined || Number.isNaN(cleanRoom[key])) {
+            cleanRoom[key] = null;
+          }
+        });
+        return cleanRoom;
+      });
 
       const propertyId = await saveProperty(
         finalWizardData,
-        rooms,
+        safeRooms,
         ownerUid,
         coverPhotoFile
       );
@@ -228,8 +349,9 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
         state: { summary, propertyId },
       });
     } catch (err) {
+      console.error("Save Property Error:", err);
       setError(
-        err.message || "Something went wrong while saving your property."
+        err.message || "Something went wrong while saving your property. Please try again."
       );
     } finally {
       setSaving(false);
@@ -247,7 +369,7 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
           Set up rooms &amp; beds
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Configure rooms uniformly, or customize capacity floor by floor.
+          Configure rooms uniformly, or customize capacities and room types floor by floor.
         </Typography>
       </Box>
 
@@ -272,7 +394,7 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
           </Box>
         </Box>
 
-        {/* Configuration Mode */}
+        {/* Configuration Mode Toggle */}
         <Box sx={rowSx}>
           <Box sx={labelColSx}>
             <Typography sx={labelColStyle}>Configuration mode</Typography>
@@ -318,7 +440,8 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
                 </Box>
                 <Box sx={fieldColSx}>
                   <Counter
-                    value={uniform.roomsPerFloor || 0}
+                    value={uniform.roomsPerFloor || 1}
+                    min={1}
                     decrementLabel="Decrease rooms per floor"
                     incrementLabel="Increase rooms per floor"
                     onDecrement={() =>
@@ -355,7 +478,7 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
                   >
                     {CAPACITY_OPTIONS.map((n) => (
                       <MenuItem key={n} value={n}>
-                        {n} beds / room
+                        {n} {n === 1 ? "bed" : "beds"} / room
                       </MenuItem>
                     ))}
                   </TextField>
@@ -395,127 +518,197 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
 
         {/* --- Configure per Floor Mode --- */}
         {configMode === "perFloor" &&
-          floorConfigs.map((floor, index) => (
+          floorConfigs.map((floor, floorIndex) => (
             <Paper
               key={floor.floorNumber}
               elevation={0}
               sx={{ border: "1px solid", borderColor: "divider", borderRadius: "4px", p: { xs: 2, sm: 3 } }}
             >
               <Typography
-                sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 600, mb: 2 }}
+                sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 600, mb: 3 }}
                 color="text.primary"
               >
                 {ordinal(floor.floorNumber)} floor
               </Typography>
 
-              <Stack spacing={2.5}>
-                <Box sx={rowSx}>
-                  <Box sx={labelColSx}>
-                    <Typography sx={labelColStyle}>Number of rooms</Typography>
-                  </Box>
-                  <Box sx={fieldColSx}>
-                    <Counter
-                      value={floor.numberOfRooms || 0}
-                      decrementLabel={`Decrease rooms on floor ${floor.floorNumber}`}
-                      incrementLabel={`Increase rooms on floor ${floor.floorNumber}`}
-                      onDecrement={() =>
-                        handleFloorFieldChange(
-                          index,
-                          "numberOfRooms",
-                          Math.max(1, (Number(floor.numberOfRooms) || 1) - 1)
-                        )
-                      }
-                      onIncrement={() =>
-                        handleFloorFieldChange(
-                          index,
-                          "numberOfRooms",
-                          (Number(floor.numberOfRooms) || 0) + 1
-                        )
-                      }
-                    />
-                  </Box>
-                </Box>
-
-                <Box sx={rowSx}>
-                  <Box sx={labelColSx}>
-                    <Typography sx={labelColStyle}>Room type / capacity</Typography>
-                  </Box>
-                  <Box sx={fieldColSx}>
-                    <TextField
-                      select
-                      fullWidth
-                      value={floor.capacityPerRoom ?? 4}
-                      onChange={(e) =>
-                        handleFloorFieldChange(
-                          index,
-                          "capacityPerRoom",
-                          Number(e.target.value) || 0
-                        )
-                      }
-                    >
-                      {CAPACITY_OPTIONS.map((n) => (
-                        <MenuItem key={n} value={n}>
-                          {n}-person room
-                        </MenuItem>
-                      ))}
-                    </TextField>
-                  </Box>
-                </Box>
-
-                <Box sx={rowSx}>
-                  <Box sx={labelColSx}>
-                    <Typography sx={labelColStyle}>Monthly rate per bed</Typography>
-                  </Box>
-                  <Box sx={fieldColSx}>
-                    <TextField
-                      type="number"
-                      value={floor.monthlyRate ?? ""}
-                      onChange={(e) => {
-                        const val = parseInt(e.target.value, 10);
-                        handleFloorFieldChange(
-                          index,
-                          "monthlyRate",
-                          isNaN(val) ? "" : val
-                        );
-                      }}
-                      slotProps={{
-                        input: {
-                          startAdornment: (
-                            <InputAdornment position="start">₱</InputAdornment>
-                          ),
-                        },
-                      }}
-                      fullWidth
-                      sx={{ maxWidth: 200 }}
-                    />
-                  </Box>
-                </Box>
-
-                {index + 1 < floorConfigs.length && (
-                  <Box sx={rowSx}>
-                    <Box sx={labelColSx} />
-                    <Box sx={fieldColSx}>
-                      <Button
+              <Stack spacing={4}>
+                {floor.roomGroups.map((group, groupIndex) => (
+                  <Box key={group.id} sx={{ position: "relative" }}>
+                    
+                    {floor.roomGroups.length > 1 && (
+                      <IconButton
                         size="small"
-                        startIcon={<ContentCopyIcon />}
-                        onClick={() => handleCopyToNextFloor(index)}
-                        sx={{
-                          alignSelf: "flex-start",
-                          color: "primary.main",
-                          px: 0,
-                          "&:hover": { bgcolor: "transparent", textDecoration: "underline" },
-                        }}
+                        color="error"
+                        onClick={() => handleRemoveRoomGroup(floorIndex, groupIndex)}
+                        aria-label="Remove room group"
+                        sx={{ position: "absolute", top: -8, right: 0 }}
                       >
-                        Copy settings to floor {floor.floorNumber + 1}
-                      </Button>
-                    </Box>
+                        <RemoveIcon fontSize="small" />
+                      </IconButton>
+                    )}
+
+                    <Stack spacing={2.5}>
+                      <Box sx={rowSx}>
+                        <Box sx={labelColSx}>
+                          <Typography sx={labelColStyle}>Room type</Typography>
+                        </Box>
+                        <Box sx={fieldColSx}>
+                          <Stack spacing={1}>
+                            <TextField
+                              select
+                              fullWidth
+                              value={group.roomType}
+                              onChange={(e) =>
+                                handleGroupFieldChange(floorIndex, groupIndex, "roomType", e.target.value)
+                              }
+                            >
+                              {ROOM_TYPES.map((type) => (
+                                <MenuItem key={type} value={type}>
+                                  {type}
+                                </MenuItem>
+                              ))}
+                            </TextField>
+                            
+                            {group.roomType === "Custom" && (
+                              <TextField
+                                fullWidth
+                                placeholder="e.g. Quadruple sharing, Master's BR..."
+                                value={group.customRoomType}
+                                onChange={(e) =>
+                                  handleGroupFieldChange(floorIndex, groupIndex, "customRoomType", e.target.value)
+                                }
+                                size="small"
+                              />
+                            )}
+                          </Stack>
+                        </Box>
+                      </Box>
+
+                      <Box sx={rowSx}>
+                        <Box sx={labelColSx}>
+                          <Typography sx={labelColStyle}>Number of rooms</Typography>
+                        </Box>
+                        <Box sx={fieldColSx}>
+                          <Counter
+                            value={group.numberOfRooms || 1}
+                            min={1}
+                            decrementLabel="Decrease rooms"
+                            incrementLabel="Increase rooms"
+                            onDecrement={() =>
+                              handleGroupFieldChange(
+                                floorIndex,
+                                groupIndex,
+                                "numberOfRooms",
+                                Math.max(1, (Number(group.numberOfRooms) || 1) - 1)
+                              )
+                            }
+                            onIncrement={() =>
+                              handleGroupFieldChange(
+                                floorIndex,
+                                groupIndex,
+                                "numberOfRooms",
+                                (Number(group.numberOfRooms) || 0) + 1
+                              )
+                            }
+                          />
+                        </Box>
+                      </Box>
+
+                      <Box sx={rowSx}>
+                        <Box sx={labelColSx}>
+                          <Typography sx={labelColStyle}>Capacity</Typography>
+                        </Box>
+                        <Box sx={fieldColSx}>
+                          <TextField
+                            select
+                            fullWidth
+                            value={group.capacityPerRoom ?? 4}
+                            onChange={(e) =>
+                              handleGroupFieldChange(
+                                floorIndex,
+                                groupIndex,
+                                "capacityPerRoom",
+                                Number(e.target.value) || 0
+                              )
+                            }
+                          >
+                            {CAPACITY_OPTIONS.map((n) => (
+                              <MenuItem key={n} value={n}>
+                                {n} {n === 1 ? "bed" : "beds"}
+                              </MenuItem>
+                            ))}
+                          </TextField>
+                        </Box>
+                      </Box>
+
+                      <Box sx={rowSx}>
+                        <Box sx={labelColSx}>
+                          <Typography sx={labelColStyle}>Monthly rate per bed</Typography>
+                        </Box>
+                        <Box sx={fieldColSx}>
+                          <TextField
+                            type="number"
+                            value={group.monthlyRate ?? ""}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              handleGroupFieldChange(
+                                floorIndex,
+                                groupIndex,
+                                "monthlyRate",
+                                isNaN(val) ? "" : val
+                              );
+                            }}
+                            slotProps={{
+                              input: {
+                                startAdornment: (
+                                  <InputAdornment position="start">₱</InputAdornment>
+                                ),
+                              },
+                            }}
+                            fullWidth
+                            sx={{ maxWidth: 200 }}
+                          />
+                        </Box>
+                      </Box>
+                    </Stack>
+                    
+                    {groupIndex < floor.roomGroups.length - 1 && (
+                      <Divider sx={{ mt: 4 }} />
+                    )}
                   </Box>
-                )}
+                ))}
+
+                <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, pt: 1 }}>
+                  <Button
+                    variant="text"
+                    size="small"
+                    startIcon={<AddIcon />}
+                    onClick={() => handleAddRoomGroup(floorIndex)}
+                    sx={{ alignSelf: "flex-start", fontWeight: 600 }}
+                  >
+                    Add another room type to this floor
+                  </Button>
+
+                  {floorIndex + 1 < floorConfigs.length && (
+                    <Button
+                      size="small"
+                      startIcon={<ContentCopyIcon />}
+                      onClick={() => handleCopyToNextFloor(floorIndex)}
+                      sx={{
+                        alignSelf: "flex-start",
+                        color: "text.secondary",
+                        "&:hover": { bgcolor: "transparent", color: "primary.main", textDecoration: "underline" },
+                      }}
+                    >
+                      Copy entire floor settings to floor {floor.floorNumber + 1}
+                    </Button>
+                  )}
+                </Box>
               </Stack>
             </Paper>
           ))}
 
-        {/* Live summary preview */}
+        {/* Live Summary Breakdown Preview */}
         <Paper
           elevation={0}
           sx={{
@@ -534,22 +727,23 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
           </Box>
 
           <Stack spacing={0.5}>
-            {summary?.perFloorBreakdown &&
+            {summary?.perFloorBreakdown && Object.keys(summary.perFloorBreakdown).length > 0 ? (
               Object.entries(summary.perFloorBreakdown).map(
                 ([floorNum, data]) => {
                   const numRooms = Number(data?.rooms) || 0;
                   const numBeds = Number(data?.beds) || 0;
-                  const bedsPerRoom = numRooms > 0 ? Math.round(numBeds / numRooms) : 0;
-                  const rate = Number(data?.rate) || 0;
-
                   return (
                     <Typography key={floorNum} variant="body2" color="text.secondary">
-                      {ordinal(Number(floorNum))} floor: {numRooms} rooms ×{" "}
-                      {bedsPerRoom} beds = {numBeds} beds (₱{rate}/bed)
+                      {ordinal(Number(floorNum))} floor: {numRooms} rooms | {numBeds} total beds
                     </Typography>
                   );
                 }
-              )}
+              )
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                Configure floor settings above to view layout breakdown...
+              </Typography>
+            )}
           </Stack>
 
           <Divider sx={{ my: 1.5, borderColor: "rgba(255, 69, 0, 0.25)" }} />
@@ -562,7 +756,7 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
 
         {error && <Alert severity="error">{error}</Alert>}
 
-        {/* Bottom action bar */}
+        {/* Sticky Action Footer */}
         <Stack
           direction="row"
           spacing={2}
@@ -571,6 +765,9 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
             bottom: 0,
             bgcolor: "background.default",
             py: 2,
+            zIndex: 10,
+            borderTop: "1px solid",
+            borderColor: "divider",
           }}
         >
           <Button variant="outlined" onClick={onBack} disabled={saving || authLoading}>

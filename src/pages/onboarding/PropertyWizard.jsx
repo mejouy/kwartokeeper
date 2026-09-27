@@ -1,11 +1,11 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Button, Typography, Alert } from '@mui/material';
+import { Box, Button, Typography, Alert, CircularProgress } from '@mui/material';
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
 import RuleOutlinedIcon from '@mui/icons-material/RuleOutlined';
 import GridViewOutlinedIcon from '@mui/icons-material/GridViewOutlined';
 
-import { auth, db, storage } from '../../config/firebase'; // Adjust path
+import { auth, db, storage } from '../../config/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
@@ -16,8 +16,7 @@ import Step3Rooms from './components/Step3Rooms';
 const STEPS = ['Basic Details', 'Rules & Amenities', 'Rooms & Layout'];
 const STEP_ICONS = [HomeOutlinedIcon, RuleOutlinedIcon, GridViewOutlinedIcon];
 
-// Same night-facade motif as Login/Register — deterministic lit pattern so
-// it doesn't reshuffle on every render.
+// Night-facade building graphic with deterministic window lighting pattern
 const FACADE_ROWS = 5;
 const FACADE_COLS = 5;
 const LIT_PATTERN = [
@@ -51,7 +50,7 @@ function DormFacade() {
       width="100%"
       style={{ maxWidth: 220, display: 'block' }}
       role="img"
-      aria-label="Illustration of a dormitory building at night, with some rooms lit to show occupancy"
+      aria-label="Illustration of a dormitory building at night, with illuminated windows"
     >
       {windows.map((win, i) => (
         <rect
@@ -69,9 +68,7 @@ function DormFacade() {
   );
 }
 
-// The single source of truth for wizard progress — replaces the old
-// stacked combination of a dot strip, a "Step X of 3" caption, and a
-// numbered Stepper. One vertical list, always visible on desktop.
+// Vertical progress navigation sidebar
 function StepList({ activeStep }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column' }}>
@@ -94,12 +91,22 @@ function StepList({ activeStep }) {
                   flexShrink: 0,
                   bgcolor: isFilled ? 'primary.main' : 'rgba(202, 220, 246, 0.16)',
                   color: isFilled ? '#ffffff' : '#cadcf6',
+                  transition: 'background-color 0.2s ease, color 0.2s ease',
                 }}
               >
                 <IconComponent sx={{ fontSize: 18 }} />
               </Box>
               {i < STEPS.length - 1 && (
-                <Box sx={{ width: '2px', flex: 1, minHeight: 28, bgcolor: isDone ? 'primary.main' : 'rgba(202, 220, 246, 0.16)', my: 0.5 }} />
+                <Box
+                  sx={{
+                    width: '2px',
+                    flex: 1,
+                    minHeight: 28,
+                    bgcolor: isDone ? 'primary.main' : 'rgba(202, 220, 246, 0.16)',
+                    my: 0.5,
+                    transition: 'background-color 0.2s ease',
+                  }}
+                />
               )}
             </Box>
             <Typography
@@ -124,15 +131,13 @@ export default function PropertyWizard() {
   const navigate = useNavigate();
   const [activeStep, setActiveStep] = useState(0);
   const [errors, setErrors] = useState({});
-  
-  // Added states for submission handling
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState('');
 
   const [wizardData, setWizardData] = useState({
     propertyName: '',
     propertyType: 'Dormitory',
-    streetAddress: '', 
+    streetAddress: '',
     barangay: '',
     cityMunicipality: '',
     province: '',
@@ -155,7 +160,7 @@ export default function PropertyWizard() {
       ...prev,
       ...newData,
     }));
-    
+
     const updatedFields = Object.keys(newData);
     setErrors((prevErrors) => {
       const newErrors = { ...prevErrors };
@@ -168,7 +173,7 @@ export default function PropertyWizard() {
     const newErrors = {};
     if (!wizardData.propertyName?.trim()) newErrors.propertyName = 'Property Name is required.';
     if (!wizardData.propertyType) newErrors.propertyType = 'Property Type is required.';
-    if (!wizardData.streetAddress?.trim()) newErrors.streetAddress = 'Street address is required.'; 
+    if (!wizardData.streetAddress?.trim()) newErrors.streetAddress = 'Street address is required.';
     if (!wizardData.regionCode) newErrors.regionCode = 'Please select a region.';
     if (!wizardData.provinceCode) newErrors.provinceCode = 'Please select a province.';
     if (!wizardData.cityCode) newErrors.cityCode = 'Please select a city/municipality.';
@@ -184,17 +189,19 @@ export default function PropertyWizard() {
     if (!wizardData.totalFloors || wizardData.totalFloors < 1) {
       newErrors.totalFloors = 'Total floors must be at least 1.';
     }
+    if (wizardData.curfewEnabled && !wizardData.curfewTime) {
+      newErrors.curfewTime = 'Please specify a curfew time when curfew is enabled.';
+    }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const handleNext = () => {
+    setSubmitError('');
     if (activeStep === 0) {
-      const isStep1Valid = validateStep1();
-      if (!isStep1Valid) return; 
+      if (!validateStep1()) return;
     } else if (activeStep === 1) {
-      const isStep2Valid = validateStep2();
-      if (!isStep2Valid) return; 
+      if (!validateStep2()) return;
     }
 
     setActiveStep((prev) => Math.min(prev + 1, STEPS.length - 1));
@@ -202,30 +209,22 @@ export default function PropertyWizard() {
 
   const handleBack = () => {
     setErrors({});
-
-    // On the first step there's no previous step to return to within the
-    // wizard, so "Back" exits setup instead of sitting there disabled.
+    setSubmitError('');
     if (activeStep === 0) {
-      navigate('/login');
+      // Navigate to previous page or dashboard instead of forcing login page
+      navigate(-1);
       return;
     }
-
     setActiveStep((prev) => Math.max(prev - 1, 0));
   };
 
-  // The core function to handle image upload and database saving
-  const submitPropertyToFirebase = async () => {
+  // Handles image upload and database saving; receives room configurations from Step 3
+  const submitPropertyToFirebase = async (roomsData = [], layoutMetrics = {}) => {
     setIsSubmitting(true);
     setSubmitError('');
 
-    // Debug trace: check state right before submission
-    console.log("=== PRE-SUBMIT STATE CHECK ===");
-    console.log("Street Address:", wizardData.streetAddress);
-    console.log("Cover Photo File:", wizardData.coverPhoto);
-
-    // Safety catch: If street is missing here, it means Step 2 or 3 wiped it.
-    if (!wizardData.streetAddress?.trim()) {
-      setSubmitError("System Error: Street Address data was lost before submission. Check console logs.");
+    if (!wizardData.streetAddress?.trim() || !wizardData.propertyName?.trim()) {
+      setSubmitError('Validation Error: Basic details are incomplete. Please review Step 1.');
       setIsSubmitting(false);
       return;
     }
@@ -233,36 +232,37 @@ export default function PropertyWizard() {
     try {
       const currentUser = auth.currentUser;
       if (!currentUser) {
-        throw new Error("Authentication error: No property owner is logged in.");
+        throw new Error('Authentication error: No property owner is currently logged in.');
       }
 
-      let uploadedPhotoUrl = ''; // Default to empty string instead of null
+      let uploadedPhotoUrl = '';
 
       // 1. Upload Cover Photo to Storage (if selected)
       if (wizardData.coverPhoto) {
         try {
-          const fileName = `${Date.now()}_${wizardData.coverPhoto.name.replace(/[^a-zA-Z0-9.]/g, '')}`;
+          const sanitizedFileName = wizardData.coverPhoto.name.replace(/[^a-zA-Z0-9.]/g, '_');
+          const fileName = `${Date.now()}_${sanitizedFileName}`;
           const photoRef = ref(storage, `properties/${currentUser.uid}/${fileName}`);
           
-          // Await the upload and fetch the URL
-          const snapshot = await uploadBytes(photoRef, wizardData.coverPhoto);
+          const metadata = {
+            contentType: wizardData.coverPhoto.type || 'image/jpeg',
+          };
+
+          const snapshot = await uploadBytes(photoRef, wizardData.coverPhoto, metadata);
           uploadedPhotoUrl = await getDownloadURL(snapshot.ref);
-          console.log("Photo uploaded successfully:", uploadedPhotoUrl);
         } catch (uploadError) {
-          console.error("Photo upload failed:", uploadError);
-          // Don't crash the whole save if just the photo fails, but let the user know
-          setSubmitError("Property saved, but cover photo failed to upload.");
+          console.error('Photo upload failed:', uploadError);
+          // Non-blocking warning: save property and let user know
+          setSubmitError('Property was saving, but cover photo upload failed. You can re-upload it later.');
         }
-      } else {
-        console.warn("No cover photo was found in wizardData.");
       }
 
-      // 2. Map data specifically for Firestore
+      // 2. Format payload for Firestore with sanitization
       const finalPropertyData = {
-        ownerUid: currentUser.uid, 
-        
-        // Address
-        street: wizardData.streetAddress || '', // Fallback to prevent undefined errors
+        ownerUid: currentUser.uid,
+
+        // Address Details
+        street: wizardData.streetAddress || '',
         barangay: wizardData.barangay || '',
         cityMunicipality: wizardData.cityMunicipality || '',
         province: wizardData.province || '',
@@ -270,36 +270,47 @@ export default function PropertyWizard() {
         regionCode: wizardData.regionCode || '',
         provinceCode: wizardData.provinceCode || '',
         cityCode: wizardData.cityCode || '',
-        
+
         // Basic Details
         propertyName: wizardData.propertyName || '',
         propertyType: wizardData.propertyType || '',
         emergencyPhone: wizardData.emergencyPhone || '',
-        coverPhotoUrl: uploadedPhotoUrl, 
-        
-        // Step 2 & 3 Details
-        totalFloors: wizardData.totalFloors || 1,
+        coverPhotoUrl: uploadedPhotoUrl,
+
+        // Rules & Amenities
+        totalFloors: Number(wizardData.totalFloors) || 1,
         amenities: wizardData.amenities || [],
-        curfewEnabled: wizardData.curfewEnabled || false,
-        curfewTime: wizardData.curfewTime || '',
+        curfewEnabled: Boolean(wizardData.curfewEnabled),
+        curfewTime: wizardData.curfewEnabled ? (wizardData.curfewTime || '') : '',
+
+        // Room & Layout Data
         namingPattern: wizardData.namingPattern || 'floor',
         configMode: wizardData.configMode || 'uniform',
-        
-        createdAt: serverTimestamp(),
-      };
+        rooms: roomsData,
+        totalRooms: layoutMetrics.totalRooms || roomsData.length,
+        totalBeds: layoutMetrics.totalBeds || 0,
 
-      console.log("Final Payload mapped for Firestore:", finalPropertyData);
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      };
 
       // 3. Save to Firestore
       const docRef = await addDoc(collection(db, 'properties'), finalPropertyData);
-      console.log("Property successfully created with ID:", docRef.id);
-      
-      // TODO: Redirect the user
+
+      // 4. Redirect to success screen
+      navigate('/wizard-success', {
+        state: {
+          propertyId: docRef.id,
+          propertyName: finalPropertyData.propertyName,
+          totalRooms: finalPropertyData.totalRooms,
+          totalBeds: finalPropertyData.totalBeds,
+        },
+      });
 
     } catch (error) {
-      console.error("Error saving property:", error);
-      setSubmitError(error.message || "An error occurred while saving the property.");
-    } finally {
+      console.error('Error saving property:', error);
+      setSubmitError(error.message || 'An error occurred while saving the property.');
+    } fontFinally: {
       setIsSubmitting(false);
     }
   };
@@ -307,7 +318,7 @@ export default function PropertyWizard() {
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: { xs: 'column', md: 'row' } }}>
 
-      {/* Left sidebar — same identity as Login/Register, and the ONLY progress indicator */}
+      {/* Left Sidebar - Visual Indicator */}
       <Box
         sx={{
           flex: { xs: '0 0 auto', md: '0 0 300px' },
@@ -332,7 +343,7 @@ export default function PropertyWizard() {
           </Typography>
         </Box>
 
-        {/* Mobile: compact single-line progress instead of the full list below */}
+        {/* Mobile progress view */}
         <Box sx={{ display: { xs: 'block', md: 'none' } }}>
           <Typography variant="body2" sx={{ color: '#cadcf6', mb: 1 }}>
             Step {activeStep + 1} of {STEPS.length} — {STEPS[activeStep]}
@@ -346,12 +357,14 @@ export default function PropertyWizard() {
                   height: 4,
                   borderRadius: 2,
                   bgcolor: i <= activeStep ? 'primary.main' : 'rgba(202, 220, 246, 0.2)',
+                  transition: 'background-color 0.2s ease',
                 }}
               />
             ))}
           </Box>
         </Box>
 
+        {/* Desktop progress list */}
         <Box sx={{ display: { xs: 'none', md: 'block' } }}>
           <StepList activeStep={activeStep} />
         </Box>
@@ -361,7 +374,7 @@ export default function PropertyWizard() {
         </Box>
       </Box>
 
-      {/* Right content — full-bleed, no floating card */}
+      {/* Main Content Area */}
       <Box sx={{ flex: 1, bgcolor: 'background.default', display: 'flex', justifyContent: 'center', px: { xs: 3, md: 6 }, py: { xs: 4, md: 6 } }}>
         <Box sx={{ width: '100%', maxWidth: 760 }}>
 
@@ -393,8 +406,8 @@ export default function PropertyWizard() {
                 wizardData={wizardData}
                 updateWizardData={updateWizardData}
                 onBack={handleBack}
-                onSubmit={submitPropertyToFirebase} // Passed handler to Step 3
-                isSubmitting={isSubmitting}         // Passed loading state to Step 3
+                onSubmit={submitPropertyToFirebase}
+                isSubmitting={isSubmitting}
               />
             )}
           </Box>
@@ -404,6 +417,7 @@ export default function PropertyWizard() {
               <Button
                 variant="outlined"
                 onClick={handleBack}
+                disabled={isSubmitting}
                 sx={{ py: 1.5, px: 3, fontWeight: 600 }}
               >
                 Back
@@ -411,6 +425,7 @@ export default function PropertyWizard() {
               <Button
                 variant="contained"
                 onClick={handleNext}
+                disabled={isSubmitting}
                 sx={{
                   py: 1.5,
                   px: 3,
