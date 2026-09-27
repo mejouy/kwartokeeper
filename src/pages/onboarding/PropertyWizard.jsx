@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, Button, Typography, Alert, CircularProgress } from '@mui/material';
@@ -8,11 +9,17 @@ import GridViewOutlinedIcon from '@mui/icons-material/GridViewOutlined';
 import { auth, db, storage } from '../../config/firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+=======
+import React, { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Box, Button, Stepper, Step, StepLabel, Paper } from "@mui/material";
+>>>>>>> origin/feature/admin
 
-import Step1Basics from './components/Step1Basics';
-import Step2Rules from './components/Step2Policies';
-import Step3Rooms from './components/Step3Rooms';
+import Step1Basics from "./components/Step1Basics";
+import Step2Rules from "./components/Step2Policies";
+import Step3Rooms from "./components/Step3Rooms";
 
+<<<<<<< HEAD
 const STEPS = ['Basic Details', 'Rules & Amenities', 'Rooms & Layout'];
 const STEP_ICONS = [HomeOutlinedIcon, RuleOutlinedIcon, GridViewOutlinedIcon];
 
@@ -126,6 +133,9 @@ function StepList({ activeStep }) {
     </Box>
   );
 }
+=======
+const STEPS = ["Basic Details", "Rules & Amenities", "Rooms & Layout"];
+>>>>>>> origin/feature/admin
 
 export default function PropertyWizard() {
   const navigate = useNavigate();
@@ -135,6 +145,7 @@ export default function PropertyWizard() {
   const [submitError, setSubmitError] = useState('');
 
   const [wizardData, setWizardData] = useState({
+<<<<<<< HEAD
     propertyName: '',
     propertyType: 'Dormitory',
     streetAddress: '',
@@ -146,13 +157,32 @@ export default function PropertyWizard() {
     provinceCode: '',
     cityCode: '',
     emergencyPhone: '',
+=======
+    propertyName: "",
+    propertyType: "Dormitory",
+    street: "",
+    barangay: "",
+    cityMunicipality: "",
+    province: "",
+    region: "",
+    regionCode: "",
+    provinceCode: "",
+    cityCode: "",
+    emergencyPhone: "",
+>>>>>>> origin/feature/admin
     coverPhoto: null,
     totalFloors: 1,
     amenities: [],
     curfewEnabled: false,
+<<<<<<< HEAD
     curfewTime: '22:00',
     namingPattern: 'floor',
     configMode: 'uniform',
+=======
+    curfewTime: "10:00 PM",
+    namingPattern: "floor",
+    configMode: "uniform",
+>>>>>>> origin/feature/admin
   });
 
   const updateWizardData = (newData) => {
@@ -161,6 +191,10 @@ export default function PropertyWizard() {
       ...newData,
     }));
 
+<<<<<<< HEAD
+=======
+    // Clear error highlights for fields as the user edits them
+>>>>>>> origin/feature/admin
     const updatedFields = Object.keys(newData);
     setErrors((prevErrors) => {
       const newErrors = { ...prevErrors };
@@ -171,6 +205,7 @@ export default function PropertyWizard() {
 
   const validateStep1 = () => {
     const newErrors = {};
+<<<<<<< HEAD
     if (!wizardData.propertyName?.trim()) newErrors.propertyName = 'Property Name is required.';
     if (!wizardData.propertyType) newErrors.propertyType = 'Property Type is required.';
     if (!wizardData.streetAddress?.trim()) newErrors.streetAddress = 'Street address is required.';
@@ -179,6 +214,24 @@ export default function PropertyWizard() {
     if (!wizardData.cityCode) newErrors.cityCode = 'Please select a city/municipality.';
     if (!wizardData.barangay) newErrors.barangay = 'Please select a barangay.';
     if (!wizardData.emergencyPhone?.trim()) newErrors.emergencyPhone = 'Emergency phone is required.';
+=======
+    if (!wizardData.propertyName?.trim())
+      newErrors.propertyName = "Property Name is required.";
+    if (!wizardData.propertyType)
+      newErrors.propertyType = "Property Type is required.";
+    if (!wizardData.street?.trim())
+      newErrors.street = "Street address is required.";
+    if (!wizardData.regionCode)
+      newErrors.regionCode = "Please select a region.";
+    if (!wizardData.provinceCode)
+      newErrors.provinceCode = "Please select a province.";
+    if (!wizardData.cityCode)
+      newErrors.cityCode = "Please select a city/municipality.";
+    if (!wizardData.barangay)
+      newErrors.barangay = "Please select a barangay.";
+    if (!wizardData.emergencyPhone?.trim())
+      newErrors.emergencyPhone = "Emergency phone is required.";
+>>>>>>> origin/feature/admin
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -187,7 +240,7 @@ export default function PropertyWizard() {
   const validateStep2 = () => {
     const newErrors = {};
     if (!wizardData.totalFloors || wizardData.totalFloors < 1) {
-      newErrors.totalFloors = 'Total floors must be at least 1.';
+      newErrors.totalFloors = "Total floors must be at least 1.";
     }
     if (wizardData.curfewEnabled && !wizardData.curfewTime) {
       newErrors.curfewTime = 'Please specify a curfew time when curfew is enabled.';
@@ -199,15 +252,28 @@ export default function PropertyWizard() {
   const handleNext = () => {
     setSubmitError('');
     if (activeStep === 0) {
+<<<<<<< HEAD
       if (!validateStep1()) return;
     } else if (activeStep === 1) {
       if (!validateStep2()) return;
+=======
+      const isStep1Valid = validateStep1();
+      if (!isStep1Valid) return;
+    } else if (activeStep === 1) {
+      const isStep2Valid = validateStep2();
+      if (!isStep2Valid) return;
+>>>>>>> origin/feature/admin
     }
 
     setActiveStep((prev) => Math.min(prev + 1, STEPS.length - 1));
   };
 
   const handleBack = () => {
+    if (activeStep === 0) {
+      navigate("/owner/dashboard", { replace: true });
+      return;
+    }
+
     setErrors({});
     setSubmitError('');
     if (activeStep === 0) {
@@ -316,7 +382,19 @@ export default function PropertyWizard() {
   };
 
   return (
+<<<<<<< HEAD
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: { xs: 'column', md: 'row' } }}>
+=======
+    <Box sx={{ maxWidth: 800, mx: "auto", p: { xs: 2, md: 4 } }}>
+      <Paper elevation={2} sx={{ p: { xs: 2, md: 4 }, borderRadius: 2 }}>
+        <Stepper activeStep={activeStep} alternativeLabel sx={{ mb: 4 }}>
+          {STEPS.map((label) => (
+            <Step key={label}>
+              <StepLabel>{label}</StepLabel>
+            </Step>
+          ))}
+        </Stepper>
+>>>>>>> origin/feature/admin
 
       {/* Left Sidebar - Visual Indicator */}
       <Box
@@ -343,6 +421,7 @@ export default function PropertyWizard() {
           </Typography>
         </Box>
 
+<<<<<<< HEAD
         {/* Mobile progress view */}
         <Box sx={{ display: { xs: 'block', md: 'none' } }}>
           <Typography variant="body2" sx={{ color: '#cadcf6', mb: 1 }}>
@@ -361,6 +440,30 @@ export default function PropertyWizard() {
                 }}
               />
             ))}
+=======
+        {activeStep < 2 && (
+          <Box
+            sx={{
+              display: "flex",
+              justifyContent: "space-between",
+              pt: 2,
+              borderTop: "1px solid #eee",
+            }}
+          >
+            <Button
+              variant="outlined"
+              onClick={handleBack}
+            >
+              Back
+            </Button>
+            <Button
+              variant="contained"
+              onClick={handleNext}
+              sx={{ bgcolor: "#1976d2", "&:hover": { bgcolor: "#115293" } }}
+            >
+              Next Step
+            </Button>
+>>>>>>> origin/feature/admin
           </Box>
         </Box>
 

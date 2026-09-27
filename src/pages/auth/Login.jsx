@@ -12,7 +12,7 @@ import {
   browserLocalPersistence,
   browserSessionPersistence
 } from 'firebase/auth';
-import { doc, getDoc, collection, query, where, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
 
 // Fixed "occupancy state" for the facade illustration — deterministic so it
@@ -109,13 +109,25 @@ export default function Login() {
         const userData = userDoc.data();
 
         if (userData.role === 'owner') {
-          // Check if owner has already registered a property
           const propertiesRef = collection(db, 'properties');
-          const q = query(propertiesRef, where('ownerId', '==', user.uid));
-          const propertySnap = await getDocs(q);
+          const propertySnap = await getDocs(propertiesRef);
 
-          if (propertySnap.empty && !userData.hasProperty) {
-            // Redirect to PropertyWizard setup if no property registered yet
+          const hasRegisteredProperty = propertySnap.docs.some((docSnap) => {
+            const property = docSnap.data();
+            const ownerValue =
+              property.ownerUid ??
+              property.ownerId ??
+              property.createdBy ??
+              property.userId ??
+              property.uid ??
+              property.owner?.uid ??
+              property.owner?.id ??
+              '';
+
+            return String(ownerValue).trim().toLowerCase() === String(user.uid).trim().toLowerCase();
+          });
+
+          if (!hasRegisteredProperty && !userData.hasProperty) {
             navigate('/setup');
           } else {
             navigate('/owner/dashboard');
