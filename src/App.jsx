@@ -1,16 +1,23 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
+import InviteCaretaker from "./pages/owner/InviteCaretaker";
+import CaretakerInvited from "./pages/owner/CaretakerInvited";
 // Import your actual files
-import Login from './pages/auth/Login';
-import OwnerRegister from './pages/auth/OwnerRegister';
-import PropertyWizard from './pages/onboarding/PropertyWizard';
-import RegisterSubUser from './pages/owner/RegisterSubUser';
-import WizardSuccess from './pages/onboarding/components/WizardSuccess';
+import Login from "./pages/auth/Login";
+import OwnerRegister from "./pages/auth/OwnerRegister";
+import PropertyWizard from "./pages/onboarding/PropertyWizard";
+import RegisterSubUser from "./pages/owner/RegisterSubUser";
+import WizardSuccess from "./pages/onboarding/components/WizardSuccess";
 
 // Temporary Dashboard Placeholders (You can create real files for these in a future sprint)
 const OwnerDashboard = () => <div>Owner Dashboard</div>;
 const TenantDashboard = () => <div>Tenant Dashboard</div>;
 const CaretakerDashboard = () => <div>Caretaker Dashboard</div>;
+const CaretakerList = () => <div>Caretaker List</div>;
 
 function App() {
   return (
@@ -18,11 +25,11 @@ function App() {
       <Routes>
         {/* Default route redirects to login */}
         <Route path="/" element={<Navigate to="/login" replace />} />
-        
+
         {/* Auth Routes */}
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<OwnerRegister />} />
-        
+
         {/* Onboarding & Dashboards */}
         <Route path="/setup" element={<PropertyWizard />} />
         <Route path="/wizard-success" element={<WizardSuccess />} />
@@ -32,6 +39,13 @@ function App() {
 
         {/* Sub-user Registration */}
         <Route path="/register-sub-user" element={<RegisterSubUser />} />
+
+        <Route path="/owner/caretakers/invite" element={<InviteCaretaker />} />
+        <Route
+          path="/owner/caretakers/invited"
+          element={<CaretakerInvited />}
+        />
+        <Route path="/owner/caretakers" element={<CaretakerList />} />
       </Routes>
     </Router>
   );
