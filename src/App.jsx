@@ -4,14 +4,14 @@ import {
   Route,
   Navigate,
 } from "react-router-dom";
-import InviteCaretaker from "./pages/owner/InviteCaretaker";
-import CaretakerInvited from "./pages/owner/CaretakerInvited";
+
 // Import your actual files
 import Login from "./pages/auth/Login";
 import OwnerRegister from "./pages/auth/OwnerRegister";
 import PropertyWizard from "./pages/onboarding/PropertyWizard";
 import RegisterSubUser from "./pages/owner/RegisterSubUser";
 import WizardSuccess from "./pages/onboarding/components/WizardSuccess";
+import CaretakerList from "./pages/owner/CaretakerList";
 
 // Temporary Dashboard Placeholders (You can create real files for these in a future sprint)
 const OwnerDashboard = () => <div>Owner Dashboard</div>;
@@ -40,11 +40,7 @@ function App() {
         {/* Sub-user Registration */}
         <Route path="/register-sub-user" element={<RegisterSubUser />} />
 
-        <Route path="/owner/caretakers/invite" element={<InviteCaretaker />} />
-        <Route
-          path="/owner/caretakers/invited"
-          element={<CaretakerInvited />}
-        />
+        {/* Caretaker List */}
         <Route path="/owner/caretakers" element={<CaretakerList />} />
       </Routes>
     </Router>
