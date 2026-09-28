@@ -178,12 +178,15 @@ export default function RegisterTenant() {
         idPhotoUrl = await getDownloadURL(photoRef);
       }
 
-      await setDoc(doc(db, "users", newUser.uid), {
+      const ownerUid = auth.currentUser?.uid || null;
+      const tenantProfile = {
         uid: newUser.uid,
+        ownerUid,
         name: form.fullName.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
         role: "tenant",
+        status: "Active",
         idType: form.idType,
         idNumber: form.idNumber.trim(),
         idPhotoUrl,
@@ -193,6 +196,12 @@ export default function RegisterTenant() {
         leaseStartDate: form.leaseStartDate || null,
         leaseDuration: form.leaseDuration || null,
         createdAt: new Date().toISOString(),
+      };
+
+      await setDoc(doc(db, "users", newUser.uid), tenantProfile);
+      await setDoc(doc(db, "tenants", newUser.uid), {
+        ...tenantProfile,
+        fullName: tenantProfile.name,
       });
 
       navigate(-1);

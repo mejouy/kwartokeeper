@@ -296,9 +296,9 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
                 <TextField
                   fullWidth
                   placeholder="House/bldg no., street, subdivision"
-                  value={wizardData.streetAddress || ''}
-                  onChange={handleChange('streetAddress')}
-                  {...fieldProps('streetAddress')}
+                  value={wizardData.street || ''}
+                  onChange={handleChange('street')}
+                  {...fieldProps('street')}
                 />
               </Box>
             </Box>

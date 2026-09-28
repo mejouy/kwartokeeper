@@ -18,6 +18,31 @@ import SoupKitchenOutlinedIcon from '@mui/icons-material/SoupKitchenOutlined';
 import SecurityIcon from '@mui/icons-material/Security';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
 
+// Helper to convert "10:00 PM" or non-standard strings into valid "HH:mm" (24-hour) format
+const formatTo24Hour = (timeStr) => {
+  if (!timeStr) return '22:00';
+
+  // Already valid 24-hour format "HH:mm"
+  if (/^([01]\d|2[0-3]):[0-5]\d$/.test(timeStr)) {
+    return timeStr;
+  }
+
+  // Parses 12-hour format like "10:00 PM", "9:30 AM", "10:00PM"
+  const match = String(timeStr).match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
+  if (match) {
+    let [_, hoursStr, minutes, modifier] = match;
+    let hours = parseInt(hoursStr, 10);
+    if (modifier) {
+      const isPM = modifier.toUpperCase() === 'PM';
+      if (isPM && hours < 12) hours += 12;
+      if (!isPM && hours === 12) hours = 0;
+    }
+    return `${String(hours).padStart(2, '0')}:${minutes}`;
+  }
+
+  return '22:00';
+};
+
 // Shared with Step1 — keep both files visually identical if you tweak one.
 const labelColStyle = {
   fontSize: '0.875rem',
@@ -268,7 +293,7 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData }) => {
                     fullWidth
                     type="time"
                     label="Curfew start time"
-                    value={wizardData.curfewTime || '22:00'}
+                    value={formatTo24Hour(wizardData.curfewTime)}
                     onChange={(e) => updateWizardData({ curfewTime: e.target.value })}
                     slotProps={{
                       inputLabel: { shrink: true },

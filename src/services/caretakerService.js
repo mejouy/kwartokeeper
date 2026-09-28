@@ -86,17 +86,25 @@ export async function createCaretakerAccount({
 
   // Write the caretaker's profile using the MAIN db instance (same Firestore
   // project either way — the secondary app was only needed for the Auth call).
-  await setDoc(doc(db, "users", caretakerUid), {
+  const caretakerProfile = {
     uid: caretakerUid,
+    ownerUid,
     name: fullName.trim(),
     email: email.trim(),
     phone: mobilePhone.trim(),
     role: "caretaker",
+    status: "Active",
     assignedPropertyId,
     permissions,
     invitedBy: ownerUid,
     mustChangePassword: true,
     createdAt: serverTimestamp(),
+  };
+
+  await setDoc(doc(db, "users", caretakerUid), caretakerProfile);
+  await setDoc(doc(db, "caretakers", caretakerUid), {
+    ...caretakerProfile,
+    fullName: caretakerProfile.name,
   });
 
   return caretakerUid;

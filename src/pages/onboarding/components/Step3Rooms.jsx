@@ -1,4 +1,3 @@
-// src/pages/onboarding/components/Step3Rooms.jsx
 import React, { useState, useMemo, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -64,8 +63,14 @@ function ordinal(n) {
   return num + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
 }
 
+// Collision-free unique ID generator
+const generateUniqueId = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
 const generateDefaultGroup = () => ({
-  id: Math.random().toString(36).substring(2, 10),
+  id: generateUniqueId(),
   roomType: "Bedspace",
   customRoomType: "",
   numberOfRooms: 4,
@@ -161,7 +166,7 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
         const added = Array.from({ length: totalFloors - prev.length }, (_, i) => {
           const lastConfig = prev[prev.length - 1];
           const copiedGroups = lastConfig?.roomGroups
-            ? lastConfig.roomGroups.map((g) => ({ ...g, id: Math.random().toString(36).substring(2, 10) }))
+            ? lastConfig.roomGroups.map((g) => ({ ...g, id: generateUniqueId() }))
             : [generateDefaultGroup()];
             
           return {
@@ -249,7 +254,14 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
     setFloorConfigs((prev) => {
       const next = [...prev];
       const updatedGroups = [...next[floorIndex].roomGroups];
-      updatedGroups[groupIndex] = { ...updatedGroups[groupIndex], [field]: value };
+      let updatedGroup = { ...updatedGroups[groupIndex], [field]: value };
+
+      // Reset customRoomType if switching room type away from "Custom"
+      if (field === "roomType" && value !== "Custom") {
+        updatedGroup.customRoomType = "";
+      }
+
+      updatedGroups[groupIndex] = updatedGroup;
       next[floorIndex] = { ...next[floorIndex], roomGroups: updatedGroups };
       return next;
     });
@@ -281,13 +293,28 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
       const next = [...prev];
       const copiedGroups = next[index].roomGroups.map((g) => ({
         ...g,
-        id: Math.random().toString(36).substring(2, 10),
+        id: generateUniqueId(),
       }));
       next[index + 1] = {
         ...next[index + 1],
         roomGroups: copiedGroups,
       };
       return next;
+    });
+  };
+
+  const handleCopyToAllUpperFloors = (fromIndex) => {
+    setFloorConfigs((prev) => {
+      return prev.map((floor, idx) => {
+        if (idx <= fromIndex) return floor;
+        return {
+          ...floor,
+          roomGroups: prev[fromIndex].roomGroups.map((g) => ({
+            ...g,
+            id: generateUniqueId(),
+          })),
+        };
+      });
     });
   };
 
@@ -494,10 +521,10 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
                     type="number"
                     value={uniform.monthlyRate ?? ""}
                     onChange={(e) => {
-                      const val = parseInt(e.target.value, 10);
+                      const val = e.target.value;
                       setUniform((u) => ({
                         ...u,
-                        monthlyRate: isNaN(val) ? "" : val,
+                        monthlyRate: val === "" ? "" : Math.max(0, parseInt(val, 10) || 0),
                       }));
                     }}
                     slotProps={{
@@ -650,12 +677,12 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
                             type="number"
                             value={group.monthlyRate ?? ""}
                             onChange={(e) => {
-                              const val = parseInt(e.target.value, 10);
+                              const val = e.target.value;
                               handleGroupFieldChange(
                                 floorIndex,
                                 groupIndex,
                                 "monthlyRate",
-                                isNaN(val) ? "" : val
+                                val === "" ? "" : Math.max(0, parseInt(val, 10) || 0)
                               );
                             }}
                             slotProps={{
@@ -701,6 +728,21 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
                       }}
                     >
                       Copy entire floor settings to floor {floor.floorNumber + 1}
+                    </Button>
+                  )}
+
+                  {floorIndex + 2 < floorConfigs.length && (
+                    <Button
+                      size="small"
+                      startIcon={<ContentCopyIcon />}
+                      onClick={() => handleCopyToAllUpperFloors(floorIndex)}
+                      sx={{
+                        alignSelf: "flex-start",
+                        color: "text.secondary",
+                        "&:hover": { bgcolor: "transparent", color: "primary.main", textDecoration: "underline" },
+                      }}
+                    >
+                      Copy entire floor settings to all upper floors
                     </Button>
                   )}
                 </Box>
