@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Button, Typography, Alert, CircularProgress } from '@mui/material';
+import { Box, Button, Typography, Alert } from '@mui/material';
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
 import RuleOutlinedIcon from '@mui/icons-material/RuleOutlined';
 import GridViewOutlinedIcon from '@mui/icons-material/GridViewOutlined';
@@ -16,7 +16,6 @@ import Step3Rooms from './components/Step3Rooms';
 const STEPS = ['Basic Details', 'Rules & Amenities', 'Rooms & Layout'];
 const STEP_ICONS = [HomeOutlinedIcon, RuleOutlinedIcon, GridViewOutlinedIcon];
 
-// Night-facade building graphic with deterministic window lighting pattern
 const FACADE_ROWS = 5;
 const FACADE_COLS = 5;
 const LIT_PATTERN = [
@@ -68,7 +67,6 @@ function DormFacade() {
   );
 }
 
-// Vertical progress navigation sidebar
 function StepList({ activeStep }) {
   return (
     <Box sx={{ display: 'flex', flexDirection: 'column' }}>
@@ -150,18 +148,21 @@ export default function PropertyWizard() {
     totalFloors: 1,
     amenities: [],
     curfewEnabled: false,
-    curfewTime: '10:00 PM', // Merged from Snippet 2
+    curfewTime: '10:00 PM',
     namingPattern: 'floor',
-    configMode: 'uniform',
+    // configMode removed here so Step 3 sets its mode dynamically based on totalFloors
   });
 
   const updateWizardData = (newData) => {
-    setWizardData((prev) => ({
-      ...prev,
-      ...newData,
-    }));
+    setWizardData((prev) => {
+      const updated = { ...prev, ...newData };
+      // Ensure totalFloors is always stored as a clean integer
+      if (newData.totalFloors !== undefined) {
+        updated.totalFloors = Math.max(1, Number(newData.totalFloors) || 1);
+      }
+      return updated;
+    });
 
-    // Clear error highlights for fields as the user edits them
     const updatedFields = Object.keys(newData);
     setErrors((prevErrors) => {
       const newErrors = { ...prevErrors };
@@ -187,7 +188,8 @@ export default function PropertyWizard() {
 
   const validateStep2 = () => {
     const newErrors = {};
-    if (!wizardData.totalFloors || wizardData.totalFloors < 1) {
+    const floorsNum = Number(wizardData.totalFloors);
+    if (!floorsNum || floorsNum < 1) {
       newErrors.totalFloors = 'Total floors must be at least 1.';
     }
     if (wizardData.curfewEnabled && !wizardData.curfewTime) {
@@ -210,7 +212,7 @@ export default function PropertyWizard() {
 
   const handleBack = () => {
     if (activeStep === 0) {
-      navigate('/owner/dashboard', { replace: true }); // Merged from Snippet 2
+      navigate('/owner/dashboard', { replace: true });
       return;
     }
     setErrors({});
@@ -218,7 +220,6 @@ export default function PropertyWizard() {
     setActiveStep((prev) => Math.max(prev - 1, 0));
   };
 
-  // Handles image upload and database saving; receives room configurations from Step 3
   const submitPropertyToFirebase = async (roomsData = [], layoutMetrics = {}) => {
     setIsSubmitting(true);
     setSubmitError('');
@@ -230,14 +231,13 @@ export default function PropertyWizard() {
     }
 
     try {
-      const currentUser = auth?.currentUser; // Merged from Snippet 2
+      const currentUser = auth?.currentUser;
       if (!currentUser) {
         throw new Error('Authentication error: No property owner is currently logged in.');
       }
 
       let uploadedPhotoUrl = '';
 
-      // 1. Upload Cover Photo to Storage (if selected)
       if (wizardData.coverPhoto) {
         try {
           const sanitizedFileName = wizardData.coverPhoto.name.replace(/[^a-zA-Z0-9.]/g, '_');
@@ -252,16 +252,13 @@ export default function PropertyWizard() {
           uploadedPhotoUrl = await getDownloadURL(snapshot.ref);
         } catch (uploadError) {
           console.error('Photo upload failed:', uploadError);
-          // Non-blocking warning: save property and let user know
           setSubmitError('Property was saving, but cover photo upload failed. You can re-upload it later.');
         }
       }
 
-      // 2. Format payload for Firestore with sanitization
       const finalPropertyData = {
         ownerUid: currentUser.uid,
 
-        // Address Details
         street: wizardData.street || '',
         barangay: wizardData.barangay || '',
         cityMunicipality: wizardData.cityMunicipality || '',
@@ -271,19 +268,16 @@ export default function PropertyWizard() {
         provinceCode: wizardData.provinceCode || '',
         cityCode: wizardData.cityCode || '',
 
-        // Basic Details
         propertyName: wizardData.propertyName || '',
         propertyType: wizardData.propertyType || '',
         emergencyPhone: wizardData.emergencyPhone || '',
         coverPhotoUrl: uploadedPhotoUrl,
 
-        // Rules & Amenities
         totalFloors: Number(wizardData.totalFloors) || 1,
         amenities: wizardData.amenities || [],
         curfewEnabled: Boolean(wizardData.curfewEnabled),
         curfewTime: wizardData.curfewEnabled ? (wizardData.curfewTime || '') : '',
 
-        // Room & Layout Data
         namingPattern: wizardData.namingPattern || 'floor',
         configMode: wizardData.configMode || 'uniform',
         rooms: roomsData,
@@ -294,10 +288,8 @@ export default function PropertyWizard() {
         updatedAt: serverTimestamp(),
       };
 
-      // 3. Save to Firestore
       const docRef = await addDoc(collection(db, 'properties'), finalPropertyData);
 
-      // 4. Redirect to success screen
       navigate('/wizard-success', {
         state: {
           propertyId: docRef.id,
@@ -310,7 +302,7 @@ export default function PropertyWizard() {
     } catch (error) {
       console.error('Error saving property:', error);
       setSubmitError(error.message || 'An error occurred while saving the property.');
-    } finally { // Fixed typo from Snippet 1 (fontFinally)
+    } finally {
       setIsSubmitting(false);
     }
   };
@@ -318,7 +310,6 @@ export default function PropertyWizard() {
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: { xs: 'column', md: 'row' } }}>
 
-      {/* Left Sidebar - Visual Indicator */}
       <Box
         sx={{
           flex: { xs: '0 0 auto', md: '0 0 300px' },
@@ -343,7 +334,6 @@ export default function PropertyWizard() {
           </Typography>
         </Box>
 
-        {/* Mobile progress view */}
         <Box sx={{ display: { xs: 'block', md: 'none' } }}>
           <Typography variant="body2" sx={{ color: '#cadcf6', mb: 1 }}>
             Step {activeStep + 1} of {STEPS.length} — {STEPS[activeStep]}
@@ -364,7 +354,6 @@ export default function PropertyWizard() {
           </Box>
         </Box>
 
-        {/* Desktop progress list */}
         <Box sx={{ display: { xs: 'none', md: 'block' } }}>
           <StepList activeStep={activeStep} />
         </Box>
@@ -374,7 +363,6 @@ export default function PropertyWizard() {
         </Box>
       </Box>
 
-      {/* Main Content Area */}
       <Box sx={{ flex: 1, bgcolor: 'background.default', display: 'flex', justifyContent: 'center', px: { xs: 3, md: 6 }, py: { xs: 4, md: 6 } }}>
         <Box sx={{ width: '100%', maxWidth: 760 }}>
 

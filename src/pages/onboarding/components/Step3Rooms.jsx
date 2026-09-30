@@ -139,8 +139,9 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
 
   const totalFloors = Math.max(1, Number(wizardData?.totalFloors) || 1);
 
-  const [namingPattern, setNamingPattern] = useState("floor");
-  const [configMode, setConfigMode] = useState(totalFloors > 1 ? "perFloor" : "uniform");
+  // Added defaults from wizardData to preserve state when navigating back
+  const [namingPattern, setNamingPattern] = useState(wizardData?.namingPattern || "floor");
+  const [configMode, setConfigMode] = useState(wizardData?.configMode || (totalFloors > 1 ? "perFloor" : "uniform"));
 
   const [uniform, setUniform] = useState({
     roomsPerFloor: 5,
@@ -329,11 +330,10 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
 
     setSaving(true);
     try {
-      // 1. Strip undefined values from wizardData
-      const cleanWizardData = { ...wizardData };
-      Object.keys(cleanWizardData).forEach((key) => {
-        if (cleanWizardData[key] === undefined) delete cleanWizardData[key];
-      });
+      // 1. Strip undefined values strictly to prevent Firestore errors
+      const cleanWizardData = Object.fromEntries(
+        Object.entries(wizardData).filter(([_, v]) => v !== undefined)
+      );
 
       // 2. Prepare payload with sensible defaults
       const finalWizardData = {
@@ -359,7 +359,8 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
         const cleanRoom = { ...room };
         Object.keys(cleanRoom).forEach((key) => {
           if (cleanRoom[key] === undefined || Number.isNaN(cleanRoom[key])) {
-            cleanRoom[key] = null;
+            // Usually, deleting the key is safer for Firestore than explicitly setting null
+            delete cleanRoom[key]; 
           }
         });
         return cleanRoom;
@@ -527,12 +528,10 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
                         monthlyRate: val === "" ? "" : Math.max(0, parseInt(val, 10) || 0),
                       }));
                     }}
-                    slotProps={{
-                      input: {
-                        startAdornment: (
-                          <InputAdornment position="start">₱</InputAdornment>
-                        ),
-                      },
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">₱</InputAdornment>
+                      ),
                     }}
                     fullWidth
                     sx={{ maxWidth: 200 }}
@@ -685,12 +684,10 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
                                 val === "" ? "" : Math.max(0, parseInt(val, 10) || 0)
                               );
                             }}
-                            slotProps={{
-                              input: {
-                                startAdornment: (
-                                  <InputAdornment position="start">₱</InputAdornment>
-                                ),
-                              },
+                            InputProps={{
+                              startAdornment: (
+                                <InputAdornment position="start">₱</InputAdornment>
+                              ),
                             }}
                             fullWidth
                             sx={{ maxWidth: 200 }}
@@ -774,10 +771,20 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
                 ([floorNum, data]) => {
                   const numRooms = Number(data?.rooms) || 0;
                   const numBeds = Number(data?.beds) || 0;
+                  const roomTypes = Object.entries(data?.roomTypes || {})
+                    .map(([type, counts]) => `${type}: ${counts.rooms} rooms / ${counts.beds} beds`)
+                    .join(", ");
                   return (
-                    <Typography key={floorNum} variant="body2" color="text.secondary">
-                      {ordinal(Number(floorNum))} floor: {numRooms} rooms | {numBeds} total beds
-                    </Typography>
+                    <Box key={floorNum}>
+                      <Typography variant="body2" color="text.secondary">
+                        {ordinal(Number(floorNum))} floor: {numRooms} rooms | {numBeds} total beds
+                      </Typography>
+                      {roomTypes && (
+                        <Typography variant="caption" color="text.secondary">
+                          {roomTypes}
+                        </Typography>
+                      )}
+                    </Box>
                   );
                 }
               )

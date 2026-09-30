@@ -8,6 +8,7 @@ import {
   IconButton,
   Paper,
   InputAdornment,
+  FormHelperText,
 } from '@mui/material';
 import AddIcon from '@mui/icons-material/Add';
 import RemoveIcon from '@mui/icons-material/Remove';
@@ -18,32 +19,6 @@ import SoupKitchenOutlinedIcon from '@mui/icons-material/SoupKitchenOutlined';
 import SecurityIcon from '@mui/icons-material/Security';
 import NightlightRoundIcon from '@mui/icons-material/NightlightRound';
 
-// Helper to convert "10:00 PM" or non-standard strings into valid "HH:mm" (24-hour) format
-const formatTo24Hour = (timeStr) => {
-  if (!timeStr) return '22:00';
-
-  // Already valid 24-hour format "HH:mm"
-  if (/^([01]\d|2[0-3]):[0-5]\d$/.test(timeStr)) {
-    return timeStr;
-  }
-
-  // Parses 12-hour format like "10:00 PM", "9:30 AM", "10:00PM"
-  const match = String(timeStr).match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-  if (match) {
-    let [_, hoursStr, minutes, modifier] = match;
-    let hours = parseInt(hoursStr, 10);
-    if (modifier) {
-      const isPM = modifier.toUpperCase() === 'PM';
-      if (isPM && hours < 12) hours += 12;
-      if (!isPM && hours === 12) hours = 0;
-    }
-    return `${String(hours).padStart(2, '0')}:${minutes}`;
-  }
-
-  return '22:00';
-};
-
-// Shared with Step1 — keep both files visually identical if you tweak one.
 const labelColStyle = {
   fontSize: '0.875rem',
   color: 'text.secondary',
@@ -68,18 +43,23 @@ const AMENITIES_LIST = [
   { key: 'Shared Kitchen', icon: SoupKitchenOutlinedIcon },
 ];
 
-export const Step2Policies = ({ wizardData = {}, updateWizardData }) => {
-  // Floor counter handlers
+export const Step2Policies = ({ wizardData = {}, updateWizardData, errors = {} }) => {
+  // Floor counter handlers (persisted directly to wizardData)
   const handleFloorChange = (delta) => {
     const current = Number(wizardData.totalFloors) || 1;
     const nextVal = Math.max(1, current + delta);
     updateWizardData({ totalFloors: nextVal });
   };
 
-  // Estimated rooms handler (prevents NaN)
+  // Estimated rooms handler
   const handleRoomsChange = (e) => {
-    const val = parseInt(e.target.value, 10);
-    updateWizardData({ estimatedRooms: isNaN(val) ? '' : val });
+    const rawVal = e.target.value;
+    if (rawVal === '') {
+      updateWizardData({ estimatedRooms: '' });
+      return;
+    }
+    const val = parseInt(rawVal, 10);
+    updateWizardData({ estimatedRooms: isNaN(val) ? '' : Math.max(0, val) });
   };
 
   // Amenities checkbox handler
@@ -92,12 +72,21 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData }) => {
     }
   };
 
+  // Toggle Curfew with '10:00 PM' as default
+  const handleCurfewToggle = (e) => {
+    const checked = e.target.checked;
+    updateWizardData({
+      curfewEnabled: checked,
+      curfewTime: checked ? (wizardData.curfewTime || '10:00 PM') : wizardData.curfewTime,
+    });
+  };
+
   const selectedAmenities = Array.isArray(wizardData.amenities) ? wizardData.amenities : [];
   const curfewEnabled = Boolean(wizardData.curfewEnabled);
 
   return (
     <Box sx={{ width: '100%', maxWidth: 700, mx: 'auto', px: { xs: 1, sm: 2 } }}>
-      {/* Header — matches Step1's treatment */}
+      {/* Header */}
       <Box sx={{ mb: 4 }}>
         <Typography
           variant="h5"
@@ -119,50 +108,60 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData }) => {
             <Typography sx={labelColStyle}>Number of floors</Typography>
           </Box>
           <Box sx={fieldColSx}>
-            <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
-              <IconButton
-                size="small"
-                onClick={() => handleFloorChange(-1)}
-                aria-label="Decrease floors"
-                sx={{
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  borderRadius: '4px',
-                  color: 'text.primary',
-                  '&:hover': { borderColor: 'primary.main', color: 'primary.main' },
-                }}
-              >
-                <RemoveIcon fontSize="small" />
-              </IconButton>
+            <Box sx={{ display: 'inline-flex', flexDirection: 'column' }}>
+              <Box sx={{ display: 'inline-flex', alignItems: 'center', gap: 1 }}>
+                <IconButton
+                  size="small"
+                  onClick={() => handleFloorChange(-1)}
+                  aria-label="Decrease floors"
+                  sx={{
+                    border: '1px solid',
+                    borderColor: errors.totalFloors ? 'error.main' : 'divider',
+                    borderRadius: '4px',
+                    color: 'text.primary',
+                    '&:hover': { borderColor: 'primary.main', color: 'primary.main' },
+                  }}
+                >
+                  <RemoveIcon fontSize="small" />
+                </IconButton>
 
-              <Typography
-                sx={{
-                  minWidth: 44,
-                  textAlign: 'center',
-                  fontWeight: 700,
-                  fontSize: '1rem',
-                  bgcolor: 'background.paper',
-                  borderRadius: '4px',
-                  py: 0.75,
-                }}
-              >
-                {Number(wizardData.totalFloors) || 1}
-              </Typography>
+                <Typography
+                  sx={{
+                    minWidth: 44,
+                    textAlign: 'center',
+                    fontWeight: 700,
+                    fontSize: '1rem',
+                    bgcolor: 'background.paper',
+                    borderRadius: '4px',
+                    py: 0.75,
+                    border: '1px solid',
+                    borderColor: errors.totalFloors ? 'error.main' : 'divider',
+                  }}
+                >
+                  {Number(wizardData.totalFloors) || 1}
+                </Typography>
 
-              <IconButton
-                size="small"
-                onClick={() => handleFloorChange(1)}
-                aria-label="Increase floors"
-                sx={{
-                  border: '1px solid',
-                  borderColor: 'divider',
-                  borderRadius: '4px',
-                  color: 'text.primary',
-                  '&:hover': { borderColor: 'primary.main', color: 'primary.main' },
-                }}
-              >
-                <AddIcon fontSize="small" />
-              </IconButton>
+                <IconButton
+                  size="small"
+                  onClick={() => handleFloorChange(1)}
+                  aria-label="Increase floors"
+                  sx={{
+                    border: '1px solid',
+                    borderColor: errors.totalFloors ? 'error.main' : 'divider',
+                    borderRadius: '4px',
+                    color: 'text.primary',
+                    '&:hover': { borderColor: 'primary.main', color: 'primary.main' },
+                  }}
+                >
+                  <AddIcon fontSize="small" />
+                </IconButton>
+              </Box>
+
+              {errors.totalFloors && (
+                <FormHelperText error sx={{ mt: 0.5, ml: 0 }}>
+                  {errors.totalFloors}
+                </FormHelperText>
+              )}
             </Box>
           </Box>
         </Box>
@@ -179,7 +178,7 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData }) => {
               value={wizardData.estimatedRooms ?? ''}
               onChange={handleRoomsChange}
               sx={{ maxWidth: 160 }}
-              slotProps={{ htmlInput: { min: 0 } }}
+              inputProps={{ min: 0 }}
             />
           </Box>
         </Box>
@@ -246,7 +245,11 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData }) => {
               elevation={0}
               sx={{
                 border: '1px solid',
-                borderColor: curfewEnabled ? 'primary.main' : 'divider',
+                borderColor: errors.curfewTime
+                  ? 'error.main'
+                  : curfewEnabled
+                  ? 'primary.main'
+                  : 'divider',
                 bgcolor: curfewEnabled ? 'rgba(255, 69, 0, 0.06)' : 'background.paper',
                 borderRadius: '4px',
                 p: 2,
@@ -282,7 +285,7 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData }) => {
 
                 <Switch
                   checked={curfewEnabled}
-                  onChange={(e) => updateWizardData({ curfewEnabled: e.target.checked })}
+                  onChange={handleCurfewToggle}
                   color="primary"
                 />
               </Box>
@@ -291,21 +294,20 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData }) => {
                 <Box sx={{ mt: 2, pt: 2, borderTop: '1px dashed', borderColor: 'primary.main' }}>
                   <TextField
                     fullWidth
-                    type="time"
-                    label="Curfew start time"
-                    value={formatTo24Hour(wizardData.curfewTime)}
+                    label="Curfew time or rule"
+                    placeholder="e.g. 10:00 PM"
+                    value={wizardData.curfewTime ?? ''}
                     onChange={(e) => updateWizardData({ curfewTime: e.target.value })}
-                    slotProps={{
-                      inputLabel: { shrink: true },
-                      input: {
-                        startAdornment: (
-                          <InputAdornment position="start">
-                            <NightlightRoundIcon sx={{ fontSize: 18, color: 'primary.main' }} />
-                          </InputAdornment>
-                        ),
-                      },
+                    error={Boolean(errors.curfewTime)}
+                    helperText={errors.curfewTime}
+                    InputProps={{
+                      startAdornment: (
+                        <InputAdornment position="start">
+                          <NightlightRoundIcon sx={{ fontSize: 18, color: 'primary.main' }} />
+                        </InputAdornment>
+                      ),
                     }}
-                    sx={{ maxWidth: 260 }}
+                    sx={{ maxWidth: 300 }}
                   />
                 </Box>
               )}

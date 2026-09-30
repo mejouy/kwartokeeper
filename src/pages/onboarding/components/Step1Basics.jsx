@@ -123,26 +123,38 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
     updateWizardData({ [field]: e.target.value });
   };
 
+  // Dedicated Emergency Contact Phone Handler (Numeric Only)
+  const handleEmergencyPhoneChange = (e) => {
+    const numericValue = e.target.value.replace(/[^0-9]/g, '');
+    updateWizardData({ emergencyPhone: numericValue });
+  };
+
+  // Cover Photo Upload Handler (Converts File to Base64 String for Safe Firestore Storage)
   const handlePhotoUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) {
-      updateWizardData({
-        coverPhoto: file,
-        coverPhotoName: file.name,
-        coverPhotoPreview: URL.createObjectURL(file)
-      });
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result;
+        updateWizardData({
+          coverPhotoName: file.name,
+          coverPhotoPreview: base64String,
+          coverPhotoUrl: base64String, // Safe Base64 string that writes cleanly to Firestore
+        });
+      };
+      reader.readAsDataURL(file);
     }
   };
 
   const handleRemovePhoto = () => {
     updateWizardData({
-      coverPhoto: null,
       coverPhotoName: '',
-      coverPhotoPreview: ''
+      coverPhotoPreview: '',
+      coverPhotoUrl: '',
     });
   };
 
-  // Shared error/helperText plumbing for every field below
+  // Shared error/helperText plumbing for every field
   const fieldProps = (field) => ({
     error: Boolean(errors?.[field]),
     helperText: errors?.[field] || '',
@@ -305,7 +317,7 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
           </Box>
         </Box>
 
-        {/* Emergency Contact */}
+        {/* Emergency Contact Phone (Numbers Only) */}
         <Box sx={rowSx}>
           <Box sx={labelColSx}>
             <Typography sx={labelColStyle}>
@@ -315,9 +327,10 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
           <Box sx={fieldColSx}>
             <TextField
               fullWidth
-              placeholder="e.g. 0917 123 4567"
+              placeholder="e.g. 09171234567"
               value={wizardData.emergencyPhone || ''}
-              onChange={handleChange('emergencyPhone')}
+              onChange={handleEmergencyPhoneChange}
+              inputProps={{ maxLength: 15 }}
               slotProps={{
                 input: {
                   startAdornment: (
@@ -338,7 +351,7 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
             <Typography sx={labelColStyle}>Property cover photo</Typography>
           </Box>
           <Box sx={fieldColSx}>
-            {wizardData.coverPhotoPreview ? (
+            {wizardData.coverPhotoPreview || wizardData.coverPhotoUrl ? (
               <Box
                 sx={{
                   display: 'flex',
@@ -353,12 +366,12 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
               >
                 <Box
                   component="img"
-                  src={wizardData.coverPhotoPreview}
+                  src={wizardData.coverPhotoPreview || wizardData.coverPhotoUrl}
                   alt="Property cover preview"
                   sx={{ width: 56, height: 56, borderRadius: '4px', objectFit: 'cover', flexShrink: 0 }}
                 />
                 <Typography variant="body2" color="text.primary" sx={{ flex: 1, wordBreak: 'break-word' }}>
-                  {wizardData.coverPhotoName}
+                  {wizardData.coverPhotoName || 'Cover Photo Loaded'}
                 </Typography>
                 <IconButton
                   size="small"

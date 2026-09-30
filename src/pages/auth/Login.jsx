@@ -136,6 +136,8 @@ export default function Login() {
           navigate('/tenant/dashboard');
         } else if (userData.role === 'caretaker') {
           navigate('/caretaker/dashboard');
+        } else if (userData.role === 'admin') {
+          navigate('/admin/overview');
         } else {
           setError('Invalid user role assigned.');
         }

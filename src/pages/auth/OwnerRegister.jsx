@@ -10,6 +10,11 @@ import {
   Alert,
   Link,
   CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  DialogContentText,
 } from "@mui/material";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
@@ -89,7 +94,17 @@ export default function OwnerRegister() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // Modals for Terms and Privacy Policy
+  const [termsOpen, setTermsOpen] = useState(false);
+  const [privacyOpen, setPrivacyOpen] = useState(false);
+
   const handleChange = (field) => (e) => {
+    if (field === "phone") {
+      // Data validation: Only allow numbers (strip any non-numeric characters)
+      const numericValue = e.target.value.replace(/[^0-9]/g, "");
+      setForm((prev) => ({ ...prev, [field]: numericValue }));
+      return;
+    }
     setForm((prev) => ({ ...prev, [field]: e.target.value }));
   };
 
@@ -97,6 +112,7 @@ export default function OwnerRegister() {
     if (!form.fullName.trim()) return "Full name is required.";
     if (!form.email.trim()) return "Email is required.";
     if (!form.phone.trim()) return "Phone number is required.";
+    if (form.phone.length < 10) return "Phone number must be at least 10 digits."; // Extra phone validation
     if (form.password.length < 6)
       return "Password must be at least 6 characters.";
     if (form.password !== form.confirmPassword)
@@ -240,6 +256,7 @@ export default function OwnerRegister() {
               value={form.phone}
               onChange={handleChange("phone")}
               sx={{ mb: 2 }}
+              inputProps={{ maxLength: 15 }} // Limit length
             />
             <TextField
               label="Password"
@@ -275,7 +292,28 @@ export default function OwnerRegister() {
               }
               label={
                 <Typography variant="body2" color="text.secondary">
-                  I agree to the Terms of Service and Privacy Policy
+                  I agree to the{" "}
+                  <Link
+                    component="button"
+                    variant="body2"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setTermsOpen(true);
+                    }}
+                  >
+                    Terms of Service
+                  </Link>{" "}
+                  and{" "}
+                  <Link
+                    component="button"
+                    variant="body2"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      setPrivacyOpen(true);
+                    }}
+                  >
+                    Privacy Policy
+                  </Link>
                 </Typography>
               }
             />
@@ -310,6 +348,53 @@ export default function OwnerRegister() {
           </Box>
         </Box>
       </Box>
+
+      {/* Terms of Service Dialog */}
+      <Dialog open={termsOpen} onClose={() => setTermsOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 'bold' }}>Terms of Service</DialogTitle>
+        <DialogContent dividers>
+          <DialogContentText sx={{ mb: 2 }}>
+            <strong>1. Acceptance of Terms</strong><br />
+            By accessing and using KwartoKeeper, you accept and agree to be bound by the terms and provision of this agreement.
+          </DialogContentText>
+          <DialogContentText sx={{ mb: 2 }}>
+            <strong>2. Property Management</strong><br />
+            As a property owner, you are solely responsible for the accuracy of the data entered, including tenant information, billing, and maintenance records.
+          </DialogContentText>
+          <DialogContentText>
+            <strong>3. Service Modifications</strong><br />
+            KwartoKeeper reserves the right to modify or discontinue the service with or without notice to the user.
+          </DialogContentText>
+          {/* Add more terms as needed here */}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTermsOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Privacy Policy Dialog */}
+      <Dialog open={privacyOpen} onClose={() => setPrivacyOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 'bold' }}>Privacy Policy</DialogTitle>
+        <DialogContent dividers>
+          <DialogContentText sx={{ mb: 2 }}>
+            <strong>1. Information Collection</strong><br />
+            We collect personal information such as your name, email address, and phone number to set up your account and facilitate property management operations.
+          </DialogContentText>
+          <DialogContentText sx={{ mb: 2 }}>
+            <strong>2. Data Usage</strong><br />
+            Your data is used to provide, maintain, and improve the KwartoKeeper platform. We do not sell your personal data to third parties.
+          </DialogContentText>
+          <DialogContentText>
+            <strong>3. Security</strong><br />
+            We implement a variety of security measures to maintain the safety of your personal information. However, no method of transmission over the Internet is 100% secure.
+          </DialogContentText>
+          {/* Add more privacy rules as needed here */}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setPrivacyOpen(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
     </Box>
   );
 }
