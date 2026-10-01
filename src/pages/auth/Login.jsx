@@ -104,9 +104,27 @@ export default function Login() {
       // 3. Fetch user profile from Firestore
       const userDocRef = doc(db, 'users', user.uid);
       const userDoc = await getDoc(userDocRef);
+      let userData = userDoc.exists() ? userDoc.data() : null;
 
-      if (userDoc.exists()) {
-        const userData = userDoc.data();
+      if (!userData) {
+        const roleProfiles = [
+          { collectionName: 'tenants', role: 'tenant' },
+          { collectionName: 'caretakers', role: 'caretaker' },
+        ];
+
+        for (const profile of roleProfiles) {
+          const profileDoc = await getDoc(
+            doc(db, profile.collectionName, user.uid)
+          );
+          if (profileDoc.exists()) {
+            const profileData = profileDoc.data();
+            userData = { ...profileData, role: profileData.role || profile.role };
+            break;
+          }
+        }
+      }
+
+      if (userData) {
 
         if (userData.role === 'owner') {
           const propertiesRef = collection(db, 'properties');
@@ -140,8 +158,7 @@ export default function Login() {
           setError('Invalid user role assigned.');
         }
       } else {
-        // Fallback for new accounts without a user document yet
-        navigate('/setup');
+        setError('We could not find a profile for this account. Please contact your property owner.');
       }
     } catch (err) {
       setError('Failed to log in. Please check your credentials.');
