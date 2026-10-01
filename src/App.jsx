@@ -9,13 +9,14 @@ import WizardSuccess from './pages/onboarding/components/WizardSuccess';
 
 // --- Layouts ---
 import OwnerLayout from './layouts/OwnerLayout';
-import AdminLayout from './layouts/AdminLayout'; // Ensure path matches your structure
+import AdminLayout from './layouts/AdminLayout';
 
 // --- Owner Pages ---
 import OwnerOverview from './pages/owner/OwnerOverview';
 
 // Properties
 import PropertyList from './pages/owner/properties/PropertyList';
+import PropertyProfile from './pages/owner/properties/PropertyProfile'; // <-- ADDED THIS IMPORT
 import PropertyDetails from './pages/owner/properties/PropertyDetails'; 
 
 // Tenants
@@ -35,9 +36,11 @@ import MaintenancePage from './pages/owner/MaintenancePage';
 import AdminOverview from './pages/admin/AdminOverview';
 import ManageOwners from './pages/admin/ManageOwners';
 
+// --- Tenant & Caretaker Pages ---
+import TenantDashboard from './pages/tenant/TenantDashboard';
+import CaretakerDashboard from './pages/caretaker/CaretakerDashboard';
+
 // --- Placeholders ---
-const TenantDashboard = () => <div>Tenant Dashboard</div>;
-const CaretakerDashboard = () => <div>Caretaker Dashboard</div>;
 const TenantDetailPlaceholder = () => <div>Tenant Details</div>;
 
 // Admin Placeholders (To be replaced with real pages next)
@@ -85,7 +88,10 @@ function App() {
           {/* Properties Group */}
           <Route path="properties">
             <Route index element={<PropertyList />} />
-            <Route path=":id" element={<PropertyDetails />} />
+            {/* View the property profile */}
+            <Route path=":id" element={<PropertyProfile />} />
+            {/* Edit the property details */}
+            <Route path=":id/edit" element={<PropertyDetails />} />   
           </Route>
 
           {/* Tenants Group */}

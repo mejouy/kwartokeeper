@@ -29,27 +29,74 @@ export default function PropertyList() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  // Fetch properties from Firestore
+  // Helper function to calculate total capacity across top-level fields or nested room arrays
+  const calculateTotalBeds = (data) => {
+    let roomCapacity = 0;
+    if (Array.isArray(data.rooms) && data.rooms.length > 0) {
+      data.rooms.forEach((room) => {
+        roomCapacity += Number(room.capacity || room.beds || room.totalBeds || 0);
+      });
+    }
+
+    const topLevelCapacity =
+      Number(data.totalBeds) ||
+      Number(data.capacity) ||
+      Number(data.beds) ||
+      Number(data.totalCapacity) ||
+      0;
+
+    return roomCapacity > 0 ? roomCapacity : topLevelCapacity;
+  };
+
+  // Fetch properties and compute live occupancy from tenants collection
   useEffect(() => {
     let isMounted = true; 
 
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user) {
         try {
-          const q = query(collection(db, "properties"), where("ownerUid", "==", user.uid));
-          const querySnapshot = await getDocs(q);
+          // 1. Fetch properties for this owner
+          const propsQuery = query(collection(db, "properties"), where("ownerUid", "==", user.uid));
+          const propsSnapshot = await getDocs(propsQuery);
           
+          // 2. Fetch tenants for this owner to count actual occupied beds per property
+          const tenantsQuery = query(collection(db, "tenants"), where("ownerUid", "==", user.uid));
+          const tenantsSnapshot = await getDocs(tenantsQuery);
+
+          // Map active tenant count by property ID
+          const tenantCountByProperty = {};
+          tenantsSnapshot.docs.forEach((doc) => {
+            const tData = doc.data();
+            const rawStatus = (tData.status || "active").toString().toLowerCase();
+
+            // Count tenant if active and assigned to a property
+            if (rawStatus !== "inactive" && rawStatus !== "archived") {
+              if (tData.propertyId) {
+                tenantCountByProperty[tData.propertyId] = (tenantCountByProperty[tData.propertyId] || 0) + 1;
+              }
+            }
+          });
+
           if (isMounted) {
-            const propsData = querySnapshot.docs.map(doc => ({
-              id: doc.id,
-              ...doc.data()
-            }));
+            const processedProps = propsSnapshot.docs.map((doc) => {
+              const data = doc.data();
+              const totalBeds = calculateTotalBeds(data);
+              // Use live tenant count if available; fallback to document field
+              const occupiedBeds = tenantCountByProperty[doc.id] ?? Number(data.occupiedBeds || 0);
+
+              return {
+                id: doc.id,
+                ...data,
+                totalBeds,
+                occupiedBeds,
+              };
+            });
             
-            setProperties(propsData);
+            setProperties(processedProps);
             setError(null);
           }
         } catch (err) {
-          console.error("Error fetching properties:", err);
+          console.error("Error fetching properties/tenants:", err);
           if (isMounted) {
             setError("Failed to load properties. Please try again.");
           }
@@ -125,7 +172,7 @@ export default function PropertyList() {
             ) : (
               properties.map((p) => {
                 const occ = p.totalBeds > 0 
-                  ? Math.round(((p.occupiedBeds || 0) / p.totalBeds) * 100) 
+                  ? Math.min(Math.round(((p.occupiedBeds || 0) / p.totalBeds) * 100), 100) 
                   : 0;
 
                 return (
@@ -159,7 +206,7 @@ export default function PropertyList() {
                         size="small" 
                         endIcon={<ArrowForwardIcon />}
                         onClick={(e) => {
-                          e.stopPropagation(); // Stops the row click from firing so we don't navigate twice
+                          e.stopPropagation();
                           navigate(`/owner/properties/${p.id}`);
                         }}
                       >

@@ -21,6 +21,11 @@ import PeopleIcon from "@mui/icons-material/People";
 import AssignmentIndIcon from "@mui/icons-material/AssignmentInd";
 import PaymentsIcon from "@mui/icons-material/Payments";
 import BuildIcon from "@mui/icons-material/Build";
+import LogoutIcon from "@mui/icons-material/Logout";
+
+// Firebase Auth imports
+import { signOut } from "firebase/auth";
+import { auth } from "../config/firebase";
 
 const drawerWidth = 260;
 
@@ -33,6 +38,15 @@ export default function OwnerLayout() {
     setMobileOpen(!mobileOpen);
   };
 
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      navigate("/login", { replace: true });
+    } catch (error) {
+      console.error("Failed to log out:", error);
+    }
+  };
+
   const menuItems = [
     { text: "Overview", path: "/owner", icon: <DashboardIcon /> },
     { text: "Properties", path: "/owner/properties", icon: <HomeWorkIcon /> },
@@ -43,34 +57,63 @@ export default function OwnerLayout() {
   ];
 
   const drawer = (
-    <div>
+    <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* Top Header */}
       <Toolbar>
         <Typography variant="h6" fontWeight="bold" color="primary">
           DormAdmin
         </Typography>
       </Toolbar>
       <Divider />
-      <List>
-        {menuItems.map((item) => (
-          <ListItem key={item.text} disablePadding>
-            <ListItemButton
-              selected={location.pathname === item.path || location.pathname.startsWith(item.path + "/")}
-              onClick={() => {
-                navigate(item.path);
-                setMobileOpen(false);
-              }}
-              sx={{
-                "&.Mui-selected": { bgcolor: "primary.light", color: "primary.main" },
-                "&.Mui-selected .MuiListItemIcon-root": { color: "primary.main" },
-              }}
-            >
-              <ListItemIcon>{item.icon}</ListItemIcon>
-              <ListItemText primary={item.text} primaryTypographyProps={{ fontWeight: 600 }} />
-            </ListItemButton>
-          </ListItem>
-        ))}
-      </List>
-    </div>
+
+      {/* Main Navigation Links */}
+      <Box sx={{ flexGrow: 1, overflowY: "auto" }}>
+        <List>
+          {menuItems.map((item) => (
+            <ListItem key={item.text} disablePadding>
+              <ListItemButton
+                selected={
+                  location.pathname === item.path ||
+                  (item.path !== "/owner" && location.pathname.startsWith(item.path + "/"))
+                }
+                onClick={() => {
+                  navigate(item.path);
+                  setMobileOpen(false);
+                }}
+                sx={{
+                  "&.Mui-selected": { bgcolor: "primary.light", color: "primary.main" },
+                  "&.Mui-selected .MuiListItemIcon-root": { color: "primary.main" },
+                }}
+              >
+                <ListItemIcon>{item.icon}</ListItemIcon>
+                <ListItemText primary={item.text} primaryTypographyProps={{ fontWeight: 600 }} />
+              </ListItemButton>
+            </ListItem>
+          ))}
+        </List>
+      </Box>
+
+      {/* Bottom Pinned Section with Logout */}
+      <Divider />
+      <Box sx={{ p: 2 }}>
+        <ListItemButton
+          onClick={handleLogout}
+          sx={{
+            borderRadius: 1,
+            color: "error.main",
+            "&:hover": {
+              bgcolor: "error.lighter",
+              color: "error.dark",
+            },
+          }}
+        >
+          <ListItemIcon sx={{ color: "error.main" }}>
+            <LogoutIcon />
+          </ListItemIcon>
+          <ListItemText primary="Logout" primaryTypographyProps={{ fontWeight: 600 }} />
+        </ListItemButton>
+      </Box>
+    </Box>
   );
 
   return (
@@ -89,8 +132,12 @@ export default function OwnerLayout() {
           <IconButton color="inherit" edge="start" onClick={handleDrawerToggle} sx={{ mr: 2, display: { sm: "none" } }}>
             <MenuIcon />
           </IconButton>
+          
           <Typography variant="h6" noWrap component="div" fontWeight="600">
-            {menuItems.find((item) => location.pathname === item.path || location.pathname.startsWith(item.path + "/"))?.text || "Dashboard"}
+            {menuItems.find((item) =>
+              location.pathname === item.path ||
+              (item.path !== "/owner" && location.pathname.startsWith(item.path + "/"))
+            )?.text || "Dashboard"}
           </Typography>
         </Toolbar>
       </AppBar>
@@ -115,7 +162,6 @@ export default function OwnerLayout() {
       </Box>
 
       <Box component="main" sx={{ flexGrow: 1, p: 3, width: { sm: `calc(100% - ${drawerWidth}px)` }, mt: 8 }}>
-        {/* This Outlet will render OwnerOverview, PropertyList, TenantList, etc. based on the URL */}
         <Outlet />
       </Box>
     </Box>

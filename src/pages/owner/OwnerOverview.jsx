@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -41,95 +41,136 @@ function MetricBox({ title, value, subtitle, icon }) {
 
 export default function OwnerOverview() {
   const navigate = useNavigate();
-  
+
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
-    totalProperties: 0, 
-    totalBeds: 0, 
-    occupancyRate: 0, 
+    totalProperties: 0,
+    totalBeds: 0,
+    occupancyRate: 0,
     occupiedBeds: 0,
-    collectedThisMonth: 0, 
-    totalRevenue: 0, 
-    pendingMaintenance: 0, 
+    collectedThisMonth: 0,
+    totalRevenue: 0,
+    pendingMaintenance: 0,
     urgentMaintenance: 0,
-    activeTenants: 0, 
-    pendingTenants: 0, 
-    totalCaretakers: 0
+    activeTenants: 0,
+    pendingTenants: 0,
+    totalCaretakers: 0,
   });
-  
+
   const [tickets, setTickets] = useState([]);
   const [payments, setPayments] = useState([]);
+
+  // Use refs to store snapshot values so combined calculations can always access up-to-date values without timing issues
+  const propertiesDataRef = useRef({ count: 0, totalBeds: 0 });
+  const tenantsDataRef = useRef({ active: 0, pending: 0 });
 
   useEffect(() => {
     if (!auth.currentUser) return;
     const ownerId = auth.currentUser.uid;
 
-    // 1. Listen to Properties Data (Calculates total properties and bed capacities)
+    const recalculateOccupancy = () => {
+      const beds = propertiesDataRef.current.totalBeds;
+      const active = tenantsDataRef.current.active;
+      const pending = tenantsDataRef.current.pending;
+      const propertiesCount = propertiesDataRef.current.count;
+
+      const occRate = beds > 0 ? Math.min(Math.round((active / beds) * 100), 100) : 0;
+
+      setStats((prev) => ({
+        ...prev,
+        totalProperties: propertiesCount,
+        totalBeds: beds,
+        activeTenants: active,
+        pendingTenants: pending,
+        occupiedBeds: active,
+        occupancyRate: occRate,
+      }));
+    };
+
+    // 1. Listen to Properties Data (Handles root fields & room arrays)
     const unsubProperties = onSnapshot(
       query(collection(db, "properties"), where("ownerUid", "==", ownerId)),
       (snapshot) => {
         let totalCapacity = 0;
-        snapshot.docs.forEach(doc => {
+
+        snapshot.docs.forEach((doc) => {
           const data = doc.data();
-          if (data.rooms) {
-            data.rooms.forEach(room => {
-              totalCapacity += (room.capacity || 0);
+
+          // Calculate capacity from rooms array if present
+          let roomCapacity = 0;
+          if (Array.isArray(data.rooms) && data.rooms.length > 0) {
+            data.rooms.forEach((room) => {
+              roomCapacity += Number(room.capacity || room.beds || room.totalBeds || 0);
             });
           }
+
+          // Fallback to top-level capacity fields
+          const topLevelCapacity =
+            Number(data.totalBeds) ||
+            Number(data.capacity) ||
+            Number(data.beds) ||
+            Number(data.totalCapacity) ||
+            0;
+
+          totalCapacity += roomCapacity > 0 ? roomCapacity : topLevelCapacity;
         });
 
-        setStats(prev => ({
-          ...prev,
-          totalProperties: snapshot.docs.length,
+        propertiesDataRef.current = {
+          count: snapshot.docs.length,
           totalBeds: totalCapacity,
-        }));
-      }
+        };
+
+        recalculateOccupancy();
+      },
+      (error) => console.error("Error fetching properties:", error)
     );
 
-    // 2. Listen to Tenants Data (Calculates occupancy and tenant statuses)
+    // 2. Listen to Tenants Data (Case-insensitive status parsing)
     const unsubTenants = onSnapshot(
       query(collection(db, "tenants"), where("ownerUid", "==", ownerId)),
       (snapshot) => {
         let active = 0;
         let pending = 0;
 
-        snapshot.docs.forEach(doc => {
-          const status = doc.data().status;
-          if (status === "Active") active++;
-          if (status === "Pending Onboarding") pending++;
+        snapshot.docs.forEach((doc) => {
+          const data = doc.data();
+          const rawStatus = (data.status || "active").toString().trim().toLowerCase();
+
+          if (rawStatus.includes("pending")) {
+            pending++;
+          } else if (rawStatus === "inactive" || rawStatus === "archived") {
+            // Exclude inactive tenants
+          } else {
+            // Count "active", "occupied", or undefined as active tenants
+            active++;
+          }
         });
 
-        setStats(prev => {
-          // Prevent division by zero
-          const occRate = prev.totalBeds > 0 ? Math.round((active / prev.totalBeds) * 100) : 0;
-          return {
-            ...prev,
-            activeTenants: active,
-            pendingTenants: pending,
-            occupiedBeds: active, // Assuming 1 active tenant = 1 occupied bed
-            occupancyRate: occRate
-          };
-        });
-      }
+        tenantsDataRef.current = { active, pending };
+        recalculateOccupancy();
+      },
+      (error) => console.error("Error fetching tenants:", error)
     );
 
     // 3. Listen to Caretakers Data
     const unsubCaretakers = onSnapshot(
       query(collection(db, "users"), where("ownerUid", "==", ownerId), where("role", "==", "caretaker")),
       (snapshot) => {
-        setStats(prev => ({ ...prev, totalCaretakers: snapshot.docs.length }));
-        setLoading(false); // End loading once core data is fetched
+        setStats((prev) => ({ ...prev, totalCaretakers: snapshot.docs.length }));
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Error fetching caretakers:", error);
+        setLoading(false);
       }
     );
-
-    // Note: Add `unsubPayments` and `unsubTickets` here later once those collections are built!
 
     return () => {
       unsubProperties();
       unsubTenants();
       unsubCaretakers();
     };
-  }, [stats.totalBeds]); // Re-run tenant calculation if total beds change
+  }, []);
 
   const pendingTickets = tickets.filter((t) => t.status !== "Resolved").slice(0, 3);
   const recentPayments = payments.slice(0, 4);
