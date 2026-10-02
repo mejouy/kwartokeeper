@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
+import HistoryIcon from "@mui/icons-material/History";
+import CloseIcon from "@mui/icons-material/Close";
 import {
   Box, Drawer, AppBar,
   Toolbar,
@@ -109,9 +111,12 @@ export default function OwnerDashboard() {
 
   // Dialog States
   const [openNewTicketModal, setOpenNewTicketModal] = useState(false);
-  const [selectedTicket, setSelectedTicket] = useState(null);
-  const [openUpdateTicketModal, setOpenUpdateTicketModal] = useState(false);
-  const [openRecordPaymentModal, setOpenRecordPaymentModal] = useState(false);
+const [selectedTicket, setSelectedTicket] = useState(null);
+const [openUpdateTicketModal, setOpenUpdateTicketModal] = useState(false);
+const [openRecordPaymentModal, setOpenRecordPaymentModal] = useState(false);
+
+const [selectedTenant, setSelectedTenant] = useState(null);
+const [openTenantPaymentHistory, setOpenTenantPaymentHistory] = useState(false);
 
   // Maintenance Ticket Forms
   const [newTicket, setNewTicket] = useState({
@@ -133,15 +138,18 @@ export default function OwnerDashboard() {
 
   // Record Payment Form
   const [newPayment, setNewPayment] = useState({
-    tenantId: "",
-    propertyId: "",
-    roomNumber: "",
-    amount: "",
-    paymentMethod: "GCash",
-    periodMonth: "September 2026",
-    status: "Paid",
-    remarks: "",
-  });
+  tenantId: "",
+  propertyId: "",
+  roomNumber: "",
+  amount: "",
+  paymentMethod: "GCash",
+  periodMonth: new Date().toLocaleString("en-US", {
+    month: "long",
+    year: "numeric",
+  }),
+  status: "Paid",
+  remarks: "",
+});
 
   const handleDrawerToggle = () => setMobileOpen(!mobileOpen);
 
@@ -320,43 +328,121 @@ export default function OwnerDashboard() {
   };
 
   // Handler: Record Tenant Payment
-  const handleRecordPayment = async () => {
-    if (!newPayment.tenantId || !newPayment.amount) {
-      alert("Please select a Tenant and enter the Amount.");
+ const handleRecordPayment = async () => {
+  if (!newPayment.tenantId || !newPayment.amount) {
+    alert("Please select a Tenant and enter the Amount.");
+    return;
+  }
+
+  const amount = Number(newPayment.amount);
+
+  if (amount <= 0) {
+    alert("Payment amount must be greater than ₱0.");
+    return;
+  }
+
+  try {
+    const selectedTenant = tenants.find(
+      (t) => t.id === newPayment.tenantId
+    );
+
+    if (!selectedTenant) {
+      alert("Selected tenant could not be found.");
       return;
     }
 
-    try {
-      const selectedTenant = tenants.find((t) => t.id === newPayment.tenantId);
-      const selectedProp = properties.find((p) => p.id === selectedTenant?.propertyId || newPayment.propertyId);
+    // Automatically get the tenant's property
+    const selectedProp = properties.find(
+      (p) => p.id === selectedTenant.propertyId
+    );
 
-      await addDoc(collection(db, "payments"), {
-        ...newPayment,
-        ownerUid: currentUser.uid,
-        tenantName: selectedTenant?.fullName || selectedTenant?.name || "Tenant",
-        propertyName: selectedProp?.propertyName || selectedProp?.name || "Dormitory",
-        roomNumber: selectedTenant?.roomNumber || newPayment.roomNumber || "N/A",
-        amount: Number(newPayment.amount) || 0,
-        paymentDate: serverTimestamp(),
-        createdAt: serverTimestamp(),
-      });
+    // Automatically get room information from tenant
+    const roomNumber =
+      selectedTenant.roomNumber ||
+      selectedTenant.roomId ||
+      newPayment.roomNumber ||
+      "N/A";
 
-      setOpenRecordPaymentModal(false);
-      setNewPayment({
-        tenantId: "",
-        propertyId: "",
-        roomNumber: "",
-        amount: "",
-        paymentMethod: "GCash",
-        periodMonth: "September 2026",
-        status: "Paid",
-        remarks: "",
-      });
-    } catch (err) {
-      console.error("Error logging payment:", err);
-      alert("Failed to record payment.");
+    // Check whether this tenant already has a payment
+    // for the selected billing period
+    const existingPayment = payments.find(
+      (p) =>
+        p.tenantId === selectedTenant.id &&
+        p.periodMonth === newPayment.periodMonth
+    );
+
+    if (existingPayment) {
+      const confirmDuplicate = window.confirm(
+        `${selectedTenant.fullName || selectedTenant.name} already has a payment recorded for ${newPayment.periodMonth}.\n\nDo you want to record another payment?`
+      );
+
+      if (!confirmDuplicate) {
+        return;
+      }
     }
-  };
+
+    await addDoc(collection(db, "payments"), {
+      tenantId: selectedTenant.id,
+
+      // Automatically saved from tenant information
+      tenantName:
+        selectedTenant.fullName ||
+        selectedTenant.name ||
+        "Tenant",
+
+      propertyId:
+        selectedTenant.propertyId ||
+        newPayment.propertyId ||
+        "",
+
+      propertyName:
+        selectedProp?.propertyName ||
+        selectedProp?.name ||
+        selectedTenant.propertyName ||
+        "Dormitory",
+
+      roomNumber,
+
+      // Payment information entered by owner
+      amount,
+      paymentMethod: newPayment.paymentMethod,
+      periodMonth: newPayment.periodMonth,
+      status: newPayment.status,
+      remarks: newPayment.remarks,
+
+      // Owner/account information
+      ownerUid: currentUser.uid,
+
+      // Timestamps
+      paymentDate: serverTimestamp(),
+      createdAt: serverTimestamp(),
+    });
+
+    alert("Payment recorded successfully.");
+
+    // Close modal
+    setOpenRecordPaymentModal(false);
+
+    // Reset form
+    setNewPayment({
+      tenantId: "",
+      propertyId: "",
+      roomNumber: "",
+      amount: "",
+      paymentMethod: "GCash",
+      periodMonth: new Date().toLocaleString("en-US", {
+        month: "long",
+        year: "numeric",
+      }),
+      status: "Paid",
+      remarks: "",
+    });
+
+  } catch (err) {
+    console.error("Error logging payment:", err);
+    alert("Failed to record payment.");
+  }
+};
 
   // Handler: Update Ticket Status
   const handleSaveTicketUpdate = async () => {
@@ -557,9 +643,17 @@ export default function OwnerDashboard() {
           <PropertiesTab properties={properties} navigate={navigate} />
         )}
 
-        {activeTab === "tenants" && (
-          <TenantsTab tenants={tenants} navigate={navigate} searchQuery={searchQuery} setSearchQuery={setSearchQuery} />
-        )}
+       {activeTab === "tenants" && (
+  <TenantsTab
+    tenants={tenants}
+    payments={payments}
+    navigate={navigate}
+    searchQuery={searchQuery}
+    setSearchQuery={setSearchQuery}
+    setSelectedTenant={setSelectedTenant}
+    setOpenTenantPaymentHistory={setOpenTenantPaymentHistory}
+  />
+)}
 
         {activeTab === "payments" && (
           <PaymentsTab
@@ -592,27 +686,107 @@ export default function OwnerDashboard() {
         <DialogContent dividers>
           <Stack spacing={2.5} sx={{ pt: 1 }}>
             <FormControl fullWidth>
-              <InputLabel>Select Tenant</InputLabel>
-              <Select
-                value={newPayment.tenantId}
-                label="Select Tenant"
-                onChange={(e) => {
-                  const t = tenants.find((tenant) => tenant.id === e.target.value);
-                  setNewPayment({
-                    ...newPayment,
-                    tenantId: e.target.value,
-                    propertyId: t?.propertyId || "",
-                    roomNumber: t?.roomNumber || "",
-                  });
-                }}
-              >
-                {tenants.map((t) => (
-                  <MenuItem key={t.id} value={t.id}>
-                    {t.fullName || t.name} {t.roomNumber ? `(Room ${t.roomNumber})` : ""}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
+  <InputLabel>Tenant</InputLabel>
+
+  <Select
+    value={newPayment.tenantId}
+    label="Tenant"
+    onChange={(e) => {
+      const selectedTenant = tenants.find(
+        (t) => t.id === e.target.value
+      );
+
+      setNewPayment({
+        ...newPayment,
+        tenantId: e.target.value,
+
+        // Automatically get these from the tenant
+        propertyId: selectedTenant?.propertyId || "",
+        roomNumber:
+          selectedTenant?.roomNumber ||
+          selectedTenant?.roomId ||
+          "",
+      });
+    }}
+  >
+    {tenants.map((tenant) => (
+      <MenuItem key={tenant.id} value={tenant.id}>
+        {tenant.fullName || tenant.name || "Unnamed Tenant"}
+      </MenuItem>
+    ))}
+  </Select>
+</FormControl>
+
+{newPayment.tenantId && (() => {
+  const selectedTenant = tenants.find(
+    (t) => t.id === newPayment.tenantId
+  );
+
+  const selectedProperty = properties.find(
+    (p) => p.id === selectedTenant?.propertyId
+  );
+
+  const tenantPayments = payments.filter(
+    (p) => p.tenantId === newPayment.tenantId
+  );
+
+  const lastPayment = [...tenantPayments]
+    .sort((a, b) => {
+      const dateA = a.paymentDate?.seconds || 0;
+      const dateB = b.paymentDate?.seconds || 0;
+      return dateB - dateA;
+    })[0];
+
+  return (
+    <Paper
+      variant="outlined"
+      sx={{
+        p: 2,
+        borderRadius: 2,
+        bgcolor: "background.default",
+      }}
+    >
+      <Typography
+        variant="subtitle2"
+        fontWeight="700"
+        sx={{ mb: 1.5 }}
+      >
+        Tenant Information
+      </Typography>
+
+      <Stack spacing={0.75}>
+        <Typography variant="body2">
+          <strong>Property:</strong>{" "}
+          {selectedProperty?.propertyName ||
+            selectedProperty?.name ||
+            selectedTenant?.propertyName ||
+            "Dormitory"}
+        </Typography>
+
+        <Typography variant="body2">
+          <strong>Room:</strong>{" "}
+          {selectedTenant?.roomNumber ||
+            selectedTenant?.roomId ||
+            "Unassigned"}
+        </Typography>
+
+        <Typography variant="body2">
+          <strong>Previous Payments:</strong>{" "}
+          {tenantPayments.length}
+        </Typography>
+
+        <Typography variant="body2">
+          <strong>Last Payment:</strong>{" "}
+          {lastPayment
+            ? `₱${Number(
+                lastPayment.amount || 0
+              ).toLocaleString()}`
+            : "No payment recorded"}
+        </Typography>
+      </Stack>
+    </Paper>
+  );
+})()}
 
             <Grid container spacing={2}>
               <Grid size={{ xs: 6 }}>
@@ -686,6 +860,365 @@ export default function OwnerDashboard() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* DIALOG: Tenant Payment History */}
+{selectedTenant && (
+  <Dialog
+    open={openTenantPaymentHistory}
+    onClose={() => {
+      setOpenTenantPaymentHistory(false);
+      setSelectedTenant(null);
+    }}
+    maxWidth="md"
+    fullWidth
+  >
+    <DialogTitle
+      sx={{
+        display: "flex",
+        justifyContent: "space-between",
+        alignItems: "center",
+        fontWeight: 800,
+      }}
+    >
+      <Box>
+        <Typography variant="h6" fontWeight="800">
+          {selectedTenant.fullName || selectedTenant.name}
+        </Typography>
+
+        <Typography variant="body2" color="text.secondary">
+          {selectedTenant.propertyName || "Dormitory"}
+          {selectedTenant.roomNumber
+            ? ` — Room ${selectedTenant.roomNumber}`
+            : ""}
+        </Typography>
+      </Box>
+
+      <IconButton
+        onClick={() => {
+          setOpenTenantPaymentHistory(false);
+          setSelectedTenant(null);
+        }}
+      >
+        <CloseIcon />
+      </IconButton>
+    </DialogTitle>
+
+    <DialogContent dividers>
+      {(() => {
+        const tenantPayments = payments
+          .filter(
+            (p) =>
+              p.tenantId === selectedTenant.id ||
+              (
+                p.tenantName &&
+                (
+                  p.tenantName === selectedTenant.fullName ||
+                  p.tenantName === selectedTenant.name
+                )
+              )
+          )
+          .sort((a, b) => {
+            const dateA = a.paymentDate?.seconds
+              ? a.paymentDate.seconds
+              : a.createdAt?.seconds || 0;
+
+            const dateB = b.paymentDate?.seconds
+              ? b.paymentDate.seconds
+              : b.createdAt?.seconds || 0;
+
+            return dateB - dateA;
+          });
+
+        const lastPayment = tenantPayments[0];
+
+        const totalPaid = tenantPayments
+          .filter((p) => p.status === "Paid")
+          .reduce(
+            (total, p) => total + (Number(p.amount) || 0),
+            0
+          );
+
+        const formatDate = (payment) => {
+          const timestamp =
+            payment?.paymentDate || payment?.createdAt;
+
+          if (!timestamp) return "No date";
+
+          try {
+            const date = timestamp.toDate
+              ? timestamp.toDate()
+              : new Date(timestamp.seconds * 1000);
+
+            return date.toLocaleDateString("en-US", {
+              month: "short",
+              day: "numeric",
+              year: "numeric",
+            });
+          } catch {
+            return "No date";
+          }
+        };
+
+        return (
+          <Box>
+            {/* SUMMARY */}
+            <Grid container spacing={2} sx={{ mb: 3 }}>
+              <Grid size={{ xs: 12, sm: 4 }}>
+                <Card
+                  elevation={0}
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "divider",
+                    borderRadius: 2,
+                  }}
+                >
+                  <CardContent>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      fontWeight="600"
+                    >
+                      Last Payment
+                    </Typography>
+
+                    <Typography
+                      variant="h5"
+                      fontWeight="800"
+                      color="success.main"
+                    >
+                      {lastPayment
+                        ? `₱${Number(
+                            lastPayment.amount || 0
+                          ).toLocaleString()}`
+                        : "₱0"}
+                    </Typography>
+
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                    >
+                      {lastPayment?.periodMonth || "No payment"}
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              <Grid size={{ xs: 12, sm: 4 }}>
+                <Card
+                  elevation={0}
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "divider",
+                    borderRadius: 2,
+                  }}
+                >
+                  <CardContent>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      fontWeight="600"
+                    >
+                      Total Payments
+                    </Typography>
+
+                    <Typography variant="h5" fontWeight="800">
+                      {tenantPayments.length}
+                    </Typography>
+
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                    >
+                      Payment records
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+
+              <Grid size={{ xs: 12, sm: 4 }}>
+                <Card
+                  elevation={0}
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "divider",
+                    borderRadius: 2,
+                  }}
+                >
+                  <CardContent>
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                      fontWeight="600"
+                    >
+                      Total Paid
+                    </Typography>
+
+                    <Typography
+                      variant="h5"
+                      fontWeight="800"
+                      color="primary.main"
+                    >
+                      ₱{totalPaid.toLocaleString()}
+                    </Typography>
+
+                    <Typography
+                      variant="caption"
+                      color="text.secondary"
+                    >
+                      Completed payments
+                    </Typography>
+                  </CardContent>
+                </Card>
+              </Grid>
+            </Grid>
+
+            {/* HISTORY TABLE */}
+            <Typography
+              variant="subtitle1"
+              fontWeight="800"
+              sx={{ mb: 1.5 }}
+            >
+              Payment History
+            </Typography>
+
+            <TableContainer>
+              <Table>
+                <TableHead sx={{ bgcolor: "background.default" }}>
+                  <TableRow>
+                    <TableCell>
+                      <strong>Date</strong>
+                    </TableCell>
+
+                    <TableCell>
+                      <strong>Billing Period</strong>
+                    </TableCell>
+
+                    <TableCell>
+                      <strong>Amount</strong>
+                    </TableCell>
+
+                    <TableCell>
+                      <strong>Method</strong>
+                    </TableCell>
+
+                    <TableCell>
+                      <strong>Status</strong>
+                    </TableCell>
+
+                    <TableCell>
+                      <strong>Remarks</strong>
+                    </TableCell>
+                  </TableRow>
+                </TableHead>
+
+                <TableBody>
+                  {tenantPayments.length === 0 ? (
+                    <TableRow>
+                      <TableCell
+                        colSpan={6}
+                        align="center"
+                        sx={{ py: 5 }}
+                      >
+                        <ReceiptLongIcon
+                          sx={{
+                            fontSize: 45,
+                            color: "text.disabled",
+                            mb: 1,
+                          }}
+                        />
+
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                        >
+                          This tenant has no payment records yet.
+                        </Typography>
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    tenantPayments.map((payment) => (
+                      <TableRow key={payment.id} hover>
+                        <TableCell>
+                          {formatDate(payment)}
+                        </TableCell>
+
+                        <TableCell>
+                          {payment.periodMonth || "N/A"}
+                        </TableCell>
+
+                        <TableCell>
+                          <Typography
+                            fontWeight="800"
+                            color="success.main"
+                          >
+                            ₱
+                            {Number(
+                              payment.amount || 0
+                            ).toLocaleString()}
+                          </Typography>
+                        </TableCell>
+
+                        <TableCell>
+                          <Chip
+                            label={
+                              payment.paymentMethod || "Cash"
+                            }
+                            size="small"
+                            variant="outlined"
+                          />
+                        </TableCell>
+
+                        <TableCell>
+                          <Chip
+                            label={payment.status || "Paid"}
+                            size="small"
+                            color={
+                              payment.status === "Paid"
+                                ? "success"
+                                : payment.status === "Overdue"
+                                ? "error"
+                                : "warning"
+                            }
+                          />
+                        </TableCell>
+
+                        <TableCell>
+                          {payment.remarks || "—"}
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </Box>
+        );
+      })()}
+    </DialogContent>
+
+    <DialogActions sx={{ p: 2 }}>
+      <Button
+        onClick={() => {
+          setOpenTenantPaymentHistory(false);
+          setSelectedTenant(null);
+        }}
+      >
+        Close
+      </Button>
+
+      <Button
+        variant="contained"
+        startIcon={<ReceiptLongIcon />}
+        onClick={() => {
+          setOpenTenantPaymentHistory(false);
+          setOpenRecordPaymentModal(true);
+        }}
+      >
+        Record Payment
+      </Button>
+    </DialogActions>
+  </Dialog>
+)}
 
       {/* DIALOG: Log New Ticket */}
       <Dialog open={openNewTicketModal} onClose={() => setOpenNewTicketModal(false)} maxWidth="sm" fullWidth>
@@ -993,14 +1526,110 @@ function PropertiesTab({ properties, navigate }) {
 }
 
 /* --- TENANTS TAB --- */
-function TenantsTab({ tenants, navigate, searchQuery, setSearchQuery }) {
+function TenantsTab({
+  tenants,
+  payments,
+  navigate,
+  searchQuery,
+  setSearchQuery,
+  setSelectedTenant,
+  setOpenTenantPaymentHistory,
+}) {
+  const getTenantPayments = (tenant) => {
+    return payments
+      .filter((p) => {
+        return (
+          p.tenantId === tenant.id ||
+          (
+            p.tenantName &&
+            (p.tenantName === tenant.fullName || p.tenantName === tenant.name)
+          )
+        );
+      })
+      .sort((a, b) => {
+        const dateA = a.paymentDate?.seconds
+          ? a.paymentDate.seconds
+          : a.createdAt?.seconds
+          ? a.createdAt.seconds
+          : 0;
+
+        const dateB = b.paymentDate?.seconds
+          ? b.paymentDate.seconds
+          : b.createdAt?.seconds
+          ? b.createdAt.seconds
+          : 0;
+
+        return dateB - dateA;
+      });
+  };
+
+  const filteredTenants = tenants.filter((tenant) =>
+    (tenant.fullName || tenant.name || "")
+      .toLowerCase()
+      .includes(searchQuery.toLowerCase())
+  );
+
+  const formatPaymentDate = (payment) => {
+    const timestamp = payment?.paymentDate || payment?.createdAt;
+
+    if (!timestamp) return "No date";
+
+    try {
+      const date = timestamp.toDate
+        ? timestamp.toDate()
+        : new Date(timestamp.seconds * 1000);
+
+      return date.toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      });
+    } catch {
+      return "No date";
+    }
+  };
+
   return (
-    <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
-        <Typography variant="h6" fontWeight="700">Enrolled Tenants Directory</Typography>
+    <Paper
+      elevation={0}
+      sx={{
+        p: 3,
+        border: "1px solid",
+        borderColor: "divider",
+        borderRadius: 3,
+      }}
+    >
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          mb: 3,
+        }}
+      >
+        <Box>
+          <Typography variant="h6" fontWeight="700">
+            Enrolled Tenants Directory
+          </Typography>
+
+          <Typography variant="body2" color="text.secondary">
+            View tenants, latest payments, and complete payment history
+          </Typography>
+        </Box>
+
         <Stack direction="row" spacing={2}>
-          <TextField size="small" placeholder="Search tenant name..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} />
-          <Button variant="contained" startIcon={<PersonAddIcon />} onClick={() => navigate("/owner/tenants/register")}>
+          <TextField
+            size="small"
+            placeholder="Search tenant name..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+
+          <Button
+            variant="contained"
+            startIcon={<PersonAddIcon />}
+            onClick={() => navigate("/owner/tenants/register")}
+          >
             Register Tenant
           </Button>
         </Stack>
@@ -1010,82 +1639,203 @@ function TenantsTab({ tenants, navigate, searchQuery, setSearchQuery }) {
         <Table>
           <TableHead sx={{ bgcolor: "background.default" }}>
             <TableRow>
-              <TableCell><strong>Tenant Name</strong></TableCell>
-              <TableCell><strong>Property</strong></TableCell>
-              <TableCell><strong>Room</strong></TableCell>
-              <TableCell><strong>Status</strong></TableCell>
-              <TableCell align="right"><strong>Action</strong></TableCell>
+              <TableCell>
+                <strong>Tenant Name</strong>
+              </TableCell>
+
+              <TableCell>
+                <strong>Property</strong>
+              </TableCell>
+
+              <TableCell>
+                <strong>Room</strong>
+              </TableCell>
+
+              <TableCell>
+                <strong>Status</strong>
+              </TableCell>
+
+              <TableCell>
+                <strong>Last Payment</strong>
+              </TableCell>
+
+              <TableCell>
+                <strong>Payment Status</strong>
+              </TableCell>
+
+              <TableCell align="right">
+                <strong>Action</strong>
+              </TableCell>
             </TableRow>
           </TableHead>
+
           <TableBody>
-            {tenants.map((t) => (
-              <TableRow key={t.id} hover>
-                <TableCell><Typography variant="subtitle2" fontWeight="700">{t.fullName || t.name}</Typography></TableCell>
-                <TableCell>{t.propertyName || "Dormitory"}</TableCell>
-                <TableCell>{t.roomNumber ? `Room ${t.roomNumber}` : <Chip label="Unassigned" size="small" color="warning" />}</TableCell>
-                <TableCell><Chip label={t.status || "Active"} color={t.status === "Pending Onboarding" ? "warning" : "success"} size="small" /></TableCell>
-                <TableCell align="right">
-                  <Button size="small" onClick={() => navigate(`/owner/tenants/${t.id}`)}>Manage</Button>
+            {filteredTenants.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} align="center" sx={{ py: 6 }}>
+                  <PeopleIcon
+                    sx={{
+                      fontSize: 48,
+                      color: "text.disabled",
+                      mb: 1,
+                    }}
+                  />
+
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                  >
+                    No tenants found.
+                  </Typography>
                 </TableCell>
               </TableRow>
-            ))}
+            ) : (
+              filteredTenants.map((tenant) => {
+                const tenantPayments = getTenantPayments(tenant);
+                const lastPayment = tenantPayments[0];
+
+                return (
+                  <TableRow key={tenant.id} hover>
+                    {/* TENANT */}
+                    <TableCell>
+                      <Typography
+                        variant="subtitle2"
+                        fontWeight="700"
+                      >
+                        {tenant.fullName || tenant.name}
+                      </Typography>
+                    </TableCell>
+
+                    {/* PROPERTY */}
+                    <TableCell>
+                      {tenant.propertyName || "Dormitory"}
+                    </TableCell>
+
+                    {/* ROOM */}
+                    <TableCell>
+                      {tenant.roomNumber ? (
+                        `Room ${tenant.roomNumber}`
+                      ) : (
+                        <Chip
+                          label="Unassigned"
+                          size="small"
+                          color="warning"
+                        />
+                      )}
+                    </TableCell>
+
+                    {/* TENANT STATUS */}
+                    <TableCell>
+                      <Chip
+                        label={tenant.status || "Active"}
+                        color={
+                          tenant.status === "Pending Onboarding"
+                            ? "warning"
+                            : "success"
+                        }
+                        size="small"
+                      />
+                    </TableCell>
+
+                    {/* LAST PAYMENT */}
+                    <TableCell>
+                      {lastPayment ? (
+                        <Box>
+                          <Typography
+                            variant="subtitle2"
+                            fontWeight="800"
+                            color="success.main"
+                          >
+                            ₱
+                            {Number(
+                              lastPayment.amount || 0
+                            ).toLocaleString()}
+                          </Typography>
+
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                          >
+                            {lastPayment.periodMonth || "N/A"}
+                          </Typography>
+
+                          <Typography
+                            variant="caption"
+                            color="text.secondary"
+                            display="block"
+                          >
+                            {formatPaymentDate(lastPayment)}
+                          </Typography>
+                        </Box>
+                      ) : (
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                        >
+                          No payment yet
+                        </Typography>
+                      )}
+                    </TableCell>
+
+                    {/* PAYMENT STATUS */}
+                    <TableCell>
+                      {lastPayment ? (
+                        <Chip
+                          label={lastPayment.status || "Paid"}
+                          size="small"
+                          color={
+                            lastPayment.status === "Paid"
+                              ? "success"
+                              : lastPayment.status === "Overdue"
+                              ? "error"
+                              : "warning"
+                          }
+                        />
+                      ) : (
+                        <Chip
+                          label="No Record"
+                          size="small"
+                          variant="outlined"
+                        />
+                      )}
+                    </TableCell>
+
+                    {/* ACTION */}
+                    <TableCell align="right">
+                      <Stack
+                        direction="row"
+                        spacing={1}
+                        justifyContent="flex-end"
+                      >
+                        <Button
+                          size="small"
+                          startIcon={<HistoryIcon />}
+                          variant="outlined"
+                          onClick={() => {
+                            setSelectedTenant(tenant);
+                            setOpenTenantPaymentHistory(true);
+                          }}
+                        >
+                          Payment History
+                        </Button>
+
+                        <Button
+                          size="small"
+                          onClick={() =>
+                            navigate(`/owner/tenants/${tenant.id}`)
+                          }
+                        >
+                          Manage
+                        </Button>
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+                );
+              })
+            )}
           </TableBody>
         </Table>
       </TableContainer>
-    </Paper>
-  );
-}
-
-/* --- CARETAKERS TAB --- */
-function CaretakersTab({ caretakers, navigate }) {
-  return (
-    <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 3 }}>
-        <Box>
-          <Typography variant="h6" fontWeight="700">Assigned Caretakers</Typography>
-          <Typography variant="body2" color="text.secondary">Manage staff, assignments, and invitations</Typography>
-        </Box>
-        <Stack direction="row" spacing={1.5}>
-          <Button variant="outlined" startIcon={<FormatListNumberedIcon />} onClick={() => navigate("/owner/caretakers")}>
-            Full List (`CaretakerList`)
-          </Button>
-          <Button variant="outlined" color="info" startIcon={<MailOutlinedIcon />} onClick={() => navigate("/owner/caretakers/invited")}>
-            Pending Invites
-          </Button>
-          <Button variant="contained" startIcon={<GroupAddIcon />} onClick={() => navigate("/owner/caretakers/invite")}>
-            Invite Caretaker (`InviteCaretaker`)
-          </Button>
-        </Stack>
-      </Box>
-
-      <Grid container spacing={2}>
-        {caretakers.length === 0 ? (
-          <Grid size={{ xs: 12 }}>
-            <Box sx={{ p: 4, textAlign: "center", bgcolor: "background.default", borderRadius: 2 }}>
-              <Typography variant="body2" color="text.secondary" mb={2}>
-                No caretakers registered yet. Click "Invite Caretaker" to send an onboarding invitation.
-              </Typography>
-              <Button variant="contained" size="small" startIcon={<GroupAddIcon />} onClick={() => navigate("/owner/caretakers/invite")}>
-                Invite First Caretaker
-              </Button>
-            </Box>
-          </Grid>
-        ) : (
-          caretakers.map((c) => (
-            <Grid size={{ xs: 12, sm: 6, md: 4 }} key={c.id}>
-              <Card variant="outlined" sx={{ borderRadius: 2 }}>
-                <CardContent sx={{ display: "flex", alignItems: "center", gap: 2 }}>
-                  <Avatar sx={{ bgcolor: "secondary.main" }}>{c.name?.[0] || "C"}</Avatar>
-                  <Box>
-                    <Typography variant="subtitle1" fontWeight="700">{c.name || c.email}</Typography>
-                    <Typography variant="caption" color="text.secondary">{c.assignedProperty || "All Properties"}</Typography>
-                  </Box>
-                </CardContent>
-              </Card>
-            </Grid>
-          ))
-        )}
-      </Grid>
     </Paper>
   );
 }
