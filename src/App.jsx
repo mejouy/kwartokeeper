@@ -8,11 +8,12 @@ import OwnerDashboard from './pages/owner/OwnerDashboard';
 import InviteCaretaker from './pages/owner/InviteCaretaker';
 import CaretakerList from './pages/owner/CaretakerList';
 import CaretakerInvited from './pages/owner/CaretakerInvited';
+import Payments from './pages/tenant/Payments';
+import TenantDetails from './pages/owner/TenantDetails';
 
 const TenantDashboard = () => <div>Tenant Dashboard</div>;
 const CaretakerDashboard = () => <div>Caretaker Dashboard</div>;
 const PropertyDetailPlaceholder = () => <div>Property Details</div>;
-const TenantDetailPlaceholder = () => <div>Tenant Details</div>;
 
 function App() {
   return (
@@ -29,11 +30,12 @@ function App() {
         <Route path="/register-sub-user" element={<RegisterTenant />} />
         <Route path="/owner/tenants/add" element={<RegisterTenant />} />
         <Route path="/owner/tenants/register" element={<RegisterTenant />} />
-        <Route path="/owner/tenants/:tenantId" element={<TenantDetailPlaceholder />} />
+        <Route path="/owner/tenants/:tenantId" element={<TenantDetails />} />
         <Route path="/owner/properties/:propertyId" element={<PropertyDetailPlaceholder />} />
         <Route path="/owner/caretakers" element={<CaretakerList />} />
         <Route path="/owner/caretakers/invite" element={<InviteCaretaker />} />
         <Route path="/owner/caretakers/invited" element={<CaretakerInvited />} />
+         <Route path="/tenant/payments" element={<Payments />} />
       </Routes>
     </Router>
   );
