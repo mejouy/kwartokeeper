@@ -8,7 +8,7 @@ import OwnerDashboard from './pages/owner/OwnerDashboard';
 import InviteCaretaker from './pages/owner/InviteCaretaker';
 import CaretakerList from './pages/owner/CaretakerList';
 import CaretakerInvited from './pages/owner/CaretakerInvited';
-import Payments from './pages/tenant/Payments';
+import Payments from './pages/tenant/payments';
 import TenantDetails from './pages/owner/TenantDetails';
 
 const TenantDashboard = () => <div>Tenant Dashboard</div>;
@@ -27,7 +27,6 @@ function App() {
         <Route path="/owner/dashboard" element={<OwnerDashboard />} />
         <Route path="/tenant/dashboard" element={<TenantDashboard />} />
         <Route path="/caretaker/dashboard" element={<CaretakerDashboard />} />
-        <Route path="/register-sub-user" element={<RegisterTenant />} />
         <Route path="/owner/tenants/add" element={<RegisterTenant />} />
         <Route path="/owner/tenants/register" element={<RegisterTenant />} />
         <Route path="/owner/tenants/:tenantId" element={<TenantDetails />} />
