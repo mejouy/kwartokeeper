@@ -70,25 +70,38 @@ export function buildPerFloorRooms({ floorConfigs, namingPattern }) {
   const rooms = [];
   let globalIndex = 1;
 
-  floorConfigs.forEach(
-    ({ floorNumber, numberOfRooms, capacityPerRoom, monthlyRate }) => {
-      for (let i = 1; i <= numberOfRooms; i++) {
+  floorConfigs.forEach((floorConfig, floorIndex) => {
+    const floorNumber = Number(floorConfig.floorNumber) || floorIndex + 1;
+    const roomGroups = Array.isArray(floorConfig.roomGroups)
+      ? floorConfig.roomGroups
+      : [floorConfig];
+    let roomIndexOnFloor = 1;
+
+    roomGroups.forEach((group) => {
+      const numberOfRooms = Math.max(0, Number(group.numberOfRooms) || 0);
+      const capacityPerRoom = Math.max(0, Number(group.capacityPerRoom) || 0);
+      const monthlyRate = Math.max(0, Number(group.monthlyRate) || 0);
+
+      for (let i = 0; i < numberOfRooms; i++) {
         rooms.push({
           roomName: generateRoomName(
             namingPattern,
             floorNumber,
-            i,
+            roomIndexOnFloor,
             globalIndex,
           ),
           floor: floorNumber,
           capacity: capacityPerRoom,
           monthlyRatePerBed: monthlyRate,
+          roomType: group.roomType || "Bedspace",
           occupiedBeds: 0,
         });
+        roomIndexOnFloor++;
         globalIndex++;
       }
-    },
-  );
+    });
+  });
+
   return rooms;
 }
 
@@ -101,10 +114,17 @@ export function computeSummary(rooms) {
   const totalBeds = rooms.reduce((sum, r) => sum + r.capacity, 0);
 
   const perFloorBreakdown = rooms.reduce((acc, r) => {
-    if (!acc[r.floor])
-      acc[r.floor] = { rooms: 0, beds: 0, rate: r.monthlyRatePerBed };
+    if (!acc[r.floor]) {
+      acc[r.floor] = { rooms: 0, beds: 0, rate: r.monthlyRatePerBed, roomTypes: {} };
+    }
     acc[r.floor].rooms += 1;
     acc[r.floor].beds += r.capacity;
+    const roomType = r.roomType || "Bedspace";
+    if (!acc[r.floor].roomTypes[roomType]) {
+      acc[r.floor].roomTypes[roomType] = { rooms: 0, beds: 0 };
+    }
+    acc[r.floor].roomTypes[roomType].rooms += 1;
+    acc[r.floor].roomTypes[roomType].beds += r.capacity;
     return acc;
   }, {});
 

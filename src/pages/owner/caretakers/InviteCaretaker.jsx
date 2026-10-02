@@ -35,10 +35,10 @@ import {
   CircularProgress,
 } from "@mui/material";
 import { collection, query, where, getDocs } from "firebase/firestore";
-import { db } from "../../config/firebase";
-import { useAuth } from "../../context/AuthContext";
-import { createCaretakerAccount } from "../../services/caretakerService";
-import { generateTempPassword } from "../../utils/generateTempPassword";
+import { db } from "../../../config/firebase";
+import { useAuth } from "../../../context/AuthContext";
+import { createCaretakerAccount } from "../../../services/caretakerService";
+import { generateTempPassword } from "../../../utils/generateTempPassword";
 
 const PERMISSION_OPTIONS = [
   {

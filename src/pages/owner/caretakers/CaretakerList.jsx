@@ -28,8 +28,8 @@ import {
   doc,
   getDoc,
 } from "firebase/firestore";
-import { db } from "../../config/firebase";
-import { useAuth } from "../../context/AuthContext";
+import { db } from "../../../config/firebase";
+import { useAuth } from "../../../context/AuthContext";
 
 const PERMISSION_LABELS = {
   manageTenants: "Manage Tenants",

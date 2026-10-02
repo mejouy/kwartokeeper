@@ -117,6 +117,7 @@ export const saveProperty = async (
       roomName: String(room.roomNumber || room.roomName || `Room ${index + 1}`),
       floor: Number(room.floorNumber || room.floor) || 1,
       capacity: Number(room.capacity) || 1,
+      roomType: room.roomType || "Bedspace",
       monthlyRatePerBed: Number(room.rate || room.monthlyRatePerBed) || 0,
       occupiedBeds: 0,
     })),
