@@ -1,48 +1,132 @@
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './context/AuthContext';
+
+// --- Auth & Onboarding ---
 import Login from './pages/auth/Login';
 import OwnerRegister from './pages/auth/OwnerRegister';
 import PropertyWizard from './pages/onboarding/PropertyWizard';
-import RegisterTenant from './pages/owner/RegisterTenant';
 import WizardSuccess from './pages/onboarding/components/WizardSuccess';
-import OwnerDashboard from './pages/owner/OwnerDashboard';
-import TenantDashboard from './pages/owner/TenantDashboard';
-import CaretakerDashboard from './pages/owner/CaretakerDashboard';
-import InviteCaretaker from './pages/owner/InviteCaretaker';
-import CaretakerList from './pages/owner/CaretakerList';
-import CaretakerInvited from './pages/owner/CaretakerInvited';
 
-const PropertyDetailPlaceholder = () => <div>Property Details</div>;
+// --- Layouts ---
+import OwnerLayout from './layouts/OwnerLayout';
+import AdminLayout from './layouts/AdminLayout';
+import CaretakerLayout from './layouts/CaretakerLayout';
+import TenantLayout from './layouts/TenantLayout';
+
+// --- Owner Pages ---
+import OwnerOverview from './pages/owner/OwnerOverview';
+
+// Properties
+import PropertyList from './pages/owner/properties/PropertyList';
+import PropertyProfile from './pages/owner/properties/PropertyProfile';
+import PropertyDetails from './pages/owner/properties/PropertyDetails'; 
+
+// Tenants
+import TenantList from './pages/owner/tenants/TenantList';
+import RegisterTenant from './pages/owner/tenants/RegisterTenant';
+import TenantOverview from './pages/owner/tenants/TenantOverview';
+
+// Caretakers
+import CaretakerList from './pages/owner/caretakers/CaretakerList';
+import InviteCaretaker from './pages/owner/caretakers/InviteCaretaker';
+import CaretakerInvited from './pages/owner/caretakers/CaretakerInvited';
+import CaretakerOverview from './pages/owner/caretakers/CaretakerOverview';
+
+// Payments & Maintenance
+import PaymentsPage from './pages/owner/PaymentsPage';
+import MaintenancePage from './pages/owner/MaintenancePage';
+
+// --- Admin Pages ---
+import AdminOverview from './pages/admin/AdminOverview';
+import ManageOwners from './pages/admin/ManageOwners';
+
+// --- Placeholders ---
 const TenantDetailPlaceholder = () => <div>Tenant Details</div>;
+
+// Admin Placeholders
+const AdminPropertiesPlaceholder = () => <div>Global Properties List</div>;
+const AdminTenantsPlaceholder = () => <div>Global Tenants List</div>;
+const AdminCaretakersPlaceholder = () => <div>Global Caretakers List</div>;
 
 function App() {
   return (
-    <AuthProvider>
-      <Router>
-        <Routes>
-          <Route path="/" element={<Navigate to="/login" replace />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/register" element={<OwnerRegister />} />
-          <Route path="/setup" element={<PropertyWizard />} />
-          <Route path="/wizard-success" element={<WizardSuccess />} />
-          <Route path="/owner/dashboard" element={<OwnerDashboard />} />
-          <Route path="/tenant/dashboard" element={<TenantDashboard />} />
-          <Route path="/caretaker/dashboard" element={<CaretakerDashboard />} />
-          <Route path="/register-tenant" element={<RegisterTenant />} />
-          <Route path="/owner/tenants/add" element={<RegisterTenant />} />
-          <Route path="/owner/tenants/register" element={<RegisterTenant />} />
-          <Route path="/owner/tenants/:tenantId" element={<TenantDetailPlaceholder />} />
-          <Route path="/owner/tenant/add" element={<RegisterTenant />} />
-          <Route path="/owner/tenant/register" element={<RegisterTenant />} />
-          <Route path="/owner/tenant/:tenantId" element={<TenantDetailPlaceholder />} />
-          <Route path="/owner/properties/:propertyId" element={<PropertyDetailPlaceholder />} />
-          <Route path="/owner/caretakers" element={<CaretakerList />} />
-          <Route path="/owner/caretakers/invite" element={<InviteCaretaker />} />
-          <Route path="/owner/caretakers/invited" element={<CaretakerInvited />} />
-          <Route path="*" element={<Navigate to="/owner/dashboard" replace />} />
-        </Routes>
-      </Router>
-    </AuthProvider>
+    <Router>
+      <Routes>
+        {/* --- Public & Auth Routes --- */}
+        <Route path="/" element={<Navigate to="/login" replace />} />
+        <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<OwnerRegister />} />
+        <Route path="/setup" element={<PropertyWizard />} />
+        <Route path="/wizard-success" element={<WizardSuccess />} />
+        
+        {/* --- External Registration Alias --- */}
+        <Route path="/register-sub-user" element={<RegisterTenant />} />
+
+        {/* --- Legacy Redirects --- */}
+        <Route path="/caretaker/dashboard" element={<Navigate to="/caretaker/overview" replace />} />
+        <Route path="/owner/dashboard" element={<Navigate to="/owner" replace />} />
+        <Route path="/admin/dashboard" element={<Navigate to="/admin/overview" replace />} />
+
+        {/* --- Tenant Routes --- */}
+        <Route path="/tenant" element={<TenantLayout />}>
+          <Route index element={<Navigate to="/tenant/dashboard" replace />} />
+          <Route path="dashboard" element={<TenantOverview section="overview" />} />
+          <Route path="payments" element={<TenantOverview section="payments" />} />
+          <Route path="maintenance" element={<MaintenancePage tenantOnly />} />
+        </Route>
+
+        {/* --- Nested Caretaker Routes --- */}
+        <Route path="/caretaker" element={<CaretakerLayout />}>
+          <Route index element={<Navigate to="/caretaker/overview" replace />} />
+          <Route path="overview" element={<CaretakerOverview section="overview" />} />
+          <Route path="properties" element={<CaretakerOverview section="properties" />} />
+          <Route path="tenants" element={<CaretakerOverview section="tenants" />} />
+          <Route path="payments" element={<PaymentsPage />} />
+          <Route path="maintenance" element={<CaretakerOverview section="maintenance" />} />
+        </Route>
+
+        {/* --- Nested Admin Routes --- */}
+        <Route path="/admin" element={<AdminLayout />}>
+          <Route index element={<Navigate to="/admin/overview" replace />} />
+          <Route path="overview" element={<AdminOverview />} />
+          <Route path="owners" element={<ManageOwners />} />
+          <Route path="properties" element={<AdminPropertiesPlaceholder />} />
+          <Route path="tenants" element={<AdminTenantsPlaceholder />} />
+          <Route path="caretakers" element={<AdminCaretakersPlaceholder />} />
+        </Route>
+
+        {/* --- Nested Owner Routes --- */}
+        <Route path="/owner" element={<OwnerLayout />}>
+          <Route index element={<OwnerOverview />} />
+
+          {/* Properties Group */}
+          <Route path="properties">
+            <Route index element={<PropertyList />} />
+            <Route path=":id" element={<PropertyProfile />} />
+            <Route path=":id/edit" element={<PropertyDetails />} />   
+          </Route>
+
+          {/* Tenants Group */}
+          <Route path="tenants">
+            <Route index element={<TenantList />} />
+            <Route path="register" element={<RegisterTenant />} />
+            <Route path="add" element={<RegisterTenant />} />
+            <Route path=":tenantId" element={<TenantDetailPlaceholder />} />
+          </Route>
+
+          {/* Caretakers Group */}
+          <Route path="caretakers">
+            <Route index element={<CaretakerList />} />
+            <Route path="invite" element={<InviteCaretaker />} />
+            <Route path="invited" element={<CaretakerInvited />} />
+          </Route>
+
+          {/* Additional Features */}
+          <Route path="payments" element={<PaymentsPage />} />
+          <Route path="maintenance" element={<MaintenancePage />} />
+        </Route>
+      </Routes>
+    </Router>
   );
 }
 
