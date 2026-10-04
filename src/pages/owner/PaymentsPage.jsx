@@ -32,9 +32,11 @@ import MeetingRoomIcon from "@mui/icons-material/MeetingRoom";
 import {
   addDoc,
   collection,
+  doc,
   onSnapshot,
   query,
   serverTimestamp,
+  updateDoc,
   where,
 } from "firebase/firestore";
 
@@ -49,6 +51,7 @@ export default function PaymentsPage() {
   const [loading, setLoading] = useState(true);
 
   const [openRecordPayment, setOpenRecordPayment] = useState(false);
+  const [processingPaymentId, setProcessingPaymentId] = useState("");
 
   const [paymentForm, setPaymentForm] = useState({
     tenantId: "",
@@ -290,6 +293,27 @@ export default function PaymentsPage() {
   }, [payments]);
 
   // ------------------------------------------------------------
+  // PENDING PAYMENT VERIFICATION
+  // ------------------------------------------------------------
+
+  const pendingVerificationPayments = useMemo(() => {
+    return [...payments]
+      .filter((payment) => {
+        const status = getPaymentStatus(payment);
+        const verificationStatus = String(
+          payment.verificationStatus || ""
+        ).toLowerCase();
+
+        return status === "pending" || verificationStatus === "pending";
+      })
+      .sort((a, b) => {
+        const dateA = getPaymentDate(a)?.getTime() || 0;
+        const dateB = getPaymentDate(b)?.getTime() || 0;
+        return dateB - dateA;
+      });
+  }, [payments]);
+
+  // ------------------------------------------------------------
   // ROOM-BASED PAYMENT MANAGEMENT
   // ------------------------------------------------------------
 
@@ -401,6 +425,49 @@ export default function PaymentsPage() {
   };
 
   // ------------------------------------------------------------
+  // PAYMENT VERIFICATION
+  // ------------------------------------------------------------
+
+  const handleVerifyPayment = async (paymentId, approved) => {
+    if (!currentUser?.uid || !paymentId) {
+      alert("Unable to update this payment.");
+      return;
+    }
+
+    const payment = payments.find((item) => item.id === paymentId);
+
+    if (!payment) {
+      alert("Payment could not be found.");
+      return;
+    }
+
+    if (payment.ownerUid && payment.ownerUid !== currentUser.uid) {
+      alert("You are not authorized to update this payment.");
+      return;
+    }
+
+    setProcessingPaymentId(paymentId);
+
+    try {
+      await updateDoc(doc(db, "payments", paymentId), {
+        status: approved ? "Paid" : "Rejected",
+        verificationStatus: approved ? "Approved" : "Rejected",
+        verifiedAt: new Date(),
+        verifiedBy: currentUser.uid,
+      });
+    } catch (error) {
+      console.error("Error verifying payment:", error);
+      alert(
+        approved
+          ? "Failed to approve the payment. Please try again."
+          : "Failed to reject the payment. Please try again."
+      );
+    } finally {
+      setProcessingPaymentId("");
+    }
+  };
+
+  // ------------------------------------------------------------
   // RECORD PAYMENT
   // ------------------------------------------------------------
 
@@ -488,6 +555,13 @@ export default function PaymentsPage() {
         status:
           paymentForm.status,
 
+        verificationStatus:
+          paymentForm.status === "Paid"
+            ? "Approved"
+            : paymentForm.status === "Pending"
+              ? "Pending"
+              : "",
+
         remarks:
           paymentForm.remarks.trim(),
 
@@ -539,6 +613,8 @@ export default function PaymentsPage() {
       color = "info";
     } else if (normalizedStatus === "unpaid") {
       color = "default";
+    } else if (normalizedStatus === "rejected") {
+      color = "error";
     }
 
     return (
@@ -788,6 +864,153 @@ export default function PaymentsPage() {
           </Card>
         </Grid>
       </Grid>
+
+      {/* ======================================================
+          PENDING PAYMENT VERIFICATION
+      ====================================================== */}
+
+      {pendingVerificationPayments.length > 0 && (
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="h6" fontWeight={700} sx={{ mb: 2 }}>
+            Pending Payment Verification
+          </Typography>
+
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            Review payment submissions made by tenants before marking them as paid.
+          </Typography>
+
+          <Stack spacing={2}>
+            {pendingVerificationPayments.map((payment) => {
+              const isProcessing = processingPaymentId === payment.id;
+
+              return (
+                <Card
+                  key={payment.id}
+                  elevation={0}
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "divider",
+                    borderRadius: 2,
+                  }}
+                >
+                  <CardContent>
+                    <Box
+                      sx={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: { xs: "flex-start", md: "center" },
+                        flexDirection: { xs: "column", md: "row" },
+                        gap: 2,
+                      }}
+                    >
+                      <Box sx={{ flex: 1 }}>
+                        <Typography fontWeight={700}>
+                          {payment.tenantName || "Unnamed Tenant"}
+                        </Typography>
+
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                          sx={{ mt: 0.5 }}
+                        >
+                          Room {payment.roomNumber || "Unassigned"} •{" "}
+                          {payment.propertyName || "Dormitory"}
+                        </Typography>
+
+                        <Stack
+                          direction="row"
+                          spacing={1}
+                          useFlexGap
+                          flexWrap="wrap"
+                          sx={{ mt: 1 }}
+                        >
+                          {renderStatusChip("Pending")}
+
+                          <Chip
+                            label={payment.paymentMethod || "Unknown Method"}
+                            size="small"
+                            variant="outlined"
+                          />
+
+                          <Chip
+                            label={payment.periodMonth || "No billing period"}
+                            size="small"
+                            variant="outlined"
+                          />
+                        </Stack>
+                      </Box>
+
+                      <Box
+                        sx={{
+                          minWidth: { md: 180 },
+                          textAlign: { xs: "left", md: "right" },
+                        }}
+                      >
+                        <Typography variant="caption" color="text.secondary">
+                          Amount
+                        </Typography>
+
+                        <Typography variant="h6" fontWeight={700}>
+                          {formatCurrency(payment.amount)}
+                        </Typography>
+
+                        <Typography variant="body2" color="text.secondary">
+                          {formatDate(payment)}
+                        </Typography>
+                      </Box>
+
+                      <Stack
+                        direction={{ xs: "column", sm: "row" }}
+                        spacing={1}
+                        sx={{ width: { xs: "100%", md: "auto" } }}
+                      >
+                        <Button
+                          variant="contained"
+                          color="success"
+                          disabled={isProcessing}
+                          onClick={() => handleVerifyPayment(payment.id, true)}
+                        >
+                          {isProcessing ? "Updating..." : "Approve"}
+                        </Button>
+
+                        <Button
+                          variant="outlined"
+                          color="error"
+                          disabled={isProcessing}
+                          onClick={() => handleVerifyPayment(payment.id, false)}
+                        >
+                          Reject
+                        </Button>
+                      </Stack>
+                    </Box>
+
+                    {(payment.referenceNumber || payment.remarks) && (
+                      <>
+                        <Divider sx={{ my: 2 }} />
+
+                        <Stack spacing={0.5}>
+                          {payment.referenceNumber && (
+                            <Typography variant="body2">
+                              <strong>Reference:</strong>{" "}
+                              {payment.referenceNumber}
+                            </Typography>
+                          )}
+
+                          {payment.remarks && (
+                            <Typography variant="body2" color="text.secondary">
+                              <strong>Remarks:</strong> {payment.remarks}
+                            </Typography>
+                          )}
+                        </Stack>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </Stack>
+        </Box>
+      )}
 
       {/* ======================================================
           PAYMENT MANAGEMENT
