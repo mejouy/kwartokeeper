@@ -12,7 +12,13 @@ import LandingWelcome from './pages/LandingWelcome';
 import Login from './pages/auth/Login';
 import OwnerRegister from './pages/auth/OwnerRegister';
 import PropertyWizard from './pages/onboarding/PropertyWizard';
+
 import WizardSuccess from './pages/onboarding/components/WizardSuccess';
+
+
+
+import Payments from './pages/tenant/payments';
+import TenantDetails from './pages/owner/TenantDetails';
 
 // --- Layouts ---
 import OwnerLayout from './layouts/OwnerLayout';

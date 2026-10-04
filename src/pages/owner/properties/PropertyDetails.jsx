@@ -421,7 +421,7 @@ export default function PropertyDetails() {
           <ArrowBackIcon />
         </IconButton>
         <Box sx={{ flexGrow: 1 }}>
-          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
+          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }} flexWrap="wrap">
             <Typography variant="h5" fontWeight="700">
               {formData.propertyName || "Unnamed Property"}
             </Typography>

@@ -293,90 +293,123 @@ export default function TenantDashboard() {
           // Fetch property
           // -------------------------------------------------------------
 
-          if (propertyId) {
-            try {
-              const propDoc = await getDoc(
-                doc(db, "properties", propertyId)
-              );
+          let propertyData = null;
+let assignedRoom = null;
 
-              if (propDoc.exists()) {
-                const propData = propDoc.data();
+if (propertyId) {
+  try {
+    const propDoc = await getDoc(
+      doc(db, "properties", propertyId)
+    );
 
-                propertyName =
-                  propData.propertyName ||
-                  propData.name ||
-                  propData.title ||
-                  "Facility Name Unavailable";
-              }
-            } catch (propErr) {
-              console.error(
-                "Error fetching property doc:",
-                propErr
-              );
-            }
-          }
+    if (propDoc.exists()) {
+      propertyData = propDoc.data();
+
+      propertyName =
+        propertyData.propertyName ||
+        propertyData.name ||
+        propertyData.title ||
+        "Facility Name Unavailable";
+
+      // -----------------------------------------------------------
+      // Find the tenant's assigned room
+      // -----------------------------------------------------------
+
+      const rooms = Array.isArray(
+        propertyData.rooms
+      )
+        ? propertyData.rooms
+        : [];
+
+      assignedRoom = rooms.find(
+        (room) =>
+          room.roomName ===
+            data.roomId ||
+          room.id === data.roomId
+      );
+
+      console.log(
+        "Tenant room ID:",
+        data.roomId
+      );
+
+      console.log(
+        "Assigned room:",
+        assignedRoom
+      );
+    }
+  } catch (propErr) {
+    console.error(
+      "Error fetching property doc:",
+      propErr
+    );
+  }
+}
 
           // -------------------------------------------------------------
           // Set tenant information
           // -------------------------------------------------------------
 
           setTenantInfo({
-            name:
-              data.name ||
-              data.fullName ||
-              "Tenant",
+  name:
+    data.name ||
+    data.fullName ||
+    "Tenant",
 
-            propertyName,
+  propertyName,
 
-            roomNumber:
-              data.roomNumber ||
-              data.roomId ||
-              "N/A",
+  // Your database uses roomId = "A2"
+  roomNumber:
+    assignedRoom?.roomName ||
+    data.roomId ||
+    "N/A",
 
-            bedId:
-              data.bedId ||
-              "N/A",
+  bedId:
+    data.bedId ||
+    "N/A",
 
-            monthlyRent: Number(
-              data.monthlyRent ||
-                data.rentAmount ||
-                0
-            ),
+  // Rent comes from the assigned room
+  monthlyRent:
+    Number(
+      assignedRoom?.monthlyRatePerBed ||
+        0
+    ),
 
-            status:
-              data.status ||
-              "Active",
+  status:
+    data.status ||
+    "Active",
 
-            leaseStartDate:
-              data.leaseStartDate ||
-              data.moveInDate ||
-              "Not specified",
+  leaseStartDate:
+    data.leaseStartDate ||
+    data.moveInDate ||
+    "Not specified",
 
-            leaseDuration:
-              formatLeaseDuration(
-                data.leaseDuration
-              ),
+  leaseDuration:
+    formatLeaseDuration(
+      data.leaseDuration
+    ),
 
-            contact:
-              data.phone ||
-              data.contact ||
-              "None provided",
+  contact:
+    data.phone ||
+    data.contact ||
+    "None provided",
 
-            ownerUid:
-              data.ownerUid ||
-              data.landlordUid ||
-              data.invitedBy ||
-              "",
+  ownerUid:
+    data.ownerUid ||
+    data.landlordUid ||
+    data.invitedBy ||
+    "",
 
-            propertyId:
-              propertyId || "",
+  propertyId:
+    propertyId || "",
 
-            rentDueDay: Number(
-              data.rentDueDay ||
-                data.dueDay ||
-                5
-            ),
-          });
+  rentDueDay:
+    Number(
+      data.rentDueDay ||
+        data.dueDay ||
+        5
+    ),
+});
         }
       } catch (err) {
         console.error(
@@ -780,7 +813,7 @@ export default function TenantDashboard() {
           <Stack
             direction="row"
             spacing={2}
-            alignItems="center"
+            sx={{ alignItems: "center" }}
           >
             <Typography
               variant="body2"
@@ -1020,7 +1053,7 @@ export default function TenantDashboard() {
               <Stack
                 direction="row"
                 spacing={1}
-                alignItems="center"
+                sx={{ alignItems: "center" }}
               >
                 <PaymentIcon color="primary" />
 
@@ -1152,10 +1185,7 @@ export default function TenantDashboard() {
             <Stack
               direction="row"
               spacing={1}
-              alignItems="center"
-              sx={{
-                mb: 1.5,
-              }}
+              sx={{ alignItems: "center", mb: 1.5 }}
             >
               <HistoryIcon
                 fontSize="small"
@@ -1236,10 +1266,10 @@ export default function TenantDashboard() {
                         </Box>
 
                         <Stack
-                          direction="row"
-                          spacing={1}
-                          alignItems="center"
-                        >
+  direction="row"
+  spacing={1}
+  sx={{ alignItems: "center" }}
+>
                           <Typography
                             variant="subtitle2"
                             fontWeight="800"
@@ -1316,9 +1346,9 @@ export default function TenantDashboard() {
           />
 
           <Stack
-            spacing={2}
-            maxWidth="sm"
-          >
+  spacing={2}
+  sx={{ maxWidth: "600px" }}
+>
             <DetailRow
               label="Tenant Name:"
               value={
@@ -1535,16 +1565,16 @@ export default function TenantDashboard() {
       ================================================================= */}
 
       <Dialog
-        open={openPaymentModal}
-        onClose={() =>
-          !paymentSubmitting &&
-          setOpenPaymentModal(
-            false
-          )
-        }
-        maxWidth="sm"
-        fullWidth
-      >
+  open={openPaymentModal}
+  onClose={() =>
+    !paymentSubmitting &&
+    setOpenPaymentModal(
+      false
+    )
+  }
+  maxWidth="sm"
+  fullWidth
+>
         <DialogTitle
           sx={{
             fontWeight: 800,
@@ -1674,14 +1704,13 @@ export default function TenantDashboard() {
                 }}
               >
                 <Stack
-                  direction="row"
-                  spacing={1}
-                  justifyContent="center"
-                  alignItems="center"
-                  sx={{
-                    mb: 1,
-                  }}
-                >
+  direction="row"
+  spacing={1}
+  sx={{
+    alignItems: "center",
+    mb: 1,
+  }}
+>
                   <QrCode2Icon
                     color="primary"
                   />
@@ -2347,4 +2376,5 @@ function formatLeaseDuration(
     default:
       return val;
   }
+
 }
