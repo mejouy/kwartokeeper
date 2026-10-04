@@ -60,13 +60,15 @@ const STATUS_OPTIONS = ["Pending", "In Progress", "Resolved"];
 export default function CaretakerDashboard() {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
-  const [assignedProperty, setAssignedProperty] = useState("Loading facility...");
+  const [assignedProperty, setAssignedProperty] = useState(
+    "Loading facility...",
+  );
   const [rooms, setRooms] = useState([]);
   const [tenants, setTenants] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  // Maintenance Requests state — gated behind the caretaker's handleReports
+  // Maintenance Requests state — gated behind the caretaker's `handleReports`
   // permission (set during the Caretaker Invite flow).
   const [tickets, setTickets] = useState([]);
   const [permissions, setPermissions] = useState({});
@@ -122,12 +124,16 @@ export default function CaretakerDashboard() {
         if (!propertyId) {
           if (active) {
             setAssignedProperty("No facility assigned");
-            setError("Ask the property owner to assign a facility to this account.");
+            setError(
+              "Ask the property owner to assign a facility to this account.",
+            );
           }
           return;
         }
 
-        const propertySnapshot = await getDoc(doc(db, "properties", propertyId));
+        const propertySnapshot = await getDoc(
+          doc(db, "properties", propertyId),
+        );
         if (!propertySnapshot.exists()) {
           if (active) {
             setAssignedProperty("Facility not found");
@@ -139,7 +145,9 @@ export default function CaretakerDashboard() {
         const property = propertySnapshot.data();
         if (!active) return;
 
-        setAssignedProperty(property.propertyName || property.name || propertyId);
+        setAssignedProperty(
+          property.propertyName || property.name || propertyId,
+        );
         setRooms(Array.isArray(property.rooms) ? property.rooms : []);
 
         let userTenants = [];
@@ -156,7 +164,11 @@ export default function CaretakerDashboard() {
               id: tenantId,
               name: tenant.name || tenant.fullName || existing.name || "Tenant",
               roomNumber:
-                tenant.roomNumber || tenant.roomId || tenant.room || existing.roomNumber || "",
+                tenant.roomNumber ||
+                tenant.roomId ||
+                tenant.room ||
+                existing.roomNumber ||
+                "",
             });
           });
           if (active) setTenants([...mergedTenants.values()]);
@@ -173,10 +185,13 @@ export default function CaretakerDashboard() {
           (snapshotError) => {
             console.error("Failed to load tenant profiles:", snapshotError);
             if (active) setError("Unable to load tenants for this facility.");
-          }
+          },
         );
         unsubscribeLegacyTenants = onSnapshot(
-          query(collection(db, "tenants"), where("propertyId", "==", propertyId)),
+          query(
+            collection(db, "tenants"),
+            where("propertyId", "==", propertyId),
+          ),
           (snapshot) => {
             legacyTenants = snapshot.docs.map((tenantDoc) => ({
               id: tenantDoc.id,
@@ -185,26 +200,35 @@ export default function CaretakerDashboard() {
             updateTenants();
           },
           (snapshotError) => {
-            console.error("Failed to load legacy tenant profiles:", snapshotError);
+            console.error(
+              "Failed to load legacy tenant profiles:",
+              snapshotError,
+            );
             if (active) setError("Unable to load tenants for this facility.");
-          }
+          },
         );
 
         // Maintenance tickets for the WHOLE facility (every tenant in this
         // property), not just one tenant — the caretaker manages all of them.
         unsubscribeTickets = onSnapshot(
-          query(collection(db, "maintenance_tickets"), where("propertyId", "==", propertyId)),
+          query(
+            collection(db, "maintenance_tickets"),
+            where("propertyId", "==", propertyId),
+          ),
           (snapshot) => {
             const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
             if (active) setTickets(docs);
           },
           (snapshotError) => {
             console.error("Failed to load maintenance tickets:", snapshotError);
-          }
+          },
         );
       } catch (loadError) {
         console.error("Failed to load caretaker facility:", loadError);
-        if (active) setError("Unable to load the assigned facility. Check your Firestore access.");
+        if (active)
+          setError(
+            "Unable to load the assigned facility. Check your Firestore access.",
+          );
       } finally {
         if (active) setLoading(false);
       }
@@ -221,14 +245,16 @@ export default function CaretakerDashboard() {
 
   const totalRooms = rooms.length;
   const occupiedRooms = rooms.filter(
-    (room) => room.status === "Occupied" || Number(room.occupiedBeds) > 0
+    (room) => room.status === "Occupied" || Number(room.occupiedBeds) > 0,
   ).length;
-  const totalTenants = tenants.filter((tenant) => tenant.status !== "Inactive").length;
+  const totalTenants = tenants.filter(
+    (tenant) => tenant.status !== "Inactive",
+  ).length;
 
   const filteredTenants = tenants.filter(
     (t) =>
       t.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      t.roomNumber?.toString().includes(searchTerm)
+      t.roomNumber?.toString().includes(searchTerm),
   );
 
   // AHP-ranked tickets: High tier first, then Medium, then Low; within the
@@ -239,7 +265,12 @@ export default function CaretakerDashboard() {
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#f8fafc" }}>
       {/* Top Header Navigation */}
-      <AppBar position="static" color="default" elevation={1} sx={{ bgcolor: "#ffffff" }}>
+      <AppBar
+        position="static"
+        color="default"
+        elevation={1}
+        sx={{ bgcolor: "#ffffff" }}
+      >
         <Toolbar sx={{ justifyContent: "space-between" }}>
           <Typography variant="h6" fontWeight="800" color="primary">
             KwartoKeeper
@@ -273,7 +304,11 @@ export default function CaretakerDashboard() {
           </Typography>
         </Box>
 
-        {error && <Alert severity="warning" sx={{ mb: 3 }}>{error}</Alert>}
+        {error && (
+          <Alert severity="warning" sx={{ mb: 3 }}>
+            {error}
+          </Alert>
+        )}
 
         {/* Metrics Row */}
         <Box
@@ -281,7 +316,7 @@ export default function CaretakerDashboard() {
             display: "grid",
             gridTemplateColumns: { xs: "1fr", sm: "repeat(3, 1fr)" },
             gap: 2.5,
-            mb: 4
+            mb: 4,
           }}
         >
           <MetricCard
@@ -305,7 +340,16 @@ export default function CaretakerDashboard() {
         </Box>
 
         {/* Tenant Roster Table */}
-        <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3, mb: 4 }}>
+        <Paper
+          elevation={0}
+          sx={{
+            p: 3,
+            border: "1px solid",
+            borderColor: "divider",
+            borderRadius: 3,
+            mb: 4,
+          }}
+        >
           <Box
             sx={{
               display: "flex",
@@ -313,7 +357,7 @@ export default function CaretakerDashboard() {
               alignItems: "center",
               mb: 2.5,
               flexWrap: "wrap",
-              gap: 2
+              gap: 2,
             }}
           >
             <Typography variant="h6" fontWeight="700">
@@ -330,8 +374,8 @@ export default function CaretakerDashboard() {
                     <InputAdornment position="start">
                       <SearchIcon fontSize="small" />
                     </InputAdornment>
-                  )
-                }
+                  ),
+                },
               }}
             />
           </Box>
@@ -340,10 +384,18 @@ export default function CaretakerDashboard() {
             <Table>
               <TableHead sx={{ bgcolor: "background.default" }}>
                 <TableRow>
-                  <TableCell><strong>Tenant Name</strong></TableCell>
-                  <TableCell><strong>Assigned Room</strong></TableCell>
-                  <TableCell><strong>Contact Info</strong></TableCell>
-                  <TableCell><strong>Status</strong></TableCell>
+                  <TableCell>
+                    <strong>Tenant Name</strong>
+                  </TableCell>
+                  <TableCell>
+                    <strong>Assigned Room</strong>
+                  </TableCell>
+                  <TableCell>
+                    <strong>Contact Info</strong>
+                  </TableCell>
+                  <TableCell>
+                    <strong>Status</strong>
+                  </TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -351,7 +403,11 @@ export default function CaretakerDashboard() {
                   <TableRow>
                     <TableCell colSpan={4} align="center" sx={{ py: 4 }}>
                       <Typography variant="body2" color="text.secondary">
-                        {loading ? <CircularProgress size={22} /> : "No tenant records found for this facility."}
+                        {loading ? (
+                          <CircularProgress size={22} />
+                        ) : (
+                          "No tenant records found for this facility."
+                        )}
                       </Typography>
                     </TableCell>
                   </TableRow>
@@ -363,12 +419,18 @@ export default function CaretakerDashboard() {
                           {tenant.name || tenant.fullName}
                         </Typography>
                       </TableCell>
-                      <TableCell>Room {tenant.roomNumber || tenant.room}</TableCell>
-                      <TableCell>{tenant.contact || tenant.email || "—"}</TableCell>
+                      <TableCell>
+                        Room {tenant.roomNumber || tenant.room}
+                      </TableCell>
+                      <TableCell>
+                        {tenant.contact || tenant.email || "—"}
+                      </TableCell>
                       <TableCell>
                         <Chip
                           label={tenant.status || "Active"}
-                          color={tenant.status === "Inactive" ? "default" : "success"}
+                          color={
+                            tenant.status === "Inactive" ? "default" : "success"
+                          }
                           size="small"
                         />
                       </TableCell>
@@ -384,8 +446,18 @@ export default function CaretakerDashboard() {
             included the "Receive & Update Incident / Maintenance Reports"
             permission. */}
         {canHandleReports && (
-          <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2.5 }}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 3,
+              border: "1px solid",
+              borderColor: "divider",
+              borderRadius: 3,
+            }}
+          >
+            <Box
+              sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2.5 }}
+            >
               <BuildOutlinedIcon color="warning" />
               <Box>
                 <Typography variant="h6" fontWeight="700">
@@ -399,7 +471,12 @@ export default function CaretakerDashboard() {
 
             <Stack spacing={1.5}>
               {rankedTickets.length === 0 ? (
-                <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 3 }}>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  align="center"
+                  sx={{ py: 3 }}
+                >
                   No maintenance tickets reported for this facility.
                 </Typography>
               ) : (
@@ -441,7 +518,9 @@ export default function CaretakerDashboard() {
                         <FormControl size="small">
                           <Select
                             value={t.status || "Pending"}
-                            onChange={(e) => handleStatusChange(t.id, e.target.value)}
+                            onChange={(e) =>
+                              handleStatusChange(t.id, e.target.value)
+                            }
                           >
                             {STATUS_OPTIONS.map((opt) => (
                               <MenuItem key={opt} value={opt}>
@@ -468,13 +547,25 @@ export default function CaretakerDashboard() {
 
 function MetricCard({ title, value, subtitle, icon }) {
   return (
-    <Card elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
+    <Card
+      elevation={0}
+      sx={{ border: "1px solid", borderColor: "divider", borderRadius: 3 }}
+    >
       <CardContent sx={{ p: 2.5 }}>
-        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
+        <Box
+          sx={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            mb: 1,
+          }}
+        >
           <Typography variant="body2" color="text.secondary" fontWeight="600">
             {title}
           </Typography>
-          <Box sx={{ p: 1, borderRadius: 2, bgcolor: "action.hover" }}>{icon}</Box>
+          <Box sx={{ p: 1, borderRadius: 2, bgcolor: "action.hover" }}>
+            {icon}
+          </Box>
         </Box>
         <Typography variant="h4" fontWeight="800">
           {value}
