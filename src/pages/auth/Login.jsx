@@ -15,8 +15,6 @@ import {
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
 
-// Fixed "occupancy state" for the facade illustration — deterministic so it
-// doesn't reshuffle on every render. Roughly 1 in 4 windows lit.
 const FACADE_ROWS = 6;
 const FACADE_COLS = 5;
 const LIT_PATTERN = [
@@ -125,7 +123,6 @@ export default function Login() {
       }
 
       if (userData) {
-
         if (userData.role === 'owner') {
           const propertiesRef = collection(db, 'properties');
           const propertySnap = await getDocs(propertiesRef);
@@ -148,7 +145,7 @@ export default function Login() {
           if (!hasRegisteredProperty && !userData.hasProperty) {
             navigate('/setup');
           } else {
-            navigate('/owner/dashboard');
+            navigate('/owner');
           }
         } else if (userData.role === 'tenant') {
           navigate('/tenant/dashboard');
@@ -173,7 +170,7 @@ export default function Login() {
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: { xs: 'column', md: 'row' } }}>
 
-      {/* Left panel — the product's own subject matter as the visual identity */}
+      {/* Left panel */}
       <Box
         sx={{
           flex: { xs: '0 0 auto', md: '0 0 42%' },
@@ -212,7 +209,7 @@ export default function Login() {
         </Box>
       </Box>
 
-      {/* Right panel — the form */}
+      {/* Right panel — form */}
       <Box
         sx={{
           flex: 1,
@@ -319,7 +316,7 @@ export default function Login() {
                 fullWidth
                 variant="outlined"
                 size="large"
-                onClick={() => navigate('/register')}
+                onClick={() => navigate('/signup')}
                 sx={{ py: 1.5, fontWeight: 600 }}
               >
                 Register your property

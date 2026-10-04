@@ -17,12 +17,10 @@ import {
   DialogContentText,
 } from "@mui/material";
 import { createUserWithEmailAndPassword } from "firebase/auth";
-import { doc, setDoc } from "firebase/firestore";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
 
-// Same facade motif as the login page, but with fewer windows lit — this is
-// a property being set up, not yet fully monitored. Deterministic pattern,
-// no reshuffling on render.
+// Same facade motif as the login page for design continuity.
 const FACADE_ROWS = 6;
 const FACADE_COLS = 5;
 const LIT_PATTERN = [
@@ -100,7 +98,6 @@ export default function OwnerRegister() {
 
   const handleChange = (field) => (e) => {
     if (field === "phone") {
-      // Data validation: Only allow numbers (strip any non-numeric characters)
       const numericValue = e.target.value.replace(/[^0-9]/g, "");
       setForm((prev) => ({ ...prev, [field]: numericValue }));
       return;
@@ -112,7 +109,7 @@ export default function OwnerRegister() {
     if (!form.fullName.trim()) return "Full name is required.";
     if (!form.email.trim()) return "Email is required.";
     if (!form.phone.trim()) return "Phone number is required.";
-    if (form.phone.length < 10) return "Phone number must be at least 10 digits."; // Extra phone validation
+    if (form.phone.length < 10) return "Phone number must be at least 10 digits.";
     if (form.password.length < 6)
       return "Password must be at least 6 characters.";
     if (form.password !== form.confirmPassword)
@@ -141,17 +138,24 @@ export default function OwnerRegister() {
       );
       const user = userCredential.user;
 
-      // Immediately write the user's profile document to Firestore
+      // Write user profile document to Firestore
       await setDoc(doc(db, "users", user.uid), {
         uid: user.uid,
-        name: form.fullName.trim(),
+        fullName: form.fullName.trim(),
         email: form.email.trim(),
         phone: form.phone.trim(),
         role: "owner",
-        createdAt: new Date().toISOString(),
+        status: "pending", // <--- FIXED: Changed from "active" to "pending"
+        approvalStatus: "pending",
+        verificationDocs: {
+          idUrl: null,
+          clearanceUrl: null,
+        },
+        createdAt: serverTimestamp(),
       });
 
-      navigate("/owner/dashboard");
+      // Direct navigation to onboarding setup wizard (or /owner)
+      navigate("/setup");
     } catch (err) {
       setError(mapFirebaseError(err.code));
     } finally {
@@ -162,7 +166,7 @@ export default function OwnerRegister() {
   return (
     <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: { xs: "column", md: "row" } }}>
 
-      {/* Left panel — same identity as the login page, for continuity across the auth flow */}
+      {/* Left Branding Panel */}
       <Box
         sx={{
           flex: { xs: "0 0 auto", md: "0 0 42%" },
@@ -201,7 +205,7 @@ export default function OwnerRegister() {
         </Box>
       </Box>
 
-      {/* Right panel — the form */}
+      {/* Right Registration Form */}
       <Box
         sx={{
           flex: 1,
@@ -256,7 +260,7 @@ export default function OwnerRegister() {
               value={form.phone}
               onChange={handleChange("phone")}
               sx={{ mb: 2 }}
-              inputProps={{ maxLength: 15 }} // Limit length
+              inputProps={{ maxLength: 15 }}
             />
             <TextField
               label="Password"
@@ -355,7 +359,7 @@ export default function OwnerRegister() {
         <DialogContent dividers>
           <DialogContentText sx={{ mb: 2 }}>
             <strong>1. Acceptance of Terms</strong><br />
-            By accessing and using KwartoKeeper, you accept and agree to be bound by the terms and provision of this agreement.
+            By accessing and using KwartoKeeper, you accept and agree to be bound by the terms and provisions of this agreement.
           </DialogContentText>
           <DialogContentText sx={{ mb: 2 }}>
             <strong>2. Property Management</strong><br />
@@ -365,7 +369,6 @@ export default function OwnerRegister() {
             <strong>3. Service Modifications</strong><br />
             KwartoKeeper reserves the right to modify or discontinue the service with or without notice to the user.
           </DialogContentText>
-          {/* Add more terms as needed here */}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setTermsOpen(false)}>Close</Button>
@@ -388,7 +391,6 @@ export default function OwnerRegister() {
             <strong>3. Security</strong><br />
             We implement a variety of security measures to maintain the safety of your personal information. However, no method of transmission over the Internet is 100% secure.
           </DialogContentText>
-          {/* Add more privacy rules as needed here */}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setPrivacyOpen(false)}>Close</Button>

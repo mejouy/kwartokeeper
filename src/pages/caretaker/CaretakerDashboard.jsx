@@ -22,6 +22,9 @@ import {
   Toolbar,
   Button,
   Stack,
+  Select,
+  MenuItem,
+  FormControl,
 } from "@mui/material";
 
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
@@ -29,6 +32,7 @@ import MeetingRoomIcon from "@mui/icons-material/MeetingRoom";
 import PeopleAltIcon from "@mui/icons-material/PeopleAlt";
 import SearchIcon from "@mui/icons-material/Search";
 import LogoutIcon from "@mui/icons-material/Logout";
+import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 
 import { signOut } from "firebase/auth";
 import { auth, db } from "../../config/firebase";
@@ -38,8 +42,20 @@ import {
   getDoc,
   onSnapshot,
   query,
+  updateDoc,
   where,
 } from "firebase/firestore";
+// AHP-based maintenance prioritization (see src/utils/maintenancePrioritization.js
+// for the full pairwise-comparison derivation and rationale).
+import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
+
+const TIER_CHIP_COLOR = {
+  High: "error",
+  Medium: "warning",
+  Low: "default",
+};
+
+const STATUS_OPTIONS = ["Pending", "In Progress", "Resolved"];
 
 export default function CaretakerDashboard() {
   const navigate = useNavigate();
@@ -50,12 +66,28 @@ export default function CaretakerDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
+  // Maintenance Requests state — gated behind the caretaker's handleReports
+  // permission (set during the Caretaker Invite flow).
+  const [tickets, setTickets] = useState([]);
+  const [permissions, setPermissions] = useState({});
+
   const handleLogout = async () => {
     try {
       await signOut(auth);
       navigate("/login");
     } catch (err) {
       console.error("Logout failed:", err);
+    }
+  };
+
+  // Update a maintenance ticket's status (Pending -> In Progress -> Resolved).
+  const handleStatusChange = async (ticketId, newStatus) => {
+    try {
+      await updateDoc(doc(db, "maintenance_tickets", ticketId), {
+        status: newStatus,
+      });
+    } catch (err) {
+      console.error("Failed to update ticket status:", err);
     }
   };
 
@@ -69,6 +101,7 @@ export default function CaretakerDashboard() {
     let active = true;
     let unsubscribeUsers;
     let unsubscribeLegacyTenants;
+    let unsubscribeTickets;
 
     const loadAssignedFacility = async () => {
       try {
@@ -81,6 +114,10 @@ export default function CaretakerDashboard() {
           ...(caretakerProfile.exists() ? caretakerProfile.data() : {}),
         };
         const propertyId = profile.assignedPropertyId || profile.propertyId;
+
+        if (active) {
+          setPermissions(profile.permissions || {});
+        }
 
         if (!propertyId) {
           if (active) {
@@ -152,6 +189,19 @@ export default function CaretakerDashboard() {
             if (active) setError("Unable to load tenants for this facility.");
           }
         );
+
+        // Maintenance tickets for the WHOLE facility (every tenant in this
+        // property), not just one tenant — the caretaker manages all of them.
+        unsubscribeTickets = onSnapshot(
+          query(collection(db, "maintenance_tickets"), where("propertyId", "==", propertyId)),
+          (snapshot) => {
+            const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+            if (active) setTickets(docs);
+          },
+          (snapshotError) => {
+            console.error("Failed to load maintenance tickets:", snapshotError);
+          }
+        );
       } catch (loadError) {
         console.error("Failed to load caretaker facility:", loadError);
         if (active) setError("Unable to load the assigned facility. Check your Firestore access.");
@@ -165,6 +215,7 @@ export default function CaretakerDashboard() {
       active = false;
       unsubscribeUsers?.();
       unsubscribeLegacyTenants?.();
+      unsubscribeTickets?.();
     };
   }, [navigate]);
 
@@ -179,6 +230,11 @@ export default function CaretakerDashboard() {
       t.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       t.roomNumber?.toString().includes(searchTerm)
   );
+
+  // AHP-ranked tickets: High tier first, then Medium, then Low; within the
+  // same tier, oldest-pending first.
+  const rankedTickets = rankMaintenanceRequests(tickets);
+  const canHandleReports = permissions?.handleReports === true;
 
   return (
     <Box sx={{ minHeight: "100vh", bgcolor: "#f8fafc" }}>
@@ -249,7 +305,7 @@ export default function CaretakerDashboard() {
         </Box>
 
         {/* Tenant Roster Table */}
-        <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
+        <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3, mb: 4 }}>
           <Box
             sx={{
               display: "flex",
@@ -323,6 +379,88 @@ export default function CaretakerDashboard() {
             </Table>
           </TableContainer>
         </Paper>
+
+        {/* Maintenance Requests — only visible to caretakers whose invite
+            included the "Receive & Update Incident / Maintenance Reports"
+            permission. */}
+        {canHandleReports && (
+          <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
+            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2.5 }}>
+              <BuildOutlinedIcon color="warning" />
+              <Box>
+                <Typography variant="h6" fontWeight="700">
+                  Maintenance Requests
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  All reports for this facility, ranked by AHP priority
+                </Typography>
+              </Box>
+            </Box>
+
+            <Stack spacing={1.5}>
+              {rankedTickets.length === 0 ? (
+                <Typography variant="body2" color="text.secondary" align="center" sx={{ py: 3 }}>
+                  No maintenance tickets reported for this facility.
+                </Typography>
+              ) : (
+                rankedTickets.map((t) => (
+                  <Box
+                    key={t.id}
+                    sx={{
+                      p: 2,
+                      borderRadius: 2,
+                      bgcolor: "background.default",
+                      border: "1px solid",
+                      borderColor: "divider",
+                    }}
+                  >
+                    <Box
+                      sx={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "flex-start",
+                        flexWrap: "wrap",
+                        gap: 1,
+                        mb: 0.5,
+                      }}
+                    >
+                      <Box>
+                        <Typography variant="subtitle2" fontWeight="700">
+                          {t.title}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {t.tenantName} — Room {t.roomNumber}
+                        </Typography>
+                      </Box>
+                      <Stack direction="row" spacing={1} alignItems="center">
+                        <Chip
+                          label={t.priority.tier}
+                          size="small"
+                          color={TIER_CHIP_COLOR[t.priority.tier]}
+                        />
+                        <FormControl size="small">
+                          <Select
+                            value={t.status || "Pending"}
+                            onChange={(e) => handleStatusChange(t.id, e.target.value)}
+                          >
+                            {STATUS_OPTIONS.map((opt) => (
+                              <MenuItem key={opt} value={opt}>
+                                {opt}
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      </Stack>
+                    </Box>
+                    <Typography variant="body2" color="text.secondary">
+                      {t.description}
+                    </Typography>
+                  </Box>
+                ))
+              )}
+            </Stack>
+          </Paper>
+        )}
       </Container>
     </Box>
   );

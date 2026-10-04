@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Box, Button, Typography, Alert } from '@mui/material';
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
@@ -150,8 +150,12 @@ export default function PropertyWizard() {
     curfewEnabled: false,
     curfewTime: '10:00 PM',
     namingPattern: 'floor',
-    // configMode removed here so Step 3 sets its mode dynamically based on totalFloors
   });
+
+  // Scroll to top when the step changes
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }, [activeStep]);
 
   const updateWizardData = (newData) => {
     setWizardData((prev) => {
@@ -191,6 +195,10 @@ export default function PropertyWizard() {
     const floorsNum = Number(wizardData.totalFloors);
     if (!floorsNum || floorsNum < 1) {
       newErrors.totalFloors = 'Total floors must be at least 1.';
+    }
+    const estimatedRooms = Number(wizardData.estimatedRooms);
+    if (!Number.isInteger(estimatedRooms) || estimatedRooms < 1) {
+      newErrors.estimatedRooms = 'Enter an estimated total of at least 1 room.';
     }
     if (wizardData.curfewEnabled && !wizardData.curfewTime) {
       newErrors.curfewTime = 'Please specify a curfew time when curfew is enabled.';
@@ -237,8 +245,10 @@ export default function PropertyWizard() {
       }
 
       let uploadedPhotoUrl = '';
+      let photoUploadWarning = null;
 
-      if (wizardData.coverPhoto) {
+      // Safe check to ensure we only upload if it is an actual File object
+      if (wizardData.coverPhoto && wizardData.coverPhoto instanceof File) {
         try {
           const sanitizedFileName = wizardData.coverPhoto.name.replace(/[^a-zA-Z0-9.]/g, '_');
           const fileName = `${Date.now()}_${sanitizedFileName}`;
@@ -252,7 +262,8 @@ export default function PropertyWizard() {
           uploadedPhotoUrl = await getDownloadURL(snapshot.ref);
         } catch (uploadError) {
           console.error('Photo upload failed:', uploadError);
-          setSubmitError('Property was saving, but cover photo upload failed. You can re-upload it later.');
+          // Don't crash property creation, but pass a warning to the success screen
+          photoUploadWarning = 'Property was saved successfully, but the cover photo failed to upload. You can re-upload it later.';
         }
       }
 
@@ -281,8 +292,8 @@ export default function PropertyWizard() {
         namingPattern: wizardData.namingPattern || 'floor',
         configMode: wizardData.configMode || 'uniform',
         rooms: roomsData,
-        totalRooms: layoutMetrics.totalRooms || roomsData.length,
-        totalBeds: layoutMetrics.totalBeds || 0,
+        totalRooms: Number(layoutMetrics.totalRooms) || roomsData.length,
+        totalBeds: Number(layoutMetrics.totalBeds) || 0,
 
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
@@ -296,20 +307,20 @@ export default function PropertyWizard() {
           propertyName: finalPropertyData.propertyName,
           totalRooms: finalPropertyData.totalRooms,
           totalBeds: finalPropertyData.totalBeds,
+          warning: photoUploadWarning,
         },
       });
 
     } catch (error) {
       console.error('Error saving property:', error);
       setSubmitError(error.message || 'An error occurred while saving the property.');
-    } finally {
-      setIsSubmitting(false);
+      setIsSubmitting(false); // Only toggle false if we fail, otherwise navigation unmounts it
     }
   };
 
   return (
     <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: { xs: 'column', md: 'row' } }}>
-
+      {/* Sidebar */}
       <Box
         sx={{
           flex: { xs: '0 0 auto', md: '0 0 300px' },
@@ -334,6 +345,7 @@ export default function PropertyWizard() {
           </Typography>
         </Box>
 
+        {/* Mobile Step Indicator */}
         <Box sx={{ display: { xs: 'block', md: 'none' } }}>
           <Typography variant="body2" sx={{ color: '#cadcf6', mb: 1 }}>
             Step {activeStep + 1} of {STEPS.length} — {STEPS[activeStep]}
@@ -354,6 +366,7 @@ export default function PropertyWizard() {
           </Box>
         </Box>
 
+        {/* Desktop Step Indicator */}
         <Box sx={{ display: { xs: 'none', md: 'block' } }}>
           <StepList activeStep={activeStep} />
         </Box>
@@ -363,9 +376,9 @@ export default function PropertyWizard() {
         </Box>
       </Box>
 
+      {/* Main Content Area */}
       <Box sx={{ flex: 1, bgcolor: 'background.default', display: 'flex', justifyContent: 'center', px: { xs: 3, md: 6 }, py: { xs: 4, md: 6 } }}>
         <Box sx={{ width: '100%', maxWidth: 760 }}>
-
           {submitError && (
             <Alert severity="error" sx={{ mb: 3 }}>
               {submitError}

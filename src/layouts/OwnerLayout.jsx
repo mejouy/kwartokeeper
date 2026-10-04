@@ -61,7 +61,7 @@ export default function OwnerLayout() {
       {/* Top Header */}
       <Toolbar>
         <Typography variant="h6" fontWeight="bold" color="primary">
-          DormAdmin
+          Dorm Owner
         </Typography>
       </Toolbar>
       <Divider />

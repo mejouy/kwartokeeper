@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Box,
   Container,
@@ -9,14 +10,17 @@ import {
   CardContent,
   CircularProgress,
   Stack,
-  Chip
+  Chip,
+    IconButton,
+  Button
 } from "@mui/material";
 import SupervisorAccountIcon from "@mui/icons-material/SupervisorAccount";
+import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import MapsHomeWorkIcon from "@mui/icons-material/MapsHomeWork";
 import GroupIcon from "@mui/icons-material/Group";
-import SupportAgentIcon from "@mui/icons-material/SupportAgent";
-import { collection, onSnapshot, query, where, orderBy, limit } from "firebase/firestore";
-import { db } from "../../config/firebase"; // Make sure this path is correct
+import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
+import { collection, onSnapshot } from "firebase/firestore";
+import { db } from "../../config/firebase"; // Adjust path if necessary
 
 function AdminMetricBox({ title, value, subtitle, icon }) {
   return (
@@ -33,46 +37,60 @@ function AdminMetricBox({ title, value, subtitle, icon }) {
   );
 }
 
+// Helper to format Firestore timestamps safely
+const formatDate = (timestamp) => {
+  if (!timestamp) return "Recently";
+  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+};
+
 export default function AdminOverview() {
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
-    totalOwners: 0,
+    pendingOwners: 0,
+    approvedOwners: 0,
     totalProperties: 0,
     totalTenants: 0,
-    totalCaretakers: 0,
   });
   
-  const [recentProperties, setRecentProperties] = useState([]);
+  const [pendingList, setPendingList] = useState([]);
 
   useEffect(() => {
-    // 1. Listen to ALL Users (Filter locally or by query to count roles)
+    // 1. Listen to ALL Users to separate pending vs approved owners
     const unsubUsers = onSnapshot(collection(db, "users"), (snapshot) => {
-      let owners = 0;
-      let caretakers = 0;
+      let approved = 0;
+      let pending = 0;
+      let pendingOwnersData = [];
       
       snapshot.docs.forEach(doc => {
-        const role = doc.data().role;
-        if (role === "owner") owners++;
-        if (role === "caretaker") caretakers++;
+        const data = doc.data();
+        if (data.role === "owner") {
+          // Adjust "status" field based on what you saved in Firebase during registration
+          if (data.status === "pending") {
+            pending++;
+            pendingOwnersData.push({ id: doc.id, ...data });
+          } else {
+            approved++;
+          }
+        }
       });
 
-      setStats(prev => ({ ...prev, totalOwners: owners, totalCaretakers: caretakers }));
+      // Sort pending list by createdAt descending
+      pendingOwnersData.sort((a, b) => {
+        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
+        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
+        return timeB - timeA;
+      });
+
+      setStats(prev => ({ ...prev, approvedOwners: approved, pendingOwners: pending }));
+      setPendingList(pendingOwnersData.slice(0, 5)); // Show up to 5 in the feed
     });
 
     // 2. Listen to ALL Properties
-    const unsubProperties = onSnapshot(
-      query(collection(db, "properties"), orderBy("createdAt", "desc")), 
-      (snapshot) => {
-        setStats(prev => ({ ...prev, totalProperties: snapshot.docs.length }));
-        
-        // Grab the 4 most recently added properties for the feed
-        const recent = snapshot.docs.slice(0, 4).map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setRecentProperties(recent);
-      }
-    );
+    const unsubProperties = onSnapshot(collection(db, "properties"), (snapshot) => {
+      setStats(prev => ({ ...prev, totalProperties: snapshot.docs.length }));
+    });
 
     // 3. Listen to ALL Tenants
     const unsubTenants = onSnapshot(collection(db, "tenants"), (snapshot) => {
@@ -105,8 +123,16 @@ export default function AdminOverview() {
       <Grid container spacing={2.5} sx={{ mb: 4 }}>
         <Grid item xs={12} sm={6} md={3}>
           <AdminMetricBox 
-            title="Registered Owners" 
-            value={stats.totalOwners} 
+            title="Pending Approvals" 
+            value={stats.pendingOwners} 
+            subtitle="Owners awaiting verification" 
+            icon={<PersonAddIcon sx={{ color: "#ed6c02" }} />} 
+          />
+        </Grid>
+        <Grid item xs={12} sm={6} md={3}>
+          <AdminMetricBox 
+            title="Approved Owners" 
+            value={stats.approvedOwners} 
             subtitle="Active platform clients" 
             icon={<SupervisorAccountIcon sx={{ color: "#9c27b0" }} />} 
           />
@@ -127,38 +153,65 @@ export default function AdminOverview() {
             icon={<GroupIcon sx={{ color: "#2e7d32" }} />} 
           />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
-          <AdminMetricBox 
-            title="Active Caretakers" 
-            value={stats.totalCaretakers} 
-            subtitle="Staff across all properties" 
-            icon={<SupportAgentIcon sx={{ color: "#ed6c02" }} />} 
-          />
-        </Grid>
       </Grid>
 
-      {/* Bottom Layout - Admin Feed */}
+      {/* Bottom Layout - Admin Feed & Quick Actions */}
       <Grid container spacing={3}>
+        
+        {/* Action Required: Pending Owner Registrations */}
         <Grid item xs={12} md={8}>
           <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%" }}>
-            <Box sx={{ mb: 2 }}>
-              <Typography variant="h6" fontWeight="700">Recently Added Properties</Typography>
-              <Typography variant="body2" color="text.secondary">Latest properties registered by owners across the system.</Typography>
+            <Box sx={{ mb: 2, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <Box>
+                <Typography variant="h6" fontWeight="700">Action Required: Registrations</Typography>
+                <Typography variant="body2" color="text.secondary">Review and approve pending owner accounts.</Typography>
+              </Box>
+              <Button 
+                variant="outlined" 
+                size="small" 
+                onClick={() => navigate("/admin/owners")}
+                sx={{ borderRadius: 2, textTransform: "none", fontWeight: 600 }}
+              >
+                View All
+              </Button>
             </Box>
             
             <Stack spacing={2}>
-              {recentProperties.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">No properties added yet.</Typography>
+              {pendingList.length === 0 ? (
+                <Box sx={{ py: 4, textAlign: "center", bgcolor: "background.default", borderRadius: 2 }}>
+                  <Typography variant="body2" color="text.secondary">All caught up! No pending registrations.</Typography>
+                </Box>
               ) : (
-                recentProperties.map((prop) => (
-                  <Box key={prop.id} sx={{ p: 2, borderRadius: 2, bgcolor: "background.default", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                pendingList.map((owner) => (
+                  <Box 
+                    key={owner.id} 
+                    sx={{ 
+                      p: 2, 
+                      borderRadius: 2, 
+                      bgcolor: "background.default", 
+                      display: "flex", 
+                      justifyContent: "space-between", 
+                      alignItems: "center",
+                      border: "1px solid",
+                      borderColor: "transparent",
+                      transition: "all 0.2s",
+                      "&:hover": { borderColor: "divider", bgcolor: "action.hover" }
+                    }}
+                  >
                     <Box>
-                      <Typography variant="subtitle2" fontWeight="700">{prop.propertyName || "Unnamed Property"}</Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        Owner UID: {prop.ownerUid} | Rooms: {prop.rooms?.length || 0}
+                      <Typography variant="subtitle2" fontWeight="700">
+                        {owner.firstName && owner.lastName ? `${owner.firstName} ${owner.lastName}` : "New Owner"}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" display="block">
+                        {owner.email} • Applied: {formatDate(owner.createdAt)}
                       </Typography>
                     </Box>
-                    <Chip label="Active" color="success" size="small" variant="outlined" />
+                    <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+                      <Chip label="Pending" color="warning" size="small" sx={{ fontWeight: 600 }} />
+                      <IconButton onClick={() => navigate("/admin/owners")} color="primary" size="small">
+                        <ArrowForwardIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
                   </Box>
                 ))
               )}
@@ -166,22 +219,75 @@ export default function AdminOverview() {
           </Paper>
         </Grid>
 
+        {/* Quick Actions Panel */}
         <Grid item xs={12} md={4}>
           <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%", bgcolor: "primary.main", color: "primary.contrastText" }}>
             <Typography variant="h6" fontWeight="700" sx={{ mb: 2 }}>Admin Quick Actions</Typography>
             <Stack spacing={2}>
-              <Box sx={{ p: 2, bgcolor: "rgba(255,255,255,0.1)", borderRadius: 2, cursor: "pointer", "&:hover": { bgcolor: "rgba(255,255,255,0.2)" } }}>
-                <Typography variant="subtitle2" fontWeight="700">Manage Owners</Typography>
-                <Typography variant="caption">View, suspend, or assist registered owners.</Typography>
+              
+              <Box 
+                onClick={() => navigate("/admin/owners")}
+                sx={{ 
+                  p: 2, 
+                  bgcolor: "rgba(255,255,255,0.1)", 
+                  borderRadius: 2, 
+                  cursor: "pointer", 
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  transition: "background-color 0.2s",
+                  "&:hover": { bgcolor: "rgba(255,255,255,0.2)" } 
+                }}
+              >
+                <Box>
+                  <Typography variant="subtitle2" fontWeight="700">Manage Owners</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.8 }}>Approve, view, or suspend registered owners.</Typography>
+                </Box>
+                <ArrowForwardIcon fontSize="small" />
               </Box>
-              <Box sx={{ p: 2, bgcolor: "rgba(255,255,255,0.1)", borderRadius: 2, cursor: "pointer", "&:hover": { bgcolor: "rgba(255,255,255,0.2)" } }}>
-                <Typography variant="subtitle2" fontWeight="700">Global Settings</Typography>
-                <Typography variant="caption">Adjust platform fees, terms, and configurations.</Typography>
+
+              <Box 
+                onClick={() => navigate("/admin/settings")}
+                sx={{ 
+                  p: 2, 
+                  bgcolor: "rgba(255,255,255,0.1)", 
+                  borderRadius: 2, 
+                  cursor: "pointer", 
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  transition: "background-color 0.2s",
+                  "&:hover": { bgcolor: "rgba(255,255,255,0.2)" } 
+                }}
+              >
+                <Box>
+                  <Typography variant="subtitle2" fontWeight="700">Global Settings</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.8 }}>Adjust platform settings and configurations.</Typography>
+                </Box>
+                <ArrowForwardIcon fontSize="small" />
               </Box>
-              <Box sx={{ p: 2, bgcolor: "rgba(255,255,255,0.1)", borderRadius: 2, cursor: "pointer", "&:hover": { bgcolor: "rgba(255,255,255,0.2)" } }}>
-                <Typography variant="subtitle2" fontWeight="700">System Logs</Typography>
-                <Typography variant="caption">Review platform errors and security events.</Typography>
+
+              <Box 
+                onClick={() => navigate("/admin/announcements")}
+                sx={{ 
+                  p: 2, 
+                  bgcolor: "rgba(255,255,255,0.1)", 
+                  borderRadius: 2, 
+                  cursor: "pointer", 
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  transition: "background-color 0.2s",
+                  "&:hover": { bgcolor: "rgba(255,255,255,0.2)" } 
+                }}
+              >
+                <Box>
+                  <Typography variant="subtitle2" fontWeight="700">System Broadcasts</Typography>
+                  <Typography variant="caption" sx={{ opacity: 0.8 }}>Send updates or announcements to owners.</Typography>
+                </Box>
+                <ArrowForwardIcon fontSize="small" />
               </Box>
+
             </Stack>
           </Paper>
         </Grid>

@@ -15,13 +15,17 @@ import {
   IconButton,
   Avatar,
 } from "@mui/material";
-import DashboardIcon from "@mui/icons-material/Dashboard";
-import SupervisorAccountIcon from "@mui/icons-material/SupervisorAccount";
-import MapsHomeWorkIcon from "@mui/icons-material/MapsHomeWork";
-import GroupIcon from "@mui/icons-material/Group";
-import SupportAgentIcon from "@mui/icons-material/SupportAgent";
-import LogoutIcon from "@mui/icons-material/Logout";
-import MenuIcon from "@mui/icons-material/Menu";
+
+// Named imports prevent Vite ESM resolution errors
+import {
+  Dashboard as DashboardIcon,
+  SupervisorAccount as SupervisorAccountIcon,
+  Campaign as CampaignIcon,
+  Settings as SettingsIcon,
+  Logout as LogoutIcon,
+  Menu as MenuIcon,
+} from "@mui/icons-material";
+
 import { signOut } from "firebase/auth";
 import { auth } from "../config/firebase";
 
@@ -30,9 +34,8 @@ const drawerWidth = 260;
 const menuItems = [
   { text: "Overview", icon: <DashboardIcon />, path: "/admin/overview" },
   { text: "Owners", icon: <SupervisorAccountIcon />, path: "/admin/owners" },
-  { text: "Properties", icon: <MapsHomeWorkIcon />, path: "/admin/properties" },
-  { text: "Tenants", icon: <GroupIcon />, path: "/admin/tenants" },
-  { text: "Caretakers", icon: <SupportAgentIcon />, path: "/admin/caretakers" },
+  { text: "Announcements", icon: <CampaignIcon />, path: "/admin/announcements" },
+  { text: "Settings", icon: <SettingsIcon />, path: "/admin/settings" },
 ];
 
 export default function AdminLayout() {
@@ -41,8 +44,12 @@ export default function AdminLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const handleLogout = async () => {
-    await signOut(auth);
-    navigate("/login");
+    try {
+      await signOut(auth);
+      navigate("/login");
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
   };
 
   const drawerContent = (
@@ -63,11 +70,17 @@ export default function AdminLayout() {
 
       <List sx={{ px: 1.5, py: 2, flexGrow: 1 }}>
         {menuItems.map((item) => {
-          const active = location.pathname === item.path;
+          const active =
+            location.pathname === item.path ||
+            location.pathname.startsWith(`${item.path}/`);
+
           return (
             <ListItem key={item.text} disablePadding sx={{ mb: 0.5 }}>
               <ListItemButton
-                onClick={() => navigate(item.path)}
+                onClick={() => {
+                  navigate(item.path);
+                  setMobileOpen(false);
+                }}
                 selected={active}
                 sx={{
                   borderRadius: 2,
@@ -79,10 +92,15 @@ export default function AdminLayout() {
                   },
                 }}
               >
-                <ListItemIcon sx={{ minWidth: 40, color: active ? "inherit" : "action.active" }}>
+                <ListItemIcon
+                  sx={{ minWidth: 40, color: active ? "inherit" : "action.active" }}
+                >
                   {item.icon}
                 </ListItemIcon>
-                <ListItemText primary={item.text} primaryTypographyProps={{ fontWeight: active ? 700 : 500 }} />
+                <ListItemText
+                  primary={item.text}
+                  primaryTypographyProps={{ fontWeight: active ? 700 : 500 }}
+                />
               </ListItemButton>
             </ListItem>
           );
@@ -92,11 +110,17 @@ export default function AdminLayout() {
       <Divider />
 
       <Box sx={{ p: 1.5 }}>
-        <ListItemButton onClick={handleLogout} sx={{ borderRadius: 2, color: "error.main" }}>
+        <ListItemButton
+          onClick={handleLogout}
+          sx={{ borderRadius: 2, color: "error.main" }}
+        >
           <ListItemIcon sx={{ minWidth: 40, color: "error.main" }}>
             <LogoutIcon />
           </ListItemIcon>
-          <ListItemText primary="Log Out" primaryTypographyProps={{ fontWeight: 600 }} />
+          <ListItemText
+            primary="Log Out"
+            primaryTypographyProps={{ fontWeight: 600 }}
+          />
         </ListItemButton>
       </Box>
     </Box>
@@ -131,7 +155,10 @@ export default function AdminLayout() {
         </Toolbar>
       </AppBar>
 
-      <Box component="nav" sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}>
+      <Box
+        component="nav"
+        sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}
+      >
         <Drawer
           variant="temporary"
           open={mobileOpen}
@@ -148,7 +175,12 @@ export default function AdminLayout() {
           variant="permanent"
           sx={{
             display: { xs: "none", sm: "block" },
-            "& .MuiDrawer-paper": { boxSizing: "border-box", width: drawerWidth, borderRight: "1px solid", borderColor: "divider" },
+            "& .MuiDrawer-paper": {
+              boxSizing: "border-box",
+              width: drawerWidth,
+              borderRight: "1px solid",
+              borderColor: "divider",
+            },
           }}
           open
         >

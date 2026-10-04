@@ -1,6 +1,6 @@
 // src/pages/WizardSuccess.jsx
 import { useLocation, useNavigate } from "react-router-dom";
-import { Box, Typography, Button } from "@mui/material";
+import { Box, Typography, Button, Alert } from "@mui/material";
 import CheckIcon from "@mui/icons-material/Check";
 import HomeWorkOutlinedIcon from "@mui/icons-material/HomeWorkOutlined";
 import PersonAddAltOutlinedIcon from "@mui/icons-material/PersonAddAltOutlined";
@@ -101,9 +101,13 @@ export default function WizardSuccess() {
   const { state } = useLocation();
   const navigate = useNavigate();
 
-  const summary = state?.summary || { totalRooms: 0, totalBeds: 0 };
-  const propertyName = summary.propertyName?.trim();
-  const coverPhotoUrl = summary.coverPhotoUrl;
+  // Flexible parsing supporting both direct state object or wrapped .summary state
+  const propertyId = state?.propertyId || state?.summary?.propertyId;
+  const propertyName = state?.propertyName?.trim() || state?.summary?.propertyName?.trim();
+  const totalRooms = state?.totalRooms ?? state?.summary?.totalRooms ?? 0;
+  const totalBeds = state?.totalBeds ?? state?.summary?.totalBeds ?? 0;
+  const coverPhotoUrl = state?.coverPhotoUrl || state?.summary?.coverPhotoUrl;
+  const warningMessage = state?.warning;
 
   return (
     <Box
@@ -119,8 +123,7 @@ export default function WizardSuccess() {
         py: { xs: 5, md: 8 },
       }}
     >
-      {/* Blurred facade texture — same window motif as the login page,
-          tiled full-bleed and softened so it reads as depth, not detail. */}
+      {/* Blurred facade texture */}
       <Box
         sx={{
           position: "absolute",
@@ -145,7 +148,7 @@ export default function WizardSuccess() {
         }}
       />
 
-      {/* The hero card — cream brand surface, floating on the black page */}
+      {/* The hero card */}
       <Box
         sx={{
           position: "relative",
@@ -157,9 +160,13 @@ export default function WizardSuccess() {
           boxShadow: "0 24px 64px rgba(0, 0, 0, 0.55)",
         }}
       >
-        {/* Banner — photo if one was uploaded, dark placeholder otherwise.
-            Wrapped separately (not inside the clipped body) so the
-            checkmark badge can overlap its bottom edge without being cut off. */}
+        {warningMessage && (
+          <Alert severity="warning" sx={{ borderRadius: 0 }}>
+            {warningMessage}
+          </Alert>
+        )}
+
+        {/* Banner */}
         <Box sx={{ position: "relative" }}>
           <Box
             sx={{
@@ -213,8 +220,8 @@ export default function WizardSuccess() {
           </Typography>
 
           <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1, mb: 3 }}>
-            <Stat value={summary.totalRooms} label="Rooms" />
-            <Stat value={summary.totalBeds} label="Beds" />
+            <Stat value={totalRooms} label="Rooms" />
+            <Stat value={totalBeds} label="Beds" />
             <Stat value="0%" label="Occupied" />
             <Stat value={0} label="Tenants" />
           </Box>
@@ -230,7 +237,7 @@ export default function WizardSuccess() {
             <NextUpRow
               icon={PersonAddAltOutlinedIcon}
               label="Add your first tenant"
-              onClick={() => navigate("/owner/tenants/add")}
+              onClick={() => navigate(propertyId ? `/owner/tenants/register?propertyId=${propertyId}` : "/owner/tenants/add")}
             />
             <NextUpRow
               icon={SupervisorAccountOutlinedIcon}

@@ -138,6 +138,8 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
   const { currentUser, loading: authLoading } = useAuth() || {};
 
   const totalFloors = Math.max(1, Number(wizardData?.totalFloors) || 1);
+  const estimatedRooms = Number(wizardData?.estimatedRooms);
+  const hasValidEstimatedRooms = Number.isInteger(estimatedRooms) && estimatedRooms > 0;
 
   // Added defaults from wizardData to preserve state when navigating back
   const [namingPattern, setNamingPattern] = useState(wizardData?.namingPattern || "floor");
@@ -221,6 +223,8 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
       return [];
     }
   }, [configMode, uniform, floorConfigs, namingPattern, totalFloors]);
+
+  const roomCountMismatch = hasValidEstimatedRooms && rooms.length !== estimatedRooms;
 
   // Live room & bed layout summary computation
   const summary = useMemo(() => {
@@ -325,6 +329,14 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
     // Validation check before proceeding
     if (!rooms || rooms.length === 0) {
       setError("Please configure at least 1 room for your property.");
+      return;
+    }
+    if (!hasValidEstimatedRooms) {
+      setError("Enter a valid estimated room count in Step 2 before generating rooms.");
+      return;
+    }
+    if (roomCountMismatch) {
+      setError(`Step 2 estimates ${estimatedRooms} rooms, but this layout generates ${rooms.length}. Adjust the layout so the totals match.`);
       return;
     }
 
@@ -804,6 +816,11 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
         </Paper>
 
         {error && <Alert severity="error">{error}</Alert>}
+        {roomCountMismatch && (
+          <Alert severity="error">
+            Step 2 estimates {estimatedRooms} rooms, but this layout generates {rooms.length}. Adjust the room counts so the totals match before saving.
+          </Alert>
+        )}
 
         {/* Sticky Action Footer */}
         <Stack

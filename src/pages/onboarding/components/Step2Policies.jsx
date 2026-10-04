@@ -58,8 +58,8 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData, errors = {} }
       updateWizardData({ estimatedRooms: '' });
       return;
     }
-    const val = parseInt(rawVal, 10);
-    updateWizardData({ estimatedRooms: isNaN(val) ? '' : Math.max(0, val) });
+    const val = Number(rawVal);
+    updateWizardData({ estimatedRooms: Number.isNaN(val) ? '' : Math.max(0, val) });
   };
 
   // Amenities checkbox handler
@@ -169,7 +169,7 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData, errors = {} }
         {/* Estimated Total Rooms */}
         <Box sx={rowSx}>
           <Box sx={labelColSx}>
-            <Typography sx={labelColStyle}>Estimated total rooms</Typography>
+            <Typography sx={labelColStyle}>Target total rooms</Typography>
           </Box>
           <Box sx={fieldColSx}>
             <TextField
@@ -177,8 +177,10 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData, errors = {} }
               placeholder="e.g. 24"
               value={wizardData.estimatedRooms ?? ''}
               onChange={handleRoomsChange}
+              error={Boolean(errors.estimatedRooms)}
+              helperText={errors.estimatedRooms || 'This total must match the rooms configured in Step 3.'}
               sx={{ maxWidth: 160 }}
-              inputProps={{ min: 0 }}
+              inputProps={{ min: 1, step: 1 }}
             />
           </Box>
         </Box>

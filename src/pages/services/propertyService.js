@@ -97,6 +97,7 @@ export const saveProperty = async (
 
     // Structure & Layout Setup
     totalFloors: Math.max(1, Number(wizardData.totalFloors) || 1),
+    estimatedRooms: Number(wizardData.estimatedRooms) || totalRooms,
     totalRooms,
     totalBeds,
     occupiedBeds: 0,
