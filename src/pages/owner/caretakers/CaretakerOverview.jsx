@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Alert,
   Box,
@@ -7,7 +7,9 @@ import {
   CardContent,
   Chip,
   CircularProgress,
+  Container,
   Divider,
+  Grid,
   InputAdornment,
   Paper,
   Stack,
@@ -24,7 +26,6 @@ import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
 import MeetingRoomIcon from "@mui/icons-material/MeetingRoom";
 import PaymentIcon from "@mui/icons-material/Payment";
-import PeopleAltIcon from "@mui/icons-material/PeopleAlt";
 import PolicyIcon from "@mui/icons-material/Policy";
 import SearchIcon from "@mui/icons-material/Search";
 import WifiIcon from "@mui/icons-material/Wifi";
@@ -44,7 +45,7 @@ const money = (amount) => `₱${(Number(amount) || 0).toLocaleString()}`;
 
 export function MetricCard({ title, value, subtitle, icon }) {
   return (
-    <Card elevation={0} sx={{ border: "1px solid #E0E0E0", borderRadius: 2 }}>
+    <Card elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%" }}>
       <CardContent sx={{ p: 2.5 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
           <Typography variant="body2" color="text.secondary" fontWeight="600">{title}</Typography>
@@ -72,7 +73,6 @@ export default function CaretakerOverview({ section = "overview" }) {
     const user = auth.currentUser;
     if (!user) {
       navigate("/login", { replace: true });
-      setLoading(false);
       return undefined;
     }
 
@@ -254,7 +254,7 @@ export default function CaretakerOverview({ section = "overview" }) {
   }
 
   return (
-    <Box>
+    <Container maxWidth="xl" disableGutters>
       {error && <Alert severity="warning" sx={{ mb: 3 }}>{error}</Alert>}
       <Typography variant="h5" fontWeight="700" sx={{ mb: 3 }}>
         {SECTION_TITLES[section] || SECTION_TITLES.overview}
@@ -262,14 +262,23 @@ export default function CaretakerOverview({ section = "overview" }) {
 
       {section === "overview" && (
         <>
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", xl: "repeat(4, minmax(0, 1fr))" }, gap: 2, mb: 3 }}>
-            <MetricCard title="Total Managed Rooms" value={rooms.length} subtitle="Assigned property capacity" icon={<MeetingRoomIcon sx={{ color: "#FF6B35" }} />} />
-            <MetricCard title="Pending Repairs" value={openTickets.length} subtitle="Requests not marked resolved" icon={<BuildOutlinedIcon sx={{ color: "#D97706" }} />} />
-            <MetricCard title="Rent Collected" value={canViewPayments ? money(rentCollectedThisMonth) : "Restricted"} subtitle={canViewPayments ? (paymentsThisMonth.length ? "This month" : "No payment records this month") : "Financial permission required"} icon={<PaymentIcon sx={{ color: "#15803D" }} />} />
-            <MetricCard title="Occupied Units" value={occupiedRooms} subtitle={`${Math.max(rooms.length - occupiedRooms, 0)} available`} icon={<HomeWorkIcon sx={{ color: "#0288D1" }} />} />
-          </Box>
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", lg: "repeat(2, minmax(0, 1fr))" }, gap: 3 }}>
-            <Paper elevation={0} sx={{ p: 3, border: "1px solid #E0E0E0", borderRadius: 2 }}>
+          <Grid container spacing={2.5} sx={{ mb: 4 }}>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Total Managed Rooms" value={rooms.length} subtitle="Assigned property capacity" icon={<MeetingRoomIcon sx={{ color: "#FF6B35" }} />} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Pending Repairs" value={openTickets.length} subtitle="Requests not marked resolved" icon={<BuildOutlinedIcon sx={{ color: "#D97706" }} />} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Rent Collected" value={canViewPayments ? money(rentCollectedThisMonth) : "Restricted"} subtitle={canViewPayments ? (paymentsThisMonth.length ? "This month" : "No payment records this month") : "Financial permission required"} icon={<PaymentIcon sx={{ color: "#15803D" }} />} />
+            </Grid>
+            <Grid size={{ xs: 12, sm: 6, md: 3 }}>
+              <MetricCard title="Occupied Units" value={occupiedRooms} subtitle={`${Math.max(rooms.length - occupiedRooms, 0)} available`} icon={<HomeWorkIcon sx={{ color: "#0288D1" }} />} />
+            </Grid>
+          </Grid>
+          <Grid container spacing={3} sx={{ mb: 4 }}>
+            <Grid size={{ xs: 12, md: 6 }}>
+            <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%" }}>
               <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2, gap: 1 }}>
                 <Typography variant="h6" fontWeight="700">Recent Rent Collected</Typography>
                 {canViewPayments && <Button size="small" onClick={() => navigate("/caretaker/payments")}>View all</Button>}
@@ -295,8 +304,10 @@ export default function CaretakerOverview({ section = "overview" }) {
                 <Typography variant="body2" color="text.secondary">No payment records are available for this property.</Typography>
               )}
             </Paper>
+            </Grid>
 
-            <Paper elevation={0} sx={{ p: 3, border: "1px solid #E0E0E0", borderRadius: 2 }}>
+            <Grid size={{ xs: 12, md: 6 }}>
+            <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%" }}>
               <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2, gap: 1 }}>
                 <Typography variant="h6" fontWeight="700">Tenant Onboarding</Typography>
                 <Chip size="small" color={pendingTenants.length ? "warning" : "default"} label={`${pendingTenants.length} pending`} />
@@ -317,20 +328,21 @@ export default function CaretakerOverview({ section = "overview" }) {
                 <Typography variant="body2" color="text.secondary">No tenants are pending onboarding.</Typography>
               )}
             </Paper>
-          </Box>
+            </Grid>
+          </Grid>
         </>
       )}
 
       {section === "properties" && (
         <>
-          <Paper variant="outlined" sx={{ p: 2.5, mb: 3, borderRadius: 2 }}>
+          <Paper variant="outlined" sx={{ p: 3, mb: 3, borderRadius: 3 }}>
             <Typography variant="h6" fontWeight="700">{propertyName}</Typography>
             <Typography variant="body2" color="text.secondary">{address || "No address provided"}</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               {rooms.length} rooms • {rooms.reduce((sum, room) => sum + Number(room.capacity || room.beds || room.totalBeds || 0), 0)} beds
             </Typography>
           </Paper>
-          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 190px), 1fr))", gap: 2 }}>
+          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 190px), 1fr))", gap: 2.5 }}>
             {rooms.map((room, index) => (
               <Paper key={room.id || room.roomName || index} elevation={0} sx={{ minHeight: 170, p: 2, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", bgcolor: "#F2EADF", border: "1px solid #D8CEC2", borderRadius: 2 }}>
                 <Typography variant="h6" fontWeight="600">{room.roomName || room.roomNumber || `Room ${index + 1}`}</Typography>
@@ -344,11 +356,11 @@ export default function CaretakerOverview({ section = "overview" }) {
           <Divider sx={{ my: 3 }} />
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 3 }}>
             <Box>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}><WifiIcon color="primary" /><Typography variant="h6">Amenities</Typography></Stack>
+              <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}><WifiIcon color="primary" /><Typography variant="h6">Amenities</Typography></Stack>
               {property?.amenities?.length ? <Stack direction="row" flexWrap="wrap" gap={1}>{property.amenities.map((item, index) => <Chip key={`${item}-${index}`} label={item} variant="outlined" />)}</Stack> : <Typography color="text.secondary">No amenities listed.</Typography>}
             </Box>
             <Box>
-              <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 1 }}><PolicyIcon color="primary" /><Typography variant="h6">House Rules</Typography></Stack>
+              <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}><PolicyIcon color="primary" /><Typography variant="h6">House Rules</Typography></Stack>
               <Typography color="text.secondary" sx={{ whiteSpace: "pre-line" }}>{Array.isArray(property?.rules) ? property.rules.join("\n") || "No house rules specified." : property?.rulesText || property?.rules || "No house rules specified."}</Typography>
             </Box>
           </Box>
@@ -356,7 +368,7 @@ export default function CaretakerOverview({ section = "overview" }) {
       )}
 
       {section === "tenants" && (
-        <Paper elevation={0} sx={{ p: 3, border: "1px solid #E0E0E0", borderRadius: 2 }}>
+        <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2.5, flexWrap: "wrap", gap: 2 }}>
             <Typography variant="h6" fontWeight="700">Tenants at {propertyName}</Typography>
             <TextField size="small" placeholder="Search tenant or room..." value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }} />
@@ -367,9 +379,9 @@ export default function CaretakerOverview({ section = "overview" }) {
 
       {section === "payments" && (
         <>
-          <MetricCard title="Expected Monthly Rent" value={money(expectedMonthlyRent)} subtitle="Sum of active tenant rent amounts" icon={<PaymentIcon sx={{ color: "#15803D" }} />} />
+          <Box sx={{ maxWidth: 420, mb: 3 }}><MetricCard title="Expected Monthly Rent" value={money(expectedMonthlyRent)} subtitle="Sum of active tenant rent amounts" icon={<PaymentIcon sx={{ color: "#15803D" }} />} /></Box>
           <Alert severity="info" sx={{ my: 2 }}>Payment transactions are not recorded in the system yet. These figures show expected monthly rent, not payments received.</Alert>
-          <Paper elevation={0} sx={{ p: 3, border: "1px solid #E0E0E0", borderRadius: 2 }}>
+          <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
             <Typography variant="h6" fontWeight="700" sx={{ mb: 2 }}>Monthly Rent by Tenant</Typography>
             <TableContainer>
               <Table>
@@ -388,7 +400,7 @@ export default function CaretakerOverview({ section = "overview" }) {
           ? <MaintenancePanel tickets={tickets} />
           : <Alert severity="info">Your caretaker account does not have permission to view maintenance reports.</Alert>
       )}
-    </Box>
+    </Container>
   );
 }
 
@@ -417,7 +429,7 @@ function TenantTable({ tenants }) {
 function MaintenancePanel({ tickets }) {
   return (
     <Paper elevation={0} sx={{ p: 3, border: "1px solid #E0E0E0", borderRadius: 2 }}>
-      <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 2 }}>
+      <Stack direction="row" spacing={1} sx={{ mb: 2, alignItems: "center" }}>
         <BuildOutlinedIcon sx={{ color: "#D97706" }} />
         <Typography variant="h6" fontWeight="700">Maintenance Requests</Typography>
       </Stack>

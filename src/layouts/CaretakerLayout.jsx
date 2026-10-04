@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   Box,
@@ -33,6 +33,29 @@ export default function CaretakerLayout({ assignedProperty, activeTab, setActive
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Override outer #root max-width styling dynamically when layout mounts
+  useEffect(() => {
+    const rootEl = document.getElementById("root");
+    if (rootEl) {
+      const originalMaxWidth = rootEl.style.maxWidth;
+      const originalMargin = rootEl.style.margin;
+      const originalPadding = rootEl.style.padding;
+      const originalWidth = rootEl.style.width;
+
+      rootEl.style.setProperty("max-width", "none", "important");
+      rootEl.style.setProperty("width", "100%", "important");
+      rootEl.style.setProperty("margin", "0", "important");
+      rootEl.style.setProperty("padding", "0", "important");
+
+      return () => {
+        rootEl.style.maxWidth = originalMaxWidth;
+        rootEl.style.margin = originalMargin;
+        rootEl.style.padding = originalPadding;
+        rootEl.style.width = originalWidth;
+      };
+    }
+  }, []);
+
   const handleLogout = async () => {
     try {
       await signOut(auth);
@@ -42,17 +65,24 @@ export default function CaretakerLayout({ assignedProperty, activeTab, setActive
     }
   };
 
-  // Determine current label based on path or explicit activeTab prop
   const activeNavItem = NAV_ITEMS.find(
     (item) => item.id === activeTab || location.pathname === item.path
   );
 
   return (
-    <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: "#FAFAFA" }}>
+    <Box 
+      sx={{ 
+        display: "flex", 
+        minHeight: "100vh", 
+        width: "100%", 
+        bgcolor: "#FAFAFA"
+      }}
+    >
       {/* Left Sidebar */}
       <Box
+        component="aside"
         sx={{
-          width: 240,
+          width: { xs: 200, sm: 260 },
           bgcolor: "#F5EFE6",
           display: "flex",
           flexDirection: "column",
@@ -146,17 +176,28 @@ export default function CaretakerLayout({ assignedProperty, activeTab, setActive
       </Box>
 
       {/* Main Content Area */}
-      <Box sx={{ minWidth: 0, flexGrow: 1, display: "flex", flexDirection: "column" }}>
+      <Box 
+        sx={{ 
+          minWidth: 0, 
+          flexGrow: 1, 
+          width: "100%",
+          display: "flex", 
+          flexDirection: "column" 
+        }}
+      >
         {/* Top Header */}
         <Box
+          component="header"
           sx={{
             py: 2.5,
-            px: 4,
+            px: { xs: 2, sm: 4 },
             bgcolor: "#F5EFE6",
             borderBottom: "1px solid #E5DFD5",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
+            width: "100%",
+            boxSizing: "border-box"
           }}
         >
           <Typography variant="h6" fontWeight="600" sx={{ color: "#2D2D2D" }}>
@@ -169,10 +210,11 @@ export default function CaretakerLayout({ assignedProperty, activeTab, setActive
 
         {/* Dynamic Body Content */}
         <Box
+          component="main"
           sx={{
-            minWidth: 0,
+            width: "100%",
             boxSizing: "border-box",
-            px: { xs: 2, sm: 2.5, lg: 3 },
+            px: { xs: 2, sm: 4 },
             py: { xs: 2, sm: 3 },
             flexGrow: 1,
             bgcolor: "#FFFFFF",

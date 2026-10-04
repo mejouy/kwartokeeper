@@ -1,257 +1,368 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
 import {
-	Alert,
-	Box,
-	Card,
-	CardContent,
-	Chip,
-	CircularProgress,
-		Button,
-	Paper,
-	Stack,
-	Table,
-	TableBody,
-	TableCell,
-	TableContainer,
-	TableHead,
-	TableRow,
-	Typography,
+  Box,
+  Grid,
+  Paper,
+  Typography,
+  Chip,
+  Button,
+  Divider,
+  Avatar,
+  Stack,
 } from "@mui/material";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
 import MeetingRoomIcon from "@mui/icons-material/MeetingRoom";
-import PaymentIcon from "@mui/icons-material/Payment";
-import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
+import PaymentsIcon from "@mui/icons-material/Payments";
+import BuildIcon from "@mui/icons-material/Build";
+import CalendarTodayIcon from "@mui/icons-material/CalendarToday";
+import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
+import PhoneIcon from "@mui/icons-material/Phone";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import { useNavigate } from "react-router-dom";
-import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
-import { auth, db } from "../../../config/firebase";
 
-const SUMMARY_ITEMS = [
-	{ key: "propertyName", label: "Property", icon: <HomeWorkIcon />, fallback: "Not assigned" },
-	{ key: "roomNumber", label: "Room", icon: <MeetingRoomIcon />, fallback: "Not assigned" },
-	{ key: "monthlyRent", label: "Monthly Rent", icon: <PaymentIcon />, fallback: 0, currency: true },
-];
+export default function TenantOverview() {
+  const navigate = useNavigate();
 
-const formatDate = (value) => {
-	if (!value) return "—";
-	const date = value?.toDate ? value.toDate() : new Date(value);
-	return Number.isNaN(date.getTime()) ? "—" : date.toLocaleDateString();
-};
+  // Mock data (replace with state/props or Firestore queries)
+  const tenantData = {
+    propertyName: "www",
+    roomNumber: "101",
+    monthlyRent: "₱0",
+    nextDueDate: "Oct 15, 2026",
+    maintenanceCount: 1,
+    accountStatus: "Active",
+    caretakerName: "Juan Dela Cruz",
+    caretakerPhone: "0917-123-4567",
+    recentReport: {
+      title: "q",
+      room: "Room 101",
+      date: "9/30/2026",
+      status: "Pending",
+    },
+  };
 
-export default function TenantOverview({ section = "overview" }) {
-	const navigate = useNavigate();
-	const [tenantInfo, setTenantInfo] = useState({});
-	const [tickets, setTickets] = useState([]);
-	const [payments, setPayments] = useState([]);
-	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState("");
+  return (
+    <Box sx={{ width: "100%", py: 1 }}>
+      {/* Header Banner */}
+      <Box
+        sx={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          mb: 3,
+        }}
+      >
+        <Typography variant="h4" fontWeight="700" sx={{ color: "#2D2D2D" }}>
+          Overview
+        </Typography>
 
-	useEffect(() => {
-		const user = auth.currentUser;
-		if (!user) {
-			navigate("/login", { replace: true });
-			setLoading(false);
-			return undefined;
-		}
+        <Stack direction="row" spacing={1} alignItems="center">
+          <Typography variant="body2" color="text.secondary">
+            Account Status:
+          </Typography>
+          <Chip
+            icon={<CheckCircleIcon style={{ color: "#FFF" }} />}
+            label={tenantData.accountStatus}
+            color="success"
+            size="medium"
+            sx={{ fontWeight: "600", px: 1 }}
+          />
+        </Stack>
+      </Box>
 
-		let active = true;
-		let unsubscribeTickets;
-		let unsubscribePayments;
+      {/* Top 4 Key Stat Cards (Maximized & Full Width) */}
+      <Grid container spacing={3} sx={{ mb: 4 }}>
+        {/* Card 1: Property */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 3,
+              borderRadius: 3,
+              bgcolor: "#F5EFE6",
+              border: "1px solid #E5DFD5",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              height: "100%",
+              minHeight: 160,
+            }}
+          >
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+              }}
+            >
+              <Typography variant="subtitle1" fontWeight="600" color="text.secondary">
+                Property
+              </Typography>
+              <Avatar sx={{ bgcolor: "#FF6B35", width: 44, height: 44 }}>
+                <HomeWorkIcon />
+              </Avatar>
+            </Box>
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="h3" fontWeight="700" color="#2D2D2D">
+                {tenantData.propertyName}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Assigned Residence
+              </Typography>
+            </Box>
+          </Paper>
+        </Grid>
 
-		const loadTenantProfile = async () => {
-			try {
-				const [userSnapshot, tenantSnapshot] = await Promise.all([
-					getDoc(doc(db, "users", user.uid)),
-					getDoc(doc(db, "tenants", user.uid)),
-				]);
-				const profile = {
-					...(tenantSnapshot.exists() ? tenantSnapshot.data() : {}),
-					...(userSnapshot.exists() ? userSnapshot.data() : {}),
-				};
+        {/* Card 2: Room */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 3,
+              borderRadius: 3,
+              bgcolor: "#F5EFE6",
+              border: "1px solid #E5DFD5",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              height: "100%",
+              minHeight: 160,
+            }}
+          >
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+              }}
+            >
+              <Typography variant="subtitle1" fontWeight="600" color="text.secondary">
+                Room
+              </Typography>
+              <Avatar sx={{ bgcolor: "#FF6B35", width: 44, height: 44 }}>
+                <MeetingRoomIcon />
+              </Avatar>
+            </Box>
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="h3" fontWeight="700" color="#2D2D2D">
+                {tenantData.roomNumber}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Unit Number
+              </Typography>
+            </Box>
+          </Paper>
+        </Grid>
 
-				if (!userSnapshot.exists() && !tenantSnapshot.exists()) {
-					if (active) setError("Tenant profile could not be found.");
-					return;
-				}
+        {/* Card 3: Monthly Rent */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 3,
+              borderRadius: 3,
+              bgcolor: "#F5EFE6",
+              border: "1px solid #E5DFD5",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              height: "100%",
+              minHeight: 160,
+            }}
+          >
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+              }}
+            >
+              <Typography variant="subtitle1" fontWeight="600" color="text.secondary">
+                Monthly Rent
+              </Typography>
+              <Avatar sx={{ bgcolor: "#FF6B35", width: 44, height: 44 }}>
+                <PaymentsIcon />
+              </Avatar>
+            </Box>
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="h3" fontWeight="700" color="#2D2D2D">
+                {tenantData.monthlyRent}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Next Due: {tenantData.nextDueDate}
+              </Typography>
+            </Box>
+          </Paper>
+        </Grid>
 
-				const propertyId = profile.propertyId || profile.assignedPropertyId;
-				let propertyName = profile.propertyName || "Not assigned";
-				if (propertyId) {
-					const propertySnapshot = await getDoc(doc(db, "properties", propertyId));
-					if (propertySnapshot.exists()) {
-						const property = propertySnapshot.data();
-						propertyName = property.propertyName || property.name || propertyName;
-					}
-				}
+        {/* Card 4: Maintenance Reports */}
+        <Grid item xs={12} sm={6} md={3}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 3,
+              borderRadius: 3,
+              bgcolor: "#F5EFE6",
+              border: "1px solid #E5DFD5",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              height: "100%",
+              minHeight: 160,
+            }}
+          >
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "flex-start",
+              }}
+            >
+              <Typography variant="subtitle1" fontWeight="600" color="text.secondary">
+                Maintenance Reports
+              </Typography>
+              <Avatar sx={{ bgcolor: "#FF6B35", width: 44, height: 44 }}>
+                <BuildIcon />
+              </Avatar>
+            </Box>
+            <Box sx={{ mt: 2 }}>
+              <Typography variant="h3" fontWeight="700" color="#2D2D2D">
+                {tenantData.maintenanceCount}
+              </Typography>
+              <Typography variant="caption" color="text.secondary">
+                Active Requests
+              </Typography>
+            </Box>
+          </Paper>
+        </Grid>
+      </Grid>
 
-				if (active) {
-					setTenantInfo({
-						...profile,
-						propertyName,
-						roomNumber: profile.roomNumber || profile.roomId || profile.room || "Not assigned",
-						monthlyRent: profile.monthlyRent || profile.rent || 0,
-					});
-				}
-			} catch (loadError) {
-				console.error("Failed to load tenant profile:", loadError);
-				if (active) setError("Unable to load your tenant information.");
-			} finally {
-				if (active) setLoading(false);
-			}
-		};
+      {/* Bottom Layout: Maintenance Report Card + Quick Info Card */}
+      <Grid container spacing={3}>
+        {/* Maintenance Report Section */}
+        <Grid item xs={12} md={8}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 3.5,
+              borderRadius: 3,
+              bgcolor: "#F5EFE6",
+              border: "1px solid #E5DFD5",
+            }}
+          >
+            <Box
+              sx={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                mb: 2.5,
+              }}
+            >
+              <Typography variant="h6" fontWeight="700" color="#2D2D2D">
+                Recent Maintenance Report
+              </Typography>
+              <Button
+                size="small"
+                endIcon={<ArrowForwardIcon />}
+                onClick={() => navigate("/tenant/maintenance")}
+                sx={{ color: "#FF6B35", fontWeight: "700", textTransform: "none" }}
+              >
+                View all reports
+              </Button>
+            </Box>
 
-		loadTenantProfile();
-		unsubscribeTickets = onSnapshot(
-			query(collection(db, "maintenance_tickets"), where("tenantUid", "==", user.uid)),
-			(snapshot) => {
-				if (active) setTickets(snapshot.docs.map((ticket) => ({ id: ticket.id, ...ticket.data() })));
-			},
-			(loadError) => {
-				console.error("Failed to load tenant tickets:", loadError);
-				if (active) setError("Unable to load your repair requests.");
-			}
-		);
-		unsubscribePayments = onSnapshot(
-			query(collection(db, "payments"), where("tenantUid", "==", user.uid)),
-			(snapshot) => {
-				if (active) setPayments(snapshot.docs.map((payment) => ({ id: payment.id, ...payment.data() })));
-			},
-			(loadError) => {
-				console.error("Failed to load tenant payment history:", loadError);
-				if (active) setError("Unable to load your payment history.");
-			}
-		);
+            {tenantData.recentReport ? (
+              <Paper
+                elevation={0}
+                sx={{
+                  p: 2.5,
+                  borderRadius: 2,
+                  bgcolor: "#FFFFFF",
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  border: "1px solid #E5DFD5",
+                }}
+              >
+                <Box>
+                  <Typography variant="h6" fontWeight="600" color="#2D2D2D">
+                    {tenantData.recentReport.title}
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    {tenantData.recentReport.room} • Submited on {tenantData.recentReport.date}
+                  </Typography>
+                </Box>
+                <Chip
+                  label={tenantData.recentReport.status}
+                  sx={{
+                    bgcolor: "#FF6B35",
+                    color: "#FFFFFF",
+                    fontWeight: "700",
+                    px: 1,
+                  }}
+                />
+              </Paper>
+            ) : (
+              <Typography variant="body2" color="text.secondary">
+                No active maintenance reports found.
+              </Typography>
+            )}
+          </Paper>
+        </Grid>
 
-		return () => {
-			active = false;
-			unsubscribeTickets?.();
-			unsubscribePayments?.();
-		};
-	}, [navigate]);
+        {/* Quick Contact & Helpful Information */}
+        <Grid item xs={12} md={4}>
+          <Paper
+            elevation={0}
+            sx={{
+              p: 3.5,
+              borderRadius: 3,
+              bgcolor: "#F5EFE6",
+              border: "1px solid #E5DFD5",
+              display: "flex",
+              flexDirection: "column",
+              justifyContent: "space-between",
+              height: "100%",
+            }}
+          >
+            <Typography variant="h6" fontWeight="700" color="#2D2D2D" sx={{ mb: 2 }}>
+              Property Contact
+            </Typography>
 
-	if (loading) {
-		return <Box sx={{ display: "flex", justifyContent: "center", py: 8 }}><CircularProgress /></Box>;
-	}
+            <Box sx={{ bgcolor: "#FFFFFF", p: 2, borderRadius: 2, border: "1px solid #E5DFD5", mb: 2 }}>
+              <Typography variant="caption" color="text.secondary" fontWeight="600">
+                ASSIGNED CARETAKER
+              </Typography>
+              <Typography variant="subtitle1" fontWeight="700" color="#2D2D2D">
+                {tenantData.caretakerName}
+              </Typography>
+              <Stack direction="row" spacing={1} alignItems="center" sx={{ mt: 1 }}>
+                <PhoneIcon fontSize="small" sx={{ color: "#FF6B35" }} />
+                <Typography variant="body2" fontWeight="600" color="text.secondary">
+                  {tenantData.caretakerPhone}
+                </Typography>
+              </Stack>
+            </Box>
 
-	if (section === "payments") {
-		return (
-			<Box>
-				{error && <Alert severity="warning" sx={{ mb: 3 }}>{error}</Alert>}
-				<Typography variant="h5" fontWeight="700" sx={{ mb: 3 }}>Payments</Typography>
-				<Card variant="outlined" sx={{ maxWidth: 420, mb: 3, borderRadius: 2 }}>
-					<CardContent>
-						<Typography variant="body2" color="text.secondary">Monthly Rent</Typography>
-						<Typography variant="h4" fontWeight="800" sx={{ mt: 1 }}>
-							₱{(Number(tenantInfo.monthlyRent) || 0).toLocaleString()}
-						</Typography>
-					</CardContent>
-				</Card>
-				<Typography variant="h6" fontWeight="700" sx={{ mb: 1.5 }}>Payment History</Typography>
-				{payments.length === 0 ? (
-					<Alert severity="info">No payment records are available yet.</Alert>
-				) : (
-					<TableContainer component={Paper} variant="outlined" sx={{ borderRadius: 2 }}>
-						<Table>
-							<TableHead sx={{ bgcolor: "#F5F5F5" }}>
-								<TableRow>
-									<TableCell><strong>Date</strong></TableCell>
-									<TableCell><strong>Description</strong></TableCell>
-									<TableCell align="right"><strong>Amount</strong></TableCell>
-									<TableCell><strong>Status</strong></TableCell>
-								</TableRow>
-							</TableHead>
-							<TableBody>
-								{payments.map((payment) => (
-									<TableRow key={payment.id}>
-										<TableCell>{formatDate(payment.paidAt || payment.paymentDate || payment.createdAt)}</TableCell>
-										<TableCell>{payment.description || payment.month || "Rent payment"}</TableCell>
-										<TableCell align="right">₱{(Number(payment.amount ?? payment.amountPaid ?? payment.rentAmount) || 0).toLocaleString()}</TableCell>
-										<TableCell><Chip size="small" label={payment.status || "Recorded"} /></TableCell>
-									</TableRow>
-								))}
-							</TableBody>
-						</Table>
-					</TableContainer>
-				)}
-			</Box>
-		);
-	}
-
-	return (
-		<Box>
-			{error && <Alert severity="warning" sx={{ mb: 3 }}>{error}</Alert>}
-			<Typography variant="h5" fontWeight="700" sx={{ mb: 3 }}>
-				Overview
-			</Typography>
-			<Box
-				sx={{
-					display: "grid",
-					gridTemplateColumns: { xs: "1fr", sm: "repeat(2, minmax(0, 1fr))", xl: "repeat(4, minmax(0, 1fr))" },
-						gap: 3,
-				}}
-			>
-				{SUMMARY_ITEMS.map((item) => {
-					const rawValue = tenantInfo[item.key] ?? item.fallback;
-					const value = item.currency
-						? `₱${(Number(rawValue) || 0).toLocaleString()}`
-						: rawValue;
-					return (
-						<Card key={item.key} elevation={0} sx={{ border: "1px solid #E0E0E0", borderRadius: 2 }}>
-							<CardContent sx={{ p: 2.5 }}>
-								<Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-									<Typography variant="body2" color="text.secondary" fontWeight="600">
-										{item.label}
-									</Typography>
-									<Box sx={{ color: "#FF6B35" }}>{item.icon}</Box>
-								</Box>
-								<Typography variant="h6" fontWeight="700">
-									{value}
-								</Typography>
-							</CardContent>
-						</Card>
-					);
-				})}
-				<Card elevation={0} sx={{ border: "1px solid #E0E0E0", borderRadius: 2 }}>
-					<CardContent sx={{ p: 2.5 }}>
-						<Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-							<Typography variant="body2" color="text.secondary" fontWeight="600">
-								Open Repairs
-							</Typography>
-							<Box sx={{ color: "#D97706" }}><BuildOutlinedIcon /></Box>
-						</Box>
-						<Typography variant="h6" fontWeight="700">
-							{tickets.filter((ticket) => String(ticket.status || "Pending").toLowerCase() !== "resolved").length}
-						</Typography>
-					</CardContent>
-				</Card>
-			</Box>
-			<Paper elevation={0} sx={{ mt: 3, p: 3, border: "1px solid #E0E0E0", borderRadius: 2 }}>
-				<Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, mb: 2 }}>
-					<Typography variant="h6" fontWeight="700">Maintenance Report</Typography>
-					<Button size="small" onClick={() => navigate("/tenant/maintenance")}>View report</Button>
-				</Box>
-				{tickets.length ? (
-					<Stack spacing={1.5}>
-						{tickets.slice(0, 3).map((ticket) => (
-							<Box key={ticket.id} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, p: 1.5, bgcolor: "#FAFAFA", borderRadius: 1 }}>
-								<Box>
-									<Typography variant="subtitle2" fontWeight="700">{ticket.title || "Maintenance request"}</Typography>
-									<Typography variant="caption" color="text.secondary">Room {ticket.roomNumber || tenantInfo.roomNumber || "—"} · {formatDate(ticket.createdAt)}</Typography>
-								</Box>
-								<Chip size="small" label={ticket.status || "Pending"} color={String(ticket.status || "Pending").toLowerCase() === "resolved" ? "success" : "warning"} />
-							</Box>
-						))}
-					</Stack>
-				) : <Typography variant="body2" color="text.secondary">No maintenance reports yet.</Typography>}
-			</Paper>
-
-			<Box sx={{ display: "flex", alignItems: "center", gap: 1, mt: 3 }}>
-				<Typography variant="body2" color="text.secondary">Account status</Typography>
-				<Chip
-					label={tenantInfo.status || "Active"}
-					color={tenantInfo.status === "Inactive" ? "default" : "success"}
-					size="small"
-				/>
-			</Box>
-		</Box>
-	);
+            <Button
+              variant="contained"
+              fullWidth
+              onClick={() => navigate("/tenant/maintenance")}
+              sx={{
+                bgcolor: "#FF6B35",
+                color: "#FFFFFF",
+                py: 1.2,
+                fontWeight: "700",
+                borderRadius: 2,
+                textTransform: "none",
+                "&:hover": { bgcolor: "#E05A2B" },
+              }}
+            >
+              + Create Maintenance Ticket
+            </Button>
+          </Paper>
+        </Grid>
+      </Grid>
+    </Box>
+  );
 }
