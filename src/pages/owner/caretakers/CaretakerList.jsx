@@ -1,9 +1,4 @@
-// src/pages/owner/CaretakerList.jsx
-//
-// Owner-facing list of all caretakers they've invited. Fetches from the
-// `users` collection filtered by role == "caretaker" and invitedBy ==
-// current owner's uid. Also fetches each caretaker's assigned property
-// name (instead of showing the raw property doc id) for readability.
+// src/pages/owner/caretakers/CaretakerList.jsx
 
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -40,12 +35,13 @@ const PERMISSION_LABELS = {
 };
 
 function CaretakerCard({ caretaker }) {
+  const navigate = useNavigate();
   const grantedPermissions = Object.entries(caretaker.permissions || {})
     .filter(([, granted]) => granted)
     .map(([key]) => PERMISSION_LABELS[key] || key);
 
   return (
-    <Paper variant="outlined" sx={{ p: 2.5 }}>
+    <Paper variant="outlined" sx={{ p: 2.5, borderRadius: 2 }}>
       <Stack direction="row" spacing={2} alignItems="flex-start">
         <Avatar sx={{ bgcolor: "primary.main" }}>
           {caretaker.name?.charAt(0)?.toUpperCase() || "?"}
@@ -57,18 +53,29 @@ function CaretakerCard({ caretaker }) {
             justifyContent="space-between"
             alignItems="flex-start"
             flexWrap="wrap"
+            gap={1}
           >
             <Typography variant="subtitle1" fontWeight={700}>
               {caretaker.name || "Unnamed Caretaker"}
             </Typography>
-            <Chip
-              size="small"
-              label={
-                caretaker.mustChangePassword ? "Pending first login" : "Active"
-              }
-              color={caretaker.mustChangePassword ? "warning" : "success"}
-              variant="outlined"
-            />
+            
+            <Stack direction="row" spacing={1} alignItems="center">
+              <Chip
+                size="small"
+                label={
+                  caretaker.mustChangePassword ? "Pending first login" : "Active"
+                }
+                color={caretaker.mustChangePassword ? "warning" : "success"}
+                variant="outlined"
+              />
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => navigate(`/owner/caretakers/${caretaker.id}`)}
+              >
+                Manage
+              </Button>
+            </Stack>
           </Stack>
 
           <Typography variant="body2" color="text.secondary">
@@ -121,18 +128,20 @@ export default function CaretakerList() {
 
   useEffect(() => {
     async function fetchCaretakers() {
-      if (!currentUser?.uid) return;
+      if (!currentUser?.uid) {
+        setLoading(false);
+        return;
+      }
       try {
         const q = query(
           collection(db, "users"),
           where("role", "==", "caretaker"),
-          where("invitedBy", "==", currentUser.uid),
+          where("invitedBy", "==", currentUser.uid)
         );
         const snap = await getDocs(q);
         const rawCaretakers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
 
         // Resolve each caretaker's assignedPropertyId into a readable name.
-        // Cache lookups so we don't re-fetch the same property doc twice.
         const propertyCache = new Map();
         const withPropertyNames = await Promise.all(
           rawCaretakers.map(async (c) => {
@@ -145,21 +154,24 @@ export default function CaretakerList() {
             }
             try {
               const propSnap = await getDoc(
-                doc(db, "properties", c.assignedPropertyId),
+                doc(db, "properties", c.assignedPropertyId)
               );
-              const name = propSnap.exists()
-                ? propSnap.data().propertyName
-                : null;
+              let name = null;
+              if (propSnap.exists()) {
+                const propData = propSnap.data();
+                name = propData.name || propData.propertyName || null;
+              }
               propertyCache.set(c.assignedPropertyId, name);
               return { ...c, propertyName: name };
             } catch {
               return { ...c, propertyName: null };
             }
-          }),
+          })
         );
 
         setCaretakers(withPropertyNames);
       } catch (err) {
+        console.error("Error loading caretakers:", err);
         setError("Failed to load caretakers. Please refresh and try again.");
       } finally {
         setLoading(false);
@@ -169,14 +181,14 @@ export default function CaretakerList() {
   }, [currentUser?.uid]);
 
   return (
-    <Box sx={{ maxWidth: 700, mx: "auto", p: { xs: 2, sm: 3 } }}>
+    <Box sx={{ maxWidth: 800, mx: "auto", p: { xs: 2, sm: 3 } }}>
       <Stack
         direction="row"
         justifyContent="space-between"
         alignItems="center"
         sx={{ mb: 3 }}
       >
-        <Typography variant="h1">Caretakers</Typography>
+        <Typography variant="h5" fontWeight="700">Caretakers</Typography>
         <Button
           variant="contained"
           startIcon={<PersonAddAltOutlinedIcon />}
@@ -192,10 +204,10 @@ export default function CaretakerList() {
         </Box>
       )}
 
-      {error && <Alert severity="error">{error}</Alert>}
+      {error && <Alert severity="error" sx={{ mb: 2 }}>{error}</Alert>}
 
       {!loading && !error && caretakers.length === 0 && (
-        <Paper variant="outlined" sx={{ p: 4, textAlign: "center" }}>
+        <Paper variant="outlined" sx={{ p: 4, textAlign: "center", borderRadius: 2 }}>
           <Typography color="text.secondary">
             You haven't invited any caretakers yet.
           </Typography>

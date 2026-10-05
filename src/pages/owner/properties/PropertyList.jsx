@@ -59,14 +59,32 @@ export default function PropertyList() {
           const propsQuery = query(collection(db, "properties"), where("ownerUid", "==", user.uid));
           const propsSnapshot = await getDocs(propsQuery);
           
-          // 2. Fetch tenants for this owner to count actual occupied beds per property
-          const tenantsQuery = query(collection(db, "tenants"), where("ownerUid", "==", user.uid));
-          const tenantsSnapshot = await getDocs(tenantsQuery);
+          // Include older tenant records linked by propertyId but missing ownerUid.
+          const propertyIds = propsSnapshot.docs.map((propertyDoc) => propertyDoc.id);
+          const tenantSnapshots = await Promise.all([
+            getDocs(query(collection(db, "tenants"), where("ownerUid", "==", user.uid))),
+            ...propertyIds.flatMap((propertyId) => [
+              getDocs(query(collection(db, "tenants"), where("propertyId", "==", propertyId))),
+              getDocs(query(collection(db, "users"), where("propertyId", "==", propertyId))),
+            ]),
+          ]);
 
           // Map active tenant count by property ID
           const tenantCountByProperty = {};
-          tenantsSnapshot.docs.forEach((doc) => {
-            const tData = doc.data();
+          const tenantsById = new Map();
+          tenantSnapshots.forEach((snapshot) => {
+            snapshot.docs.forEach((tenantDoc) => {
+              const tenant = { id: tenantDoc.id, ...tenantDoc.data() };
+              if (tenant.role && tenant.role !== "tenant") return;
+              const tenantId = tenant.uid || tenant.id;
+              tenantsById.set(tenantId, {
+                ...(tenantsById.get(tenantId) || {}),
+                ...tenant,
+              });
+            });
+          });
+
+          tenantsById.forEach((tData) => {
             const rawStatus = (tData.status || "active").toString().toLowerCase();
 
             // Count tenant if active and assigned to a property

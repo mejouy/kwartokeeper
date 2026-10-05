@@ -1,5 +1,5 @@
-import React from 'react';
-import React from 'react';
+// src/App.jsx
+
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 
 // --- Guards & Security ---
@@ -12,17 +12,13 @@ import LandingWelcome from './pages/LandingWelcome';
 import Login from './pages/auth/Login';
 import OwnerRegister from './pages/auth/OwnerRegister';
 import PropertyWizard from './pages/onboarding/PropertyWizard';
-
 import WizardSuccess from './pages/onboarding/components/WizardSuccess';
-
-
-
-import Payments from './pages/tenant/payments';
-import TenantDetails from './pages/owner/TenantDetails';
 
 // --- Layouts ---
 import OwnerLayout from './layouts/OwnerLayout';
 import AdminLayout from './layouts/AdminLayout';
+import CaretakerLayout from './layouts/CaretakerLayout';
+import TenantLayout from './layouts/TenantLayout';
 
 // --- Owner Pages ---
 import OwnerOverview from './pages/owner/OwnerOverview';
@@ -32,14 +28,16 @@ import PropertyList from './pages/owner/properties/PropertyList';
 import PropertyProfile from './pages/owner/properties/PropertyProfile';
 import PropertyDetails from './pages/owner/properties/PropertyDetails'; 
 
-// Tenants
+// Tenants (Using the real TenantDetail component instead of the placeholder)
 import TenantList from './pages/owner/tenants/TenantList';
 import RegisterTenant from './pages/owner/tenants/RegisterTenant';
+import TenantDetail from './pages/owner/tenants/TenantDetail'; // 👈 Pointing to your tenant detail component
 
 // Caretakers
 import CaretakerList from './pages/owner/caretakers/CaretakerList';
 import InviteCaretaker from './pages/owner/caretakers/InviteCaretaker';
 import CaretakerInvited from './pages/owner/caretakers/CaretakerInvited';
+import CaretakerDetail from './pages/owner/caretakers/CaretakerDetail';
 
 // Payments & Maintenance
 import PaymentsPage from './pages/owner/PaymentsPage';
@@ -56,8 +54,7 @@ import AdminSettings from './pages/admin/AdminSettings';
 import TenantDashboard from './pages/tenant/TenantDashboard';
 import CaretakerDashboard from './pages/caretaker/CaretakerDashboard';
 
-// --- Placeholders for secondary routes ---
-const TenantDetailPlaceholder = () => <div className="p-6">Tenant Details</div>;
+// --- Placeholders for other secondary routes ---
 const AdminPropertiesPlaceholder = () => <div className="p-6">Global Properties List</div>;
 const AdminTenantsPlaceholder = () => <div className="p-6">Global Tenants List</div>;
 const AdminCaretakersPlaceholder = () => <div className="p-6">Global Caretakers List</div>;
@@ -98,7 +95,9 @@ function App() {
           path="/tenant/dashboard" 
           element={
             <ProtectedRoute allowedRoles={['tenant']}>
-              <TenantDashboard />
+              <TenantLayout>
+                {(activeTab) => <TenantDashboard activeTab={activeTab} />}
+              </TenantLayout>
             </ProtectedRoute>
           } 
         />
@@ -106,7 +105,9 @@ function App() {
           path="/caretaker/dashboard" 
           element={
             <ProtectedRoute allowedRoles={['caretaker']}>
-              <CaretakerDashboard />
+              <CaretakerLayout>
+                <CaretakerDashboard />
+              </CaretakerLayout>
             </ProtectedRoute>
           } 
         />
@@ -127,17 +128,14 @@ function App() {
           <Route index element={<Navigate to="/admin/overview" replace />} />
           <Route path="overview" element={<AdminOverview />} />
           
-          {/* Owners Management Group */}
           <Route path="owners">
             <Route index element={<ManageOwners />} />
             <Route path=":ownerId" element={<OwnerDetails />} />
           </Route>
 
-          {/* Core Admin Pages */}
           <Route path="announcements" element={<AdminAnnouncements />} />
           <Route path="settings" element={<AdminSettings />} />
 
-          {/* Placeholders */}
           <Route path="properties" element={<AdminPropertiesPlaceholder />} />
           <Route path="tenants" element={<AdminTenantsPlaceholder />} />
           <Route path="caretakers" element={<AdminCaretakersPlaceholder />} />
@@ -166,7 +164,7 @@ function App() {
             <Route index element={<TenantList />} />
             <Route path="register" element={<RegisterTenant />} />
             <Route path="add" element={<RegisterTenant />} />
-            <Route path=":tenantId" element={<TenantDetailPlaceholder />} />
+            <Route path=":tenantId" element={<TenantDetail />} />
           </Route>
 
           {/* Caretakers Group */}
@@ -174,6 +172,7 @@ function App() {
             <Route index element={<CaretakerList />} />
             <Route path="invite" element={<InviteCaretaker />} />
             <Route path="invited" element={<CaretakerInvited />} />
+            <Route path=":caretakerId" element={<CaretakerDetail />} />
           </Route>
 
           {/* Additional Operational Pages */}

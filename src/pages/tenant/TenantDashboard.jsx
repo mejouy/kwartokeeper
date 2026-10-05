@@ -8,8 +8,6 @@ import {
   Stack,
   Card,
   CardContent,
-  AppBar,
-  Toolbar,
   Divider,
   CircularProgress,
   Chip,
@@ -27,7 +25,6 @@ import {
 
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import MeetingRoomIcon from "@mui/icons-material/MeetingRoom";
-import LogoutIcon from "@mui/icons-material/Logout";
 import CalendarMonthIcon from "@mui/icons-material/CalendarMonth";
 import AddIcon from "@mui/icons-material/Add";
 import PaymentIcon from "@mui/icons-material/Payment";
@@ -35,7 +32,6 @@ import QrCode2Icon from "@mui/icons-material/QrCode2";
 import HistoryIcon from "@mui/icons-material/History";
 
 import { useNavigate } from "react-router-dom";
-import { signOut } from "firebase/auth";
 
 import {
   doc,
@@ -129,7 +125,7 @@ const DRAFT_PAYMENT_METHODS = {
   },
 };
 
-export default function TenantDashboard() {
+export default function TenantDashboard({ activeTab = "overview" }) {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
@@ -455,19 +451,6 @@ export default function TenantDashboard() {
   }, [navigate]);
 
   // -------------------------------------------------------------------------
-  // LOGOUT
-  // -------------------------------------------------------------------------
-
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      navigate("/login");
-    } catch (err) {
-      console.error("Logout failed:", err);
-    }
-  };
-
-  // -------------------------------------------------------------------------
   // MAINTENANCE SUBMISSION
   // -------------------------------------------------------------------------
 
@@ -482,7 +465,6 @@ export default function TenantDashboard() {
       await addDoc(
         collection(db, "maintenance_tickets"),
         {
-          tenantUid: user.uid,
 
           tenantName:
             tenantInfo.name,
@@ -751,74 +733,14 @@ export default function TenantDashboard() {
         bgcolor: "#f8fafc",
       }}
     >
-      {/* ================================================================
-          NAVBAR
-      ================================================================= */}
-
-      <AppBar
-        position="static"
-        color="default"
-        elevation={1}
-        sx={{
-          bgcolor: "#ffffff",
-        }}
-      >
-        <Toolbar
-          sx={{
-            justifyContent:
-              "space-between",
-          }}
-        >
-          <Typography
-            variant="h6"
-            fontWeight="800"
-            color="primary"
-          >
-            KwartoKeeper
-          </Typography>
-
-          <Stack
-            direction="row"
-            spacing={2}
-            alignItems="center"
-          >
-            <Typography
-              variant="body2"
-              color="text.secondary"
-              fontWeight="600"
-            >
-              {tenantInfo.name} (
-              {tenantInfo.propertyName})
-            </Typography>
-
-            <Button
-              variant="outlined"
-              color="error"
-              size="small"
-              startIcon={
-                <LogoutIcon />
-              }
-              onClick={
-                handleLogout
-              }
-            >
-              Logout
-            </Button>
-          </Stack>
-        </Toolbar>
-      </AppBar>
-
-      <Container
-        maxWidth="xl"
-        sx={{
-          py: 4,
-        }}
-      >
+      <Container maxWidth="xl" sx={{ py: 4 }}>
+        {activeTab === "overview" && (
+          <>
         {/* ==============================================================
             WELCOME
         ============================================================== */}
 
-        <Box sx={{ mb: 4 }}>
+        <Box id="tenant-overview" sx={{ mb: 4, scrollMarginTop: 16 }}>
           <Typography
             variant="h5"
             fontWeight="800"
@@ -983,12 +905,16 @@ export default function TenantDashboard() {
             </CardContent>
           </Card>
         </Box>
+          </>
+        )}
 
         {/* ==============================================================
             RENT PAYMENT
         ============================================================== */}
 
+        {activeTab === "payments" && (
         <Paper
+          id="tenant-payments"
           elevation={0}
           sx={{
             p: 3,
@@ -1269,12 +1195,15 @@ export default function TenantDashboard() {
             )}
           </Box>
         </Paper>
+        )}
 
         {/* ==============================================================
             RESIDENCY & LEASE
         ============================================================== */}
 
+        {activeTab === "profile" && (
         <Paper
+          id="tenant-profile"
           elevation={0}
           sx={{
             ...sectionPaperSx,
@@ -1376,12 +1305,15 @@ export default function TenantDashboard() {
             />
           </Stack>
         </Paper>
+        )}
 
         {/* ==============================================================
             MAINTENANCE
         ============================================================== */}
 
+        {activeTab === "maintenance" && (
         <Paper
+          id="tenant-maintenance"
           elevation={0}
           sx={sectionPaperSx}
         >
@@ -1528,6 +1460,7 @@ export default function TenantDashboard() {
             )}
           </Stack>
         </Paper>
+        )}
       </Container>
 
       {/* ================================================================

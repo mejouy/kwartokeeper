@@ -5,7 +5,9 @@ import {
   CircularProgress, IconButton, Stack, Snackbar, Alert, FormGroup,
   FormControlLabel, Checkbox, Table, TableBody, TableCell, TableContainer,
   TableHead, TableRow, Chip, Switch, Divider, Card, CardContent,
-  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment
+  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment,
+  Accordion, AccordionSummary, AccordionDetails, useMediaQuery, useTheme,
+  Menu, MenuItem
 } from "@mui/material";
 
 // Icons
@@ -24,6 +26,7 @@ import DeleteIcon from "@mui/icons-material/Delete";
 import CloudUploadIcon from "@mui/icons-material/CloudUpload";
 import InsertDriveFileIcon from "@mui/icons-material/InsertDriveFile";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 
 // Firebase
 import { db, storage } from "../../../config/firebase";
@@ -60,9 +63,60 @@ const formatTo24Hour = (time12) => {
   return `${String(h).padStart(2, "0")}:${minutes}`;
 };
 
+// Rate field with quick presets tucked behind a small dropdown instead of
+// a permanently-visible row of chips — same shortcut, far less visual
+// weight when it's repeated across every room in every floor.
+function RateInput({ value, onChange }) {
+  const [anchorEl, setAnchorEl] = useState(null);
+
+  return (
+    <>
+      <TextField
+        fullWidth
+        size="small"
+        type="number"
+        label="Monthly Rate / Bed"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        InputProps={{
+          startAdornment: <InputAdornment position="start">₱</InputAdornment>,
+          endAdornment: (
+            <InputAdornment position="end">
+              <IconButton
+                size="small"
+                edge="end"
+                onClick={(e) => setAnchorEl(e.currentTarget)}
+                aria-label="Quick rate presets"
+              >
+                <ExpandMoreIcon fontSize="small" />
+              </IconButton>
+            </InputAdornment>
+          ),
+        }}
+      />
+      <Menu anchorEl={anchorEl} open={Boolean(anchorEl)} onClose={() => setAnchorEl(null)}>
+        {RATE_PRESETS.map((preset) => (
+          <MenuItem
+            key={preset}
+            selected={Number(value) === preset}
+            onClick={() => {
+              onChange(preset);
+              setAnchorEl(null);
+            }}
+          >
+            ₱{preset.toLocaleString()} / bed
+          </MenuItem>
+        ))}
+      </Menu>
+    </>
+  );
+}
+
 export default function PropertyDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -415,33 +469,43 @@ export default function PropertyDetails() {
 
   return (
     <Box sx={{ pb: 6, maxWidth: 1200, mx: "auto" }}>
-      {/* Header */}
-      <Box sx={{ display: "flex", alignItems: "center", mb: 3, flexWrap: "wrap", gap: 2 }}>
-        <IconButton onClick={() => navigate("/owner/properties")}>
-          <ArrowBackIcon />
-        </IconButton>
-        <Box sx={{ flexGrow: 1 }}>
-          <Stack direction="row" spacing={1} sx={{ alignItems: "center" }} flexWrap="wrap">
-            <Typography variant="h5" fontWeight="700">
-              {formData.propertyName || "Unnamed Property"}
+      {/* Header — stacks vertically on mobile so the title/chip and the
+          Save button never have to squeeze into one row. The inline Save
+          button is desktop-only; mobile gets a sticky bar at the bottom
+          of the page instead (see end of component). */}
+      <Stack
+        direction={{ xs: "column", sm: "row" }}
+        alignItems={{ xs: "stretch", sm: "center" }}
+        spacing={2}
+        sx={{ mb: 3 }}
+      >
+        <Stack direction="row" alignItems="flex-start" spacing={1} sx={{ flexGrow: 1, minWidth: 0 }}>
+          <IconButton onClick={() => navigate("/owner/properties")} sx={{ mt: -0.5 }}>
+            <ArrowBackIcon />
+          </IconButton>
+          <Box sx={{ minWidth: 0 }}>
+            <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+              <Typography variant="h5" fontWeight="700" sx={{ wordBreak: "break-word" }}>
+                {formData.propertyName || "Unnamed Property"}
+              </Typography>
+              <Chip label={formData.propertyType} size="small" color="primary" variant="outlined" />
+            </Stack>
+            <Typography variant="body2" color="text.secondary">
+              {fullAddressStr || "No address specified"}
             </Typography>
-            <Chip label={formData.propertyType} size="small" color="primary" variant="outlined" />
-          </Stack>
-          <Typography variant="body2" color="text.secondary">
-            {fullAddressStr || "No address specified"}
-          </Typography>
-        </Box>
+          </Box>
+        </Stack>
         <Button
           variant="contained"
           size="large"
           startIcon={saving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
           onClick={handleSave}
           disabled={saving}
-          sx={{ fontWeight: 700, px: 3, borderRadius: 2 }}
+          sx={{ display: { xs: "none", sm: "inline-flex" }, fontWeight: 700, px: 3, borderRadius: 2, flexShrink: 0 }}
         >
           {saving ? "Saving..." : "Save Property"}
         </Button>
-      </Box>
+      </Stack>
 
       {/* Metrics Bar */}
       <Grid container spacing={2} sx={{ mb: 3 }}>
@@ -490,8 +554,20 @@ export default function PropertyDetails() {
         </Grid>
       </Grid>
 
-      {/* Tabs */}
-      <Paper elevation={0} sx={{ borderBottom: 1, borderColor: "divider", mb: 3 }}>
+      {/* Tabs — sticky so it stays reachable after scrolling into a
+          long tab's content (e.g. several floors of rooms). */}
+      <Paper
+        elevation={0}
+        sx={{
+          borderBottom: 1,
+          borderColor: "divider",
+          mb: 3,
+          position: "sticky",
+          top: 0,
+          zIndex: 5,
+          bgcolor: "background.paper",
+        }}
+      >
         <Tabs value={tabValue} onChange={(e, val) => setTabValue(val)} variant="scrollable">
           <Tab icon={<HomeWorkIcon sx={{ fontSize: 18 }} />} iconPosition="start" label="General Profile" />
           <Tab icon={<MeetingRoomIcon sx={{ fontSize: 18 }} />} iconPosition="start" label={`Rooms (${formData.rooms.length}) & Rates`} />
@@ -615,9 +691,12 @@ export default function PropertyDetails() {
         </Grid>
       )}
 
-      {/* TAB 1: ROOMS GROUPED BY FLOOR */}
+      {/* TAB 1: ROOMS GROUPED BY FLOOR — each floor is now a collapsible
+          accordion (expanded by default, same as before), and the room
+          table becomes a stacked card list on mobile instead of a cramped
+          5-column table. */}
       {tabValue === 1 && (
-        <Stack spacing={3}>
+        <Stack spacing={2}>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 2 }}>
             <Box>
               <Typography variant="h6" fontWeight="700">Rooms & Rates Manager</Typography>
@@ -636,7 +715,7 @@ export default function PropertyDetails() {
           </Box>
 
           {floorNumbers.length === 0 ? (
-            <Paper elevation={0} sx={{ p: 5, textAlign: "center", border: "1px border-dashed", borderColor: "divider" }}>
+            <Paper elevation={0} sx={{ p: 5, textAlign: "center", border: "1px dashed", borderColor: "divider" }}>
               <Typography variant="body1" color="text.secondary">No rooms added yet.</Typography>
               <Button startIcon={<AddIcon />} sx={{ mt: 1 }} onClick={() => setOpenAddRoomModal(true)}>
                 Add your first room
@@ -648,96 +727,144 @@ export default function PropertyDetails() {
               const floorBeds = floorRooms.reduce((sum, r) => sum + (Number(r.capacity) || 0), 0);
 
               return (
-                <Paper key={floorNum} elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 3, overflow: "hidden" }}>
-                  <Box sx={{ p: 2, px: 3, backgroundColor: "action.hover", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <Stack direction="row" spacing={1.5} alignItems="center">
-                      <LayersIcon color="primary" size="small" />
+                <Accordion
+                  key={floorNum}
+                  defaultExpanded
+                  disableGutters
+                  elevation={0}
+                  sx={{
+                    border: "1px solid",
+                    borderColor: "divider",
+                    borderRadius: 3,
+                    overflow: "hidden",
+                    "&:before": { display: "none" },
+                  }}
+                >
+                  <AccordionSummary
+                    expandIcon={<ExpandMoreIcon />}
+                    sx={{
+                      backgroundColor: "action.hover",
+                      "& .MuiAccordionSummary-content": { alignItems: "center", my: 1 },
+                    }}
+                  >
+                    <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap rowGap={1}>
+                      <LayersIcon color="primary" fontSize="small" />
                       <Typography variant="subtitle1" fontWeight="700">
                         Floor {floorNum}
                       </Typography>
                       <Chip label={`${floorRooms.length} Rooms`} size="small" variant="outlined" />
                       <Chip label={`${floorBeds} Total Beds`} size="small" color="primary" variant="outlined" />
                     </Stack>
-                  </Box>
+                  </AccordionSummary>
 
-                  <TableContainer>
-                    <Table>
-                      <TableHead>
-                        <TableRow>
-                          <TableCell fontWeight="700">Room Name</TableCell>
-                          <TableCell fontWeight="700">Floor Level</TableCell>
-                          <TableCell fontWeight="700">Bed Capacity</TableCell>
-                          <TableCell fontWeight="700">Monthly Rate / Bed (₱)</TableCell>
-                          <TableCell align="right" fontWeight="700">Actions</TableCell>
-                        </TableRow>
-                      </TableHead>
-                      <TableBody>
+                  <AccordionDetails sx={{ p: 0 }}>
+                    {isMobile ? (
+                      <Stack spacing={1.5} sx={{ p: 2 }}>
                         {floorRooms.map((room) => {
                           const idx = room.originalIndex;
                           return (
-                            <TableRow key={room.id || idx} hover>
-                              <TableCell sx={{ minWidth: 150 }}>
+                            <Paper key={room.id || idx} variant="outlined" sx={{ p: 2, borderRadius: 2 }}>
+                              <Stack direction="row" spacing={1} alignItems="flex-start">
                                 <TextField
                                   size="small"
                                   fullWidth
+                                  label="Room Name"
                                   value={room.roomName}
                                   onChange={(e) => handleRoomChange(idx, "roomName", e.target.value)}
                                 />
-                              </TableCell>
-                              <TableCell sx={{ width: 120 }}>
+                                <IconButton color="error" size="small" onClick={() => handleDeleteRoom(idx)} sx={{ mt: 0.5 }}>
+                                  <DeleteIcon fontSize="small" />
+                                </IconButton>
+                              </Stack>
+                              <Stack direction="row" spacing={1.5} sx={{ mt: 1.5 }}>
                                 <TextField
                                   type="number"
                                   size="small"
+                                  label="Floor"
                                   value={room.floor}
                                   onChange={(e) => handleRoomChange(idx, "floor", e.target.value)}
+                                  sx={{ flex: 1 }}
                                 />
-                              </TableCell>
-                              <TableCell sx={{ width: 130 }}>
                                 <TextField
                                   type="number"
                                   size="small"
+                                  label="Beds"
                                   value={room.capacity}
                                   onChange={(e) => handleRoomChange(idx, "capacity", e.target.value)}
+                                  sx={{ flex: 1 }}
                                 />
-                              </TableCell>
-                              <TableCell sx={{ minWidth: 320 }}>
-                                <Stack spacing={1}>
-                                  <TextField
-                                    size="small"
-                                    type="number"
-                                    value={room.monthlyRatePerBed}
-                                    onChange={(e) => handleRoomChange(idx, "monthlyRatePerBed", e.target.value)}
-                                    InputProps={{
-                                      startAdornment: <InputAdornment position="start">₱</InputAdornment>
-                                    }}
-                                  />
-                                  {/* Non-Techy Easy Rate Presets */}
-                                  <Stack direction="row" spacing={0.5} flexWrap="wrap" gap={0.5}>
-                                    {RATE_PRESETS.map(preset => (
-                                      <Chip
-                                        key={preset}
-                                        label={`₱${preset.toLocaleString()}`}
-                                        size="small"
-                                        clickable
-                                        color={room.monthlyRatePerBed === preset ? "primary" : "default"}
-                                        onClick={() => handleRoomChange(idx, "monthlyRatePerBed", preset)}
-                                      />
-                                    ))}
-                                  </Stack>
-                                </Stack>
-                              </TableCell>
-                              <TableCell align="right">
-                                <IconButton color="error" onClick={() => handleDeleteRoom(idx)}>
-                                  <DeleteIcon />
-                                </IconButton>
-                              </TableCell>
-                            </TableRow>
+                              </Stack>
+                              <Box sx={{ mt: 1.5 }}>
+                                <RateInput
+                                  value={room.monthlyRatePerBed}
+                                  onChange={(val) => handleRoomChange(idx, "monthlyRatePerBed", val)}
+                                />
+                              </Box>
+                            </Paper>
                           );
                         })}
-                      </TableBody>
-                    </Table>
-                  </TableContainer>
-                </Paper>
+                      </Stack>
+                    ) : (
+                      <TableContainer>
+                        <Table>
+                          <TableHead>
+                            <TableRow>
+                              <TableCell fontWeight="700">Room Name</TableCell>
+                              <TableCell fontWeight="700">Floor Level</TableCell>
+                              <TableCell fontWeight="700">Bed Capacity</TableCell>
+                              <TableCell fontWeight="700">Monthly Rate / Bed (₱)</TableCell>
+                              <TableCell align="right" fontWeight="700">Actions</TableCell>
+                            </TableRow>
+                          </TableHead>
+                          <TableBody>
+                            {floorRooms.map((room) => {
+                              const idx = room.originalIndex;
+                              return (
+                                <TableRow key={room.id || idx} hover>
+                                  <TableCell sx={{ minWidth: 150 }}>
+                                    <TextField
+                                      size="small"
+                                      fullWidth
+                                      value={room.roomName}
+                                      onChange={(e) => handleRoomChange(idx, "roomName", e.target.value)}
+                                    />
+                                  </TableCell>
+                                  <TableCell sx={{ width: 120 }}>
+                                    <TextField
+                                      type="number"
+                                      size="small"
+                                      value={room.floor}
+                                      onChange={(e) => handleRoomChange(idx, "floor", e.target.value)}
+                                    />
+                                  </TableCell>
+                                  <TableCell sx={{ width: 130 }}>
+                                    <TextField
+                                      type="number"
+                                      size="small"
+                                      value={room.capacity}
+                                      onChange={(e) => handleRoomChange(idx, "capacity", e.target.value)}
+                                    />
+                                  </TableCell>
+                                  <TableCell sx={{ minWidth: 200 }}>
+                                    <RateInput
+                                      value={room.monthlyRatePerBed}
+                                      onChange={(val) => handleRoomChange(idx, "monthlyRatePerBed", val)}
+                                    />
+                                  </TableCell>
+                                  <TableCell align="right">
+                                    <IconButton color="error" onClick={() => handleDeleteRoom(idx)}>
+                                      <DeleteIcon />
+                                    </IconButton>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </TableContainer>
+                    )}
+                  </AccordionDetails>
+                </Accordion>
               );
             })
           )}
@@ -992,6 +1119,35 @@ export default function PropertyDetails() {
           <Button variant="contained" onClick={handleCreateRoom}>Add Room</Button>
         </DialogActions>
       </Dialog>
+
+      {/* Mobile-only sticky Save bar — keeps the primary action reachable
+          without scrolling back to the top of a long, tabbed form. */}
+      <Box
+        sx={{
+          display: { xs: "block", sm: "none" },
+          position: "sticky",
+          bottom: 0,
+          mt: 4,
+          py: 1.5,
+          px: 2,
+          bgcolor: "background.paper",
+          borderTop: "1px solid",
+          borderColor: "divider",
+          zIndex: 10,
+        }}
+      >
+        <Button
+          fullWidth
+          variant="contained"
+          size="large"
+          startIcon={saving ? <CircularProgress size={20} color="inherit" /> : <SaveIcon />}
+          onClick={handleSave}
+          disabled={saving}
+          sx={{ fontWeight: 700, borderRadius: 2 }}
+        >
+          {saving ? "Saving..." : "Save Property"}
+        </Button>
+      </Box>
 
       {/* Toast Feedback */}
       <Snackbar

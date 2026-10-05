@@ -12,9 +12,7 @@ import {
 } from "@mui/material";
 
 import DashboardIcon from "@mui/icons-material/Dashboard";
-import HomeWorkIcon from "@mui/icons-material/HomeWork";
 import PeopleAltIcon from "@mui/icons-material/PeopleAlt";
-import PaymentIcon from "@mui/icons-material/Payment";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import LogoutIcon from "@mui/icons-material/Logout";
 
@@ -22,14 +20,12 @@ import { signOut } from "firebase/auth";
 import { auth } from "../config/firebase";
 
 const NAV_ITEMS = [
-  { id: "overview", label: "Overview", icon: <DashboardIcon />, path: "/caretaker/overview" },
-  { id: "properties", label: "Assigned Property", icon: <HomeWorkIcon />, path: "/caretaker/properties" },
-  { id: "tenants", label: "Tenants", icon: <PeopleAltIcon />, path: "/caretaker/tenants" },
-  { id: "payments", label: "Payments", icon: <PaymentIcon />, path: "/caretaker/payments" },
-  { id: "maintenance", label: "Maintenance", icon: <BuildOutlinedIcon />, path: "/caretaker/maintenance" },
+  { id: "overview", label: "Overview", icon: <DashboardIcon />, sectionId: "caretaker-overview" },
+  { id: "tenants", label: "Tenants", icon: <PeopleAltIcon />, sectionId: "caretaker-tenants" },
+  { id: "maintenance", label: "Maintenance", icon: <BuildOutlinedIcon />, sectionId: "caretaker-maintenance" },
 ];
 
-export default function CaretakerLayout({ assignedProperty, activeTab, setActiveTab, children }) {
+export default function CaretakerLayout({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -65,9 +61,12 @@ export default function CaretakerLayout({ assignedProperty, activeTab, setActive
     }
   };
 
-  const activeNavItem = NAV_ITEMS.find(
-    (item) => item.id === activeTab || location.pathname === item.path
-  );
+  const activeNavItem = NAV_ITEMS.find((item) => location.hash === `#${item.sectionId}`) || NAV_ITEMS[0];
+
+  const navigateToSection = (sectionId) => {
+    navigate(`/caretaker/dashboard#${sectionId}`);
+    document.getElementById(sectionId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <Box 
@@ -106,16 +105,12 @@ export default function CaretakerLayout({ assignedProperty, activeTab, setActive
           {/* Navigation Links */}
           <List sx={{ px: 0 }}>
             {NAV_ITEMS.map((item) => {
-              const isActive =
-                activeTab === item.id || location.pathname === item.path;
+              const isActive = activeNavItem.sectionId === item.sectionId;
 
               return (
                 <ListItem key={item.id} disablePadding sx={{ mb: 0.5 }}>
                   <ListItemButton
-                    onClick={() => {
-                      if (setActiveTab) setActiveTab(item.id);
-                      if (item.path) navigate(item.path);
-                    }}
+                    onClick={() => navigateToSection(item.sectionId)}
                     sx={{
                       py: 1.5,
                       px: 3,

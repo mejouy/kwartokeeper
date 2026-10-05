@@ -1,0 +1,152 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // HELPER FUNCTIONS
+    // ===============================================================
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userExists() {
+      return isSignedIn() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isAdmin() {
+      return userExists() && getUserData().role == 'admin';
+    }
+
+    function isOwner() {
+      return userExists() && getUserData().role == 'owner';
+    }
+
+    function isTenant() {
+      return userExists() && getUserData().role == 'tenant';
+    }
+
+    function isCaretaker() {
+      return userExists() && getUserData().role == 'caretaker';
+    }
+
+    // Verify document ownership by matching ownerUid OR createdBy OR direct owner association
+    function isDocOwner(docData) {
+      return docData.get('ownerUid', '') == request.auth.uid ||
+             docData.get('createdBy', '') == request.auth.uid ||
+             docData.get('userId', '') == request.auth.uid;
+    }
+
+    function isRecipient(docData) {
+      return docData.userId == request.auth.uid;
+    }
+
+    // ===============================================================
+    // USERS COLLECTION
+    // ===============================================================
+    match /users/{userId} {
+      allow read: if isSignedIn();
+
+      allow create: if isSignedIn() && (
+        isAdmin() || (
+          request.auth.uid == userId &&
+          request.resource.data.role != 'admin'
+        )
+      );
+
+      // Users can update their own profile EXCEPT restricted security fields
+      allow update: if isAdmin() || (
+        request.auth.uid == userId &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'approvalStatus', 'status'])
+      );
+
+      allow delete: if isAdmin();
+    }
+
+    // ===============================================================
+    // GLOBAL SETTINGS & ANNOUNCEMENTS
+    // ===============================================================
+    match /settings/{settingId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /announcements/{announcementId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ===============================================================
+    // NOTIFICATIONS
+    // ===============================================================
+    match /notifications/{notificationId} {
+      allow read: if isSignedIn() && (isAdmin() || isRecipient(resource.data));
+      allow create: if isAdmin() || (isSignedIn() && isRecipient(request.resource.data));
+      allow update: if isAdmin() || (
+        isSignedIn() &&
+        isRecipient(resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead'])
+      );
+      allow delete: if isAdmin() || (isSignedIn() && isRecipient(resource.data));
+    }
+
+    // ===============================================================
+    // PROPERTIES, TENANTS, CARETAKERS, PAYMENTS, MAINTENANCE TICKETS
+    // ===============================================================
+
+    match /properties/{propertyId} {
+      allow read: if isSignedIn();
+      allow create: if isAdmin() || (isOwner() && isDocOwner(request.resource.data));
+      allow update: if isAdmin() || (isOwner() && isDocOwner(resource.data));
+      allow delete: if isAdmin() || (isOwner() && isDocOwner(resource.data));
+    }
+
+    match /tenants/{tenantId} {
+      allow read: if isSignedIn() && (isAdmin() || isOwner() || resource.data.get('tenantId', '') == request.auth.uid || resource.data.get('userId', '') == request.auth.uid);
+      allow create: if isAdmin() || (isOwner() && isDocOwner(request.resource.data));
+      allow update, delete: if isAdmin() || (isOwner() && isDocOwner(resource.data));
+    }
+
+    match /caretakers/{caretakerId} {
+      allow read: if isSignedIn() && (isAdmin() || isOwner() || resource.data.get('caretakerId', '') == request.auth.uid);
+      allow create: if isAdmin() || (isOwner() && isDocOwner(request.resource.data));
+      allow update, delete: if isAdmin() || (isOwner() && isDocOwner(resource.data));
+    }
+
+    match /payments/{paymentId} {
+      // Tenant queries constrain tenantId; owner queries constrain ownerUid.
+      allow read: if isAdmin() ||
+        (isTenant() && resource.data.get('tenantId', '') == request.auth.uid) ||
+        (isOwner() && resource.data.get('ownerUid', '') == request.auth.uid);
+
+      // Tenants may submit their own pending payment; owners may record payments for their properties.
+      allow create: if isAdmin() ||
+        (isTenant() &&
+          request.resource.data.get('tenantId', '') == request.auth.uid &&
+          request.resource.data.get('status', '') == 'Pending') ||
+        (isOwner() && request.resource.data.get('ownerUid', '') == request.auth.uid);
+
+      // Only the owning owner may update or delete a payment. Keep its ownership fields immutable.
+      allow update: if isAdmin() ||
+        (isOwner() &&
+          resource.data.get('ownerUid', '') == request.auth.uid &&
+          request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '') &&
+          request.resource.data.get('tenantId', '') == resource.data.get('tenantId', ''));
+      allow delete: if isAdmin() ||
+        (isOwner() && resource.data.get('ownerUid', '') == request.auth.uid);
+    }
+
+    // RENAMED from /tickets/{ticketId} to match the React app collection name
+    match /maintenance_tickets/{ticketId} {
+      // Allow owners, system admins, or the user who created/owns the ticket to read & write
+      allow read: if isSignedIn() && (isAdmin() || isOwner() || isTenant() || isCaretaker() || isDocOwner(resource.data));
+
+      // When creating/updating, ensure the user has the right relationship to the ticket
+      allow create, update, delete: if isSignedIn() && (isAdmin() || isOwner() || isDocOwner(request.resource.data) || isDocOwner(resource.data));
+    }
+  }
+}

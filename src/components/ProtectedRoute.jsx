@@ -5,7 +5,14 @@ import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../config/firebase"; // Adjust path to your firebase config
 import { Box, CircularProgress } from "@mui/material";
 
-export default function ProtectedRoute({ children }) {
+const ROLE_HOME_PATHS = {
+  owner: "/owner",
+  admin: "/admin/overview",
+  tenant: "/tenant/dashboard",
+  caretaker: "/caretaker/dashboard",
+};
+
+export default function ProtectedRoute({ children, allowedRoles = [] }) {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [userDoc, setUserDoc] = useState(null);
@@ -23,6 +30,13 @@ export default function ProtectedRoute({ children }) {
           
           if (docSnap.exists()) {
             setUserDoc(docSnap.data());
+          } else {
+            const roleProfiles = await Promise.all([
+              getDoc(doc(db, "tenants", currentUser.uid)),
+              getDoc(doc(db, "caretakers", currentUser.uid)),
+            ]);
+            const profile = roleProfiles.find((profileDoc) => profileDoc.exists());
+            if (profile) setUserDoc(profile.data());
           }
         } catch (error) {
           console.error("Error fetching user data:", error);
@@ -57,6 +71,16 @@ export default function ProtectedRoute({ children }) {
     return <Navigate to="/suspended" replace />;
   }
 
-  // 4. If logged in and NOT suspended, render the requested page (children)
+  if (allowedRoles.length > 0) {
+    const role = userDoc?.role;
+    if (!role) {
+      return <Navigate to="/login" state={{ from: location }} replace />;
+    }
+    if (!allowedRoles.includes(role)) {
+      return <Navigate to={ROLE_HOME_PATHS[role] || "/login"} replace />;
+    }
+  }
+
+  // 4. If logged in, not suspended, and authorized, render the requested page.
   return children;
 }

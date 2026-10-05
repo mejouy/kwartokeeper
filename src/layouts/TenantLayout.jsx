@@ -1,5 +1,5 @@
-import React, { useEffect } from "react";
-import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import React, { useEffect, useState } from "react";
+import { Outlet, useNavigate } from "react-router-dom";
 import {
   Box,
   Button,
@@ -19,15 +19,16 @@ import { signOut } from "firebase/auth";
 import { auth } from "../config/firebase";
 
 const NAV_ITEMS = [
-  { label: "Overview", path: "/tenant/dashboard", icon: <DashboardIcon /> },
-  { label: "Tenant Profile", path: "/tenant/profile", icon: <AccountCircleOutlinedIcon /> },
-  { label: "Payments", path: "/tenant/payments", icon: <PaymentIcon /> },
-  { label: "Maintenance Report", path: "/tenant/maintenance", icon: <BuildOutlinedIcon /> },
+  { id: "overview", label: "Overview", icon: <DashboardIcon /> },
+  { id: "profile", label: "Tenant Profile", icon: <AccountCircleOutlinedIcon /> },
+  { id: "payments", label: "Payments", icon: <PaymentIcon /> },
+  { id: "maintenance", label: "Maintenance Report", icon: <BuildOutlinedIcon /> },
 ];
 
 export default function TenantLayout({ children }) {
   const navigate = useNavigate();
-  const location = useLocation();
+  const [activeTab, setActiveTab] = useState("overview");
+  const activeNavItem = NAV_ITEMS.find((item) => item.id === activeTab) || NAV_ITEMS[0];
 
   // Forcefully override parent #root styles from inside this layout component alone
   useEffect(() => {
@@ -61,8 +62,6 @@ export default function TenantLayout({ children }) {
     }
   };
 
-  const activeNavItem = NAV_ITEMS.find((item) => location.pathname === item.path);
-
   return (
     <Box
       sx={{
@@ -93,12 +92,12 @@ export default function TenantLayout({ children }) {
           </Box>
           <List sx={{ px: 0 }}>
             {NAV_ITEMS.map((item) => {
-              const selected = location.pathname === item.path;
+              const selected = activeNavItem.id === item.id;
               return (
-                <ListItem key={item.path} disablePadding sx={{ mb: 0.5 }}>
+                <ListItem key={item.id} disablePadding sx={{ mb: 0.5 }}>
                   <ListItemButton
                     selected={selected}
-                    onClick={() => navigate(item.path)}
+                    onClick={() => setActiveTab(item.id)}
                     sx={{
                       py: 1.5,
                       px: 3,
@@ -192,7 +191,9 @@ export default function TenantLayout({ children }) {
             boxSizing: "border-box",
           }}
         >
-          {children || <Outlet />}
+          {typeof children === "function"
+            ? children(activeTab)
+            : children || <Outlet />}
         </Box>
       </Box>
     </Box>
