@@ -118,11 +118,7 @@ const DRAFT_PAYMENT_METHODS = {
       "BANK TRANSFER DRAFT - Replace with actual bank details before defense",
   },
 
-  Cash: {
-    enabled: true,
-    instructions:
-      "Submit this request after handing the cash payment to the owner or caretaker. The payment will remain pending until it is verified.",
-  },
+  
 };
 
 export default function TenantDashboard({ activeTab = "overview" }) {
@@ -1739,9 +1735,7 @@ export default function TenantDashboard({ activeTab = "overview" }) {
                 />
               </Box>
             ) : (
-              /* ========================================================
-                 CASH
-              ========================================================= */
+             
 
               <Alert severity="info">
                 {
@@ -1750,161 +1744,23 @@ export default function TenantDashboard({ activeTab = "overview" }) {
               </Alert>
             )}
 
-            {/* PAYMENT AMOUNT */}
-
-            <TextField
-              label="Payment Amount"
-              type="number"
-              fullWidth
-              value={
-                paymentForm.amount
-              }
-              onChange={(e) =>
-                setPaymentForm({
-                  ...paymentForm,
-                  amount:
-                    e.target.value,
-                })
-              }
-              InputProps={{
-                startAdornment: (
-                  <Typography
-                    sx={{
-                      mr: 1,
-                    }}
-                  >
-                    ₱
-                  </Typography>
-                ),
-              }}
-            />
-
-            {/* REFERENCE */}
-
-            <TextField
-              label={
-                selectedPaymentMethod ===
-                "Cash"
-                  ? "Reference / Receipt Number (optional)"
-                  : "Payment Reference Number"
-              }
-              fullWidth
-              value={
-                paymentForm.referenceNumber
-              }
-              onChange={(e) =>
-                setPaymentForm({
-                  ...paymentForm,
-                  referenceNumber:
-                    e.target.value,
-                })
-              }
-              placeholder={
-                selectedPaymentMethod ===
-                "Cash"
-                  ? "Optional"
-                  : "Enter the reference number from your payment"
-              }
-            />
-
-            {/* DATE */}
-
-            <TextField
-              label="Payment Date"
-              type="date"
-              fullWidth
-              value={
-                paymentForm.paymentDate
-              }
-              onChange={(e) =>
-                setPaymentForm({
-                  ...paymentForm,
-                  paymentDate:
-                    e.target.value,
-                })
-              }
-              InputLabelProps={{
-                shrink: true,
-              }}
-            />
-
-            {/* REMARKS */}
-
-            <TextField
-              label="Remarks (optional)"
-              multiline
-              rows={2}
-              fullWidth
-              value={
-                paymentForm.remarks
-              }
-              onChange={(e) =>
-                setPaymentForm({
-                  ...paymentForm,
-                  remarks:
-                    e.target.value,
-                })
-              }
-              placeholder="Add any additional payment details"
-            />
-
-            {/* VERIFICATION NOTICE */}
-
-            <Alert severity="warning">
-              Your payment will
-              be recorded as{" "}
-              <strong>
-                Pending
-              </strong>
-              . The owner must
-              verify it before it
-              becomes{" "}
-              <strong>
-                Paid
-              </strong>
-              .
-            </Alert>
-          </Stack>
+                      </Stack>
         </DialogContent>
 
-        <DialogActions
-          sx={{ p: 2 }}
-        >
+        <DialogActions sx={{ p: 2 }}>
           <Button
-            onClick={() =>
-              setOpenPaymentModal(
-                false
-              )
-            }
-            disabled={
-              paymentSubmitting
-            }
+            onClick={() => setOpenPaymentModal(false)}
+            disabled={paymentSubmitting}
           >
             Cancel
           </Button>
 
           <Button
             variant="contained"
-            onClick={
-              handlePaymentSubmit
-            }
-            disabled={
-              paymentSubmitting
-            }
-            startIcon={
-              paymentSubmitting ? (
-                <CircularProgress
-                  size={18}
-                  color="inherit"
-                />
-              ) : (
-                <PaymentIcon />
-              )
-            }
+            onClick={handlePaymentSubmit}
+            disabled={paymentSubmitting}
           >
-            {paymentSubmitting
-              ? "Submitting..."
-              : "Submit Payment"}
+            {paymentSubmitting ? "Submitting..." : "Submit Payment"}
           </Button>
         </DialogActions>
       </Dialog>
@@ -2035,6 +1891,7 @@ export default function TenantDashboard({ activeTab = "overview" }) {
     </Box>
   );
 }
+
 
 // ============================================================================
 // STYLES
