@@ -15,6 +15,7 @@ import DashboardIcon from "@mui/icons-material/Dashboard";
 import PeopleAltIcon from "@mui/icons-material/PeopleAlt";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import LogoutIcon from "@mui/icons-material/Logout";
+import NotificationFeed from "../components/NotificationFeed";
 
 import { signOut } from "firebase/auth";
 import { auth } from "../config/firebase";
@@ -198,9 +199,12 @@ export default function CaretakerLayout({ children }) {
           <Typography variant="h6" fontWeight="600" sx={{ color: "#2D2D2D" }}>
             {activeNavItem?.label || "Dashboard"}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            Caretaker Portal
-          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              Caretaker Portal
+            </Typography>
+            <NotificationFeed />
+          </Box>
         </Box>
 
         {/* Dynamic Body Content */}

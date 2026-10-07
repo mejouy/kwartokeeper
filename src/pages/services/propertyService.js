@@ -12,15 +12,39 @@ import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 const normalizeText = (value) =>
   typeof value === "string" ? value.trim() : "";
 
-/**
- * TEMPORARY DEV WORKAROUND:
- * Photo uploads are deliberately disabled for now because the
- * Firebase Storage / CORS path still needs work. Keep the setup flow
- * usable while the UI/UX and property creation flow are being finished.
- */
+const sanitizeFileName = (fileName) =>
+  String(fileName || "cover-photo")
+    .replace(/[^a-zA-Z0-9._-]/g, "_")
+    .replace(/_+/g, "_");
+
 export const uploadPropertyPhoto = async (file, ownerUid) => {
-  console.warn("Cover photo upload is intentionally disabled for now. Firebase Storage / CORS needs work.");
-  return null;
+  if (!(file instanceof File)) {
+    throw new Error("The selected cover photo is not a valid file.");
+  }
+
+  if (!file.type.startsWith("image/")) {
+    throw new Error("The selected cover photo must be an image file.");
+  }
+
+  if (file.size > 10 * 1024 * 1024) {
+    throw new Error("The cover photo must be smaller than 10 MB.");
+  }
+
+  const uploadPath = `properties/${ownerUid}/${Date.now()}_${sanitizeFileName(file.name)}`;
+  const photoRef = ref(storage, uploadPath);
+  const metadata = {
+    contentType: file.type,
+    cacheControl: "public,max-age=31536000,immutable",
+  };
+
+  const snapshot = await uploadBytes(photoRef, file, metadata);
+  const downloadUrl = await getDownloadURL(snapshot.ref);
+
+  if (!downloadUrl.startsWith("https://")) {
+    throw new Error("Firebase Storage did not return a valid download URL.");
+  }
+
+  return { downloadUrl, storagePath: uploadPath };
 };
 
 /**
@@ -76,11 +100,17 @@ export const saveProperty = async (
     region: normalizeText(wizardData.region) || normalizeText(wizardData.address?.region) || null,
   };
 
-  // TEMPORARY DEV WORKAROUND:
-  // Deliberately persist null for the cover photo URL now.
-  // Firebase Storage / CORS mapping still needs work, and we want
-  // the UI/UX and property setup flow to continue without being blocked.
-  let uploadedCoverPhotoUrl = null;
+  let uploadedCoverPhotoUrl =
+    normalizeText(wizardData.coverPhotoUrl) ||
+    normalizeText(wizardData.coverPhotoPreview) ||
+    normalizeText(wizardData.coverPhoto);
+
+  if (coverPhotoFile instanceof File) {
+    const uploadedPhoto = await uploadPropertyPhoto(coverPhotoFile, resolvedOwnerUid);
+    uploadedCoverPhotoUrl = uploadedPhoto.downloadUrl;
+  }
+
+  const normalizedCoverPhotoUrl = uploadedCoverPhotoUrl || null;
 
   const propertyPayload = {
     // Basic Details
@@ -90,7 +120,13 @@ export const saveProperty = async (
       "Untitled Property",
     propertyType: wizardData.propertyType || "Dormitory",
     emergencyPhone: normalizeText(wizardData.emergencyPhone) || null,
-    coverPhotoUrl: uploadedCoverPhotoUrl,
+    coverPhotoUrl: normalizedCoverPhotoUrl,
+    coverPhoto: normalizedCoverPhotoUrl,
+    imageUrl: normalizedCoverPhotoUrl,
+    photoUrl: normalizedCoverPhotoUrl,
+    coverPhotoStoragePath: coverPhotoFile instanceof File
+      ? `properties/${resolvedOwnerUid}/${Date.now()}_${sanitizeFileName(coverPhotoFile.name)}`
+      : null,
 
     // Hierarchical Address Details
     address: addressPayload,

@@ -22,6 +22,7 @@ import TenantLayout from './layouts/TenantLayout';
 
 // --- Owner Pages ---
 import OwnerOverview from './pages/owner/OwnerOverview';
+import OwnerAnnouncements from './pages/owner/OwnerAnnouncements';
 
 // Properties
 import PropertyList from './pages/owner/properties/PropertyList';
@@ -178,6 +179,7 @@ function App() {
           {/* Additional Operational Pages */}
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="maintenance" element={<MaintenancePage />} />
+          <Route path="announcements" element={<OwnerAnnouncements />} />
         </Route>
 
         {/* --- 404 Fallback Route --- */}

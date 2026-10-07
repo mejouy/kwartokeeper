@@ -5,10 +5,10 @@ import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
 import RuleOutlinedIcon from '@mui/icons-material/RuleOutlined';
 import GridViewOutlinedIcon from '@mui/icons-material/GridViewOutlined';
 
-import { auth, db, storage } from '../../config/firebase';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { auth, db } from '../../config/firebase';
+import { collection, addDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
 
+import { uploadPropertyPhoto } from '../services/propertyService';
 import Step1Basics from './components/Step1Basics';
 import Step2Rules from './components/Step2Policies';
 import Step3Rooms from './components/Step3Rooms';
@@ -145,6 +145,9 @@ export default function PropertyWizard() {
     cityCode: '',
     emergencyPhone: '',
     coverPhoto: null,
+    coverPhotoUrl: '',
+    coverPhotoPreview: '',
+    coverPhotoName: '',
     totalFloors: 1,
     amenities: [],
     curfewEnabled: false,
@@ -152,7 +155,6 @@ export default function PropertyWizard() {
     namingPattern: 'floor',
   });
 
-  // Scroll to top when the step changes
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [activeStep]);
@@ -160,7 +162,6 @@ export default function PropertyWizard() {
   const updateWizardData = (newData) => {
     setWizardData((prev) => {
       const updated = { ...prev, ...newData };
-      // Ensure totalFloors is always stored as a clean integer
       if (newData.totalFloors !== undefined) {
         updated.totalFloors = Math.max(1, Number(newData.totalFloors) || 1);
       }
@@ -244,31 +245,37 @@ export default function PropertyWizard() {
         throw new Error('Authentication error: No property owner is currently logged in.');
       }
 
-      let uploadedPhotoUrl = '';
+      // Extract photo string from base64 string or file preview
+      const fallbackPhotoString =
+        (typeof wizardData.coverPhotoUrl === 'string' && wizardData.coverPhotoUrl) ||
+        (typeof wizardData.coverPhotoPreview === 'string' && wizardData.coverPhotoPreview) ||
+        (typeof wizardData.coverPhoto === 'string' && wizardData.coverPhoto) ||
+        '';
+
+      let finalPhotoUrl = fallbackPhotoString;
       let photoUploadWarning = null;
 
-      // Safe check to ensure we only upload if it is an actual File object
-      if (wizardData.coverPhoto && wizardData.coverPhoto instanceof File) {
+      if (wizardData.coverPhoto instanceof File) {
         try {
-          const sanitizedFileName = wizardData.coverPhoto.name.replace(/[^a-zA-Z0-9.]/g, '_');
-          const fileName = `${Date.now()}_${sanitizedFileName}`;
-          const photoRef = ref(storage, `properties/${currentUser.uid}/${fileName}`);
-          
-          const metadata = {
-            contentType: wizardData.coverPhoto.type || 'image/jpeg',
-          };
-
-          const snapshot = await uploadBytes(photoRef, wizardData.coverPhoto, metadata);
-          uploadedPhotoUrl = await getDownloadURL(snapshot.ref);
+          const uploadedPhoto = await uploadPropertyPhoto(
+            wizardData.coverPhoto,
+            currentUser.uid
+          );
+          finalPhotoUrl = uploadedPhoto.downloadUrl;
         } catch (uploadError) {
-          console.error('Photo upload failed:', uploadError);
-          // Don't crash property creation, but pass a warning to the success screen
-          photoUploadWarning = 'Property was saved successfully, but the cover photo failed to upload. You can re-upload it later.';
+          console.error('Firebase Storage cover photo upload failed:', uploadError);
+          throw new Error(
+            `The cover photo could not be saved. ${uploadError.message || 'Please try another image.'}`
+          );
         }
       }
 
+      const normalizedPhotoUrl = finalPhotoUrl || null;
+
       const finalPropertyData = {
         ownerUid: currentUser.uid,
+        createdBy: currentUser.uid,
+        userId: currentUser.uid,
 
         street: wizardData.street || '',
         barangay: wizardData.barangay || '',
@@ -282,7 +289,12 @@ export default function PropertyWizard() {
         propertyName: wizardData.propertyName || '',
         propertyType: wizardData.propertyType || '',
         emergencyPhone: wizardData.emergencyPhone || '',
-        coverPhotoUrl: uploadedPhotoUrl,
+
+        // Multi-field mapping to support any dashboard UI schema
+        coverPhotoUrl: normalizedPhotoUrl,
+        coverPhoto: normalizedPhotoUrl,
+        imageUrl: normalizedPhotoUrl,
+        photoUrl: normalizedPhotoUrl,
 
         totalFloors: Number(wizardData.totalFloors) || 1,
         amenities: wizardData.amenities || [],
@@ -301,6 +313,14 @@ export default function PropertyWizard() {
 
       const docRef = await addDoc(collection(db, 'properties'), finalPropertyData);
 
+      // Update owner's profile document to set hasProperty flag
+      try {
+        const userRef = doc(db, 'users', currentUser.uid);
+        await updateDoc(userRef, { hasProperty: true });
+      } catch (userErr) {
+        console.warn('Could not update user hasProperty flag:', userErr);
+      }
+
       navigate('/wizard-success', {
         state: {
           propertyId: docRef.id,
@@ -314,7 +334,7 @@ export default function PropertyWizard() {
     } catch (error) {
       console.error('Error saving property:', error);
       setSubmitError(error.message || 'An error occurred while saving the property.');
-      setIsSubmitting(false); // Only toggle false if we fail, otherwise navigation unmounts it
+      setIsSubmitting(false);
     }
   };
 

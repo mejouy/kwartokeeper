@@ -15,6 +15,7 @@ import AccountCircleOutlinedIcon from "@mui/icons-material/AccountCircleOutlined
 import PaymentIcon from "@mui/icons-material/Payment";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import LogoutIcon from "@mui/icons-material/Logout";
+import NotificationFeed from "../components/NotificationFeed";
 import { signOut } from "firebase/auth";
 import { auth } from "../config/firebase";
 
@@ -175,9 +176,12 @@ export default function TenantLayout({ children }) {
           <Typography variant="h6" fontWeight="600" sx={{ color: "#2D2D2D" }}>
             {activeNavItem?.label || "Tenant Portal"}
           </Typography>
-          <Typography variant="body2" color="text.secondary">
-            KwartoKeeper
-          </Typography>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+            <Typography variant="body2" color="text.secondary">
+              KwartoKeeper
+            </Typography>
+            <NotificationFeed />
+          </Box>
         </Box>
 
         {/* Content */}

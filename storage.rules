@@ -1,0 +1,34 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function userDocExists() {
+      return isSignedIn() && 
+        firestore.exists(/databases/(default)/documents/users/$(request.auth.uid));
+    }
+
+    function getUserRole() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isOwnerOrAdmin() {
+      return userDocExists() && (getUserRole() == 'owner' || getUserRole() == 'admin');
+    }
+
+    // Property Cover Photos Directory
+    match /properties/{ownerId}/{fileName} {
+      // ✅ Allow all authenticated users (tenants, caretakers, owners, admins) to view cover photos
+      allow read: if isSignedIn();
+
+      // ✅ Owners (uploading to their own folder) or Admins can upload/delete images (<10MB images only)
+      allow create, update, delete: if isSignedIn() && 
+        (ownerId == request.auth.uid || isOwnerOrAdmin()) &&
+        request.resource.size < 10 * 1024 * 1024 &&
+        request.resource.contentType.matches('image/.*');
+    }
+  }
+}

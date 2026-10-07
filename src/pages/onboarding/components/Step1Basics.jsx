@@ -32,11 +32,51 @@ const RequiredMark = () => (
   <Box component="span" sx={{ color: 'primary.main', ml: 0.4 }}>*</Box>
 );
 
+// Fallback image compressor (HTML5 Canvas)
+const compressImage = (file, maxWidth = 1000, maxHeight = 1000, quality = 0.75) => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target.result;
+      img.onload = () => {
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement('canvas');
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const compressedBase64 = canvas.toDataURL('image/jpeg', quality);
+        resolve(compressedBase64);
+      };
+      img.onerror = (err) => reject(err);
+    };
+    reader.onerror = (err) => reject(err);
+  });
+};
+
 export default function Step1Basics({ wizardData = {}, updateWizardData, errors = {} }) {
   const [regionList, setRegionList] = useState([]);
   const [provinceList, setProvinceList] = useState([]);
   const [cityList, setCityList] = useState([]);
   const [barangayList, setBarangayList] = useState([]);
+  const [uploading, setUploading] = useState(false);
 
   // Load Regions on Initial Mount
   useEffect(() => {
@@ -129,20 +169,45 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
     updateWizardData({ emergencyPhone: numericValue });
   };
 
-  // Cover Photo Upload Handler (Converts File to Base64 String for Safe Firestore Storage)
-  const handlePhotoUpload = (e) => {
+  // Fail-Safe Photo Upload Handler
+  const handlePhotoUpload = async (e) => {
     const file = e.target.files?.[0];
-    if (file) {
+    if (!file) return;
+
+    if (!file.type.startsWith('image/')) {
+      alert('Please select a valid image file.');
+      return;
+    }
+
+    setUploading(true);
+
+    try {
+      // Keep a compressed data URL for the preview, but retain the original File
+      // so the save step can upload it to Firebase Storage.
+      let imageString = await compressImage(file, 1000, 1000, 0.75);
+
+      updateWizardData({
+        coverPhotoName: file.name,
+        coverPhotoPreview: imageString,
+        coverPhotoUrl: '',
+        coverPhoto: file,
+      });
+    } catch (err) {
+      console.warn("Canvas compression failed, falling back to direct FileReader:", err);
       const reader = new FileReader();
       reader.onloadend = () => {
-        const base64String = reader.result;
+        const rawBase64 = reader.result;
         updateWizardData({
           coverPhotoName: file.name,
-          coverPhotoPreview: base64String,
-          coverPhotoUrl: base64String, // Safe Base64 string that writes cleanly to Firestore
+          coverPhotoPreview: rawBase64,
+          coverPhotoUrl: '',
+          coverPhoto: file,
         });
       };
       reader.readAsDataURL(file);
+    } finally {
+      setUploading(false);
+      e.target.value = '';
     }
   };
 
@@ -151,14 +216,16 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
       coverPhotoName: '',
       coverPhotoPreview: '',
       coverPhotoUrl: '',
+      coverPhoto: null,
     });
   };
 
-  // Shared error/helperText plumbing for every field
   const fieldProps = (field) => ({
     error: Boolean(errors?.[field]),
     helperText: errors?.[field] || '',
   });
+
+  const photoSrc = wizardData.coverPhotoPreview || wizardData.coverPhotoUrl || (typeof wizardData.coverPhoto === 'string' ? wizardData.coverPhoto : '');
 
   return (
     <Box sx={{ width: '100%', maxWidth: 700, mx: 'auto', px: { xs: 1, sm: 2 } }}>
@@ -317,7 +384,7 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
           </Box>
         </Box>
 
-        {/* Emergency Contact Phone (Numbers Only) */}
+        {/* Emergency Contact Phone */}
         <Box sx={rowSx}>
           <Box sx={labelColSx}>
             <Typography sx={labelColStyle}>
@@ -351,7 +418,7 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
             <Typography sx={labelColStyle}>Property cover photo</Typography>
           </Box>
           <Box sx={fieldColSx}>
-            {wizardData.coverPhotoPreview || wizardData.coverPhotoUrl ? (
+            {photoSrc ? (
               <Box
                 sx={{
                   display: 'flex',
@@ -366,7 +433,7 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
               >
                 <Box
                   component="img"
-                  src={wizardData.coverPhotoPreview || wizardData.coverPhotoUrl}
+                  src={photoSrc}
                   alt="Property cover preview"
                   sx={{ width: 56, height: 56, borderRadius: '4px', objectFit: 'cover', flexShrink: 0 }}
                 />
@@ -390,6 +457,7 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
                 <Button
                   component="label"
                   variant="outlined"
+                  disabled={uploading}
                   startIcon={<CloudUploadIcon />}
                   sx={{
                     color: 'text.primary',
@@ -406,7 +474,7 @@ export default function Step1Basics({ wizardData = {}, updateWizardData, errors 
                     },
                   }}
                 >
-                  Upload photo
+                  {uploading ? 'Processing photo...' : 'Upload photo'}
                   <input type="file" hidden accept="image/*" onChange={handlePhotoUpload} />
                 </Button>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.75 }}>

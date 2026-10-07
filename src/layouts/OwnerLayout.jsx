@@ -21,7 +21,9 @@ import PeopleIcon from "@mui/icons-material/People";
 import AssignmentIndIcon from "@mui/icons-material/AssignmentInd";
 import PaymentsIcon from "@mui/icons-material/Payments";
 import BuildIcon from "@mui/icons-material/Build";
+import CampaignIcon from "@mui/icons-material/Campaign";
 import LogoutIcon from "@mui/icons-material/Logout";
+import NotificationFeed from "../components/NotificationFeed";
 
 // Firebase Auth imports
 import { signOut } from "firebase/auth";
@@ -54,6 +56,7 @@ export default function OwnerLayout() {
     { text: "Caretakers", path: "/owner/caretakers", icon: <AssignmentIndIcon /> },
     { text: "Payments", path: "/owner/payments", icon: <PaymentsIcon /> },
     { text: "Maintenance", path: "/owner/maintenance", icon: <BuildIcon /> },
+    { text: "Announcements", path: "/owner/announcements", icon: <CampaignIcon /> },
   ];
 
   const drawer = (
@@ -86,7 +89,10 @@ export default function OwnerLayout() {
                 }}
               >
                 <ListItemIcon>{item.icon}</ListItemIcon>
-                <ListItemText primary={item.text} primaryTypographyProps={{ fontWeight: 600 }} />
+                <ListItemText
+                  primary={item.text}
+                  slotProps={{ primary: { sx: { fontWeight: 600 } } }}
+                />
               </ListItemButton>
             </ListItem>
           ))}
@@ -110,7 +116,10 @@ export default function OwnerLayout() {
           <ListItemIcon sx={{ color: "error.main" }}>
             <LogoutIcon />
           </ListItemIcon>
-          <ListItemText primary="Logout" primaryTypographyProps={{ fontWeight: 600 }} />
+          <ListItemText
+            primary="Logout"
+            slotProps={{ primary: { sx: { fontWeight: 600 } } }}
+          />
         </ListItemButton>
       </Box>
     </Box>
@@ -139,6 +148,9 @@ export default function OwnerLayout() {
               (item.path !== "/owner" && location.pathname.startsWith(item.path + "/"))
             )?.text || "Dashboard"}
           </Typography>
+          <Box sx={{ ml: "auto" }}>
+            <NotificationFeed />
+          </Box>
         </Toolbar>
       </AppBar>
 

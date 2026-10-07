@@ -27,8 +27,9 @@ import GroupAddIcon from "@mui/icons-material/GroupAdd";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import LockIcon from "@mui/icons-material/Lock";
 import AddHomeWorkIcon from "@mui/icons-material/AddHomeWork";
-import { collection, query, where, onSnapshot, doc, setDoc, updateDoc } from "firebase/firestore";
+import { collection, query, where, onSnapshot, doc, setDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { onAuthStateChanged } from "firebase/auth"; // Added Auth listener
 import { auth, db, storage } from "../../config/firebase";
 
 function MetricBox({ title, value, subtitle, icon }) {
@@ -46,9 +47,6 @@ function MetricBox({ title, value, subtitle, icon }) {
   );
 }
 
-// One property's card in the "Your Properties" overview — photo (or a
-// placeholder icon), name, type, and a quick room/bed count. Clicking it
-// goes to that property's detail page.
 function PropertyCard({ property, onClick }) {
   return (
     <Card
@@ -109,6 +107,7 @@ export default function OwnerOverview() {
   const [idFile, setIdFile] = useState(null);
   const [clearanceFile, setClearanceFile] = useState(null);
   const [uploading, setUploading] = useState(false);
+  const [setupError, setSetupError] = useState(""); // Replaces raw alert()
 
   const [stats, setStats] = useState({
     totalProperties: 0,
@@ -132,209 +131,228 @@ export default function OwnerOverview() {
   const tenantsDataRef = useRef([]);
 
   useEffect(() => {
-    if (!auth.currentUser) return;
-    const ownerId = auth.currentUser.uid;
-    const tenantSources = new Map();
+    let unsubOwner, unsubProperties, unsubTenants, unsubUserTenants, unsubCaretakers, unsubPayments, unsubTickets;
     let tenantPropertyUnsubscribers = [];
+    const tenantSources = new Map();
 
-    const updateTenantSource = (sourceId, snapshot, tenantUsersOnly = false) => {
-      const records = snapshot.docs
-        .map((tenantDoc) => ({ id: tenantDoc.id, ...tenantDoc.data() }))
-        .filter((tenant) => !tenantUsersOnly || tenant.role === "tenant");
-      tenantSources.set(sourceId, records);
-
-      const tenantsById = new Map();
-      tenantSources.forEach((sourceRecords) => {
-        sourceRecords.forEach((tenant) => {
-          const tenantId = tenant.uid || tenant.id;
-          tenantsById.set(tenantId, {
-            ...(tenantsById.get(tenantId) || {}),
-            ...tenant,
-          });
-        });
-      });
-      tenantsDataRef.current = [...tenantsById.values()];
-      recalculateOccupancy();
-    };
-
-    const recalculateOccupancy = () => {
-      const beds = propertiesDataRef.current.totalBeds;
-      const ownerPropertyIds = new Set(propertiesDataRef.current.propertyIds);
-      const ownerTenants = tenantsDataRef.current.filter((tenant) =>
-        tenant.ownerUid === ownerId || ownerPropertyIds.has(tenant.propertyId)
-      );
-      let active = 0;
-      let pending = 0;
-      ownerTenants.forEach((tenant) => {
-        const rawStatus = (tenant.status || "active").toString().trim().toLowerCase();
-        if (rawStatus.includes("pending")) pending++;
-        else if (rawStatus !== "inactive" && rawStatus !== "archived") active++;
-      });
-      const propertiesCount = propertiesDataRef.current.count;
-
-      const occRate = beds > 0 ? Math.min(Math.round((active / beds) * 100), 100) : 0;
-
-      setStats((prev) => ({
-        ...prev,
-        totalProperties: propertiesCount,
-        totalBeds: beds,
-        activeTenants: active,
-        pendingTenants: pending,
-        occupiedBeds: active,
-        occupancyRate: occRate,
-      }));
-    };
-
-    // 0. Listen to Owner Profile (approvalStatus & verificationDocs)
-    const unsubOwner = onSnapshot(doc(db, "users", ownerId), (docSnap) => {
-      if (docSnap.exists()) {
-        setOwner(docSnap.data());
+    const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      if (!user) {
+        setLoading(false);
+        return;
       }
-    });
+      
+      const ownerId = user.uid;
 
-    // 1. Listen to Properties Data
-    const unsubProperties = onSnapshot(
-      query(collection(db, "properties"), where("ownerUid", "==", ownerId)),
-      (snapshot) => {
-        let totalCapacity = 0;
-        const propertyList = [];
+      const updateTenantSource = (sourceId, snapshot, tenantUsersOnly = false) => {
+        const records = snapshot.docs
+          .map((tenantDoc) => ({ id: tenantDoc.id, ...tenantDoc.data() }))
+          .filter((tenant) => !tenantUsersOnly || tenant.role === "tenant");
+        
+        tenantSources.set(sourceId, records);
 
-        snapshot.docs.forEach((docSnap) => {
-          const data = docSnap.data();
-          let roomCapacity = 0;
-          if (Array.isArray(data.rooms) && data.rooms.length > 0) {
-            data.rooms.forEach((room) => {
-              roomCapacity += Number(room.capacity || room.beds || room.totalBeds || 0);
+        const tenantsById = new Map();
+        tenantSources.forEach((sourceRecords) => {
+          sourceRecords.forEach((tenant) => {
+            const tenantId = tenant.uid || tenant.id;
+            tenantsById.set(tenantId, {
+              ...(tenantsById.get(tenantId) || {}),
+              ...tenant,
             });
-          }
-
-          const topLevelCapacity = Number(data.totalBeds) || Number(data.capacity) || Number(data.beds) || Number(data.totalCapacity) || 0;
-          const capacity = roomCapacity > 0 ? roomCapacity : topLevelCapacity;
-          totalCapacity += capacity;
-
-          propertyList.push({
-            id: docSnap.id,
-            propertyName: data.propertyName || "Unnamed Property",
-            propertyType: data.propertyType || "",
-            coverPhotoUrl: data.coverPhotoUrl || "",
-            totalRooms: Array.isArray(data.rooms) ? data.rooms.length : (Number(data.totalRooms) || 0),
-            totalBeds: capacity,
           });
         });
+        
+        tenantsDataRef.current = [...tenantsById.values()];
+        recalculateOccupancy(ownerId);
+      };
 
-        propertiesDataRef.current = {
-          count: snapshot.docs.length,
-          totalBeds: totalCapacity,
-          propertyIds: snapshot.docs.map((propertyDoc) => propertyDoc.id),
-        };
-
-        tenantPropertyUnsubscribers.forEach((unsubscribe) => unsubscribe());
-        tenantPropertyUnsubscribers = [];
-        [...tenantSources.keys()]
-          .filter((sourceId) => sourceId.startsWith("property:"))
-          .forEach((sourceId) => tenantSources.delete(sourceId));
-
-        propertiesDataRef.current.propertyIds.forEach((propertyId) => {
-          ["tenants", "users"].forEach((collectionName) => {
-            const sourceId = `property:${propertyId}:${collectionName}`;
-            const unsubscribe = onSnapshot(
-              query(collection(db, collectionName), where("propertyId", "==", propertyId)),
-              (tenantSnapshot) => updateTenantSource(sourceId, tenantSnapshot, collectionName === "users"),
-              (error) => console.error(`Error fetching tenants for property ${propertyId}:`, error)
-            );
-            tenantPropertyUnsubscribers.push(unsubscribe);
-          });
+      const recalculateOccupancy = (currentOwnerId) => {
+        const beds = propertiesDataRef.current.totalBeds;
+        const ownerPropertyIds = new Set(propertiesDataRef.current.propertyIds);
+        const ownerTenants = tenantsDataRef.current.filter((tenant) =>
+          tenant.ownerUid === currentOwnerId || ownerPropertyIds.has(tenant.propertyId)
+        );
+        
+        let active = 0;
+        let pending = 0;
+        ownerTenants.forEach((tenant) => {
+          const rawStatus = (tenant.status || "active").toString().trim().toLowerCase();
+          if (rawStatus.includes("pending")) pending++;
+          else if (rawStatus !== "inactive" && rawStatus !== "archived") active++;
         });
-
-        setProperties(propertyList);
-        recalculateOccupancy();
-      },
-      (error) => console.error("Error fetching properties:", error)
-    );
-
-    // 2. Listen to Tenants Data
-    const unsubTenants = onSnapshot(
-      query(collection(db, "tenants"), where("ownerUid", "==", ownerId)),
-      (snapshot) => updateTenantSource("owner:tenants", snapshot),
-      (error) => console.error("Error fetching tenants:", error)
-    );
-    const unsubUserTenants = onSnapshot(
-      query(collection(db, "users"), where("ownerUid", "==", ownerId)),
-      (snapshot) => updateTenantSource("owner:users", snapshot, true),
-      (error) => console.error("Error fetching tenant user profiles:", error)
-    );
-
-    // 3. Listen to Caretakers Data
-    const unsubCaretakers = onSnapshot(
-      query(collection(db, "users"), where("ownerUid", "==", ownerId), where("role", "==", "caretaker")),
-      (snapshot) => {
-        setStats((prev) => ({ ...prev, totalCaretakers: snapshot.docs.length }));
-      },
-      (error) => console.error("Error fetching caretakers:", error)
-    );
-
-    // 4. Listen to Payments Data
-    const unsubPayments = onSnapshot(
-      query(collection(db, "payments"), where("ownerUid", "==", ownerId)),
-      (snapshot) => {
-        const fetchedPayments = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        setPayments(fetchedPayments);
-
-        const currentMonth = new Date().getMonth();
-        const currentYear = new Date().getFullYear();
-
-        let monthTotal = 0;
-        fetchedPayments.forEach((p) => {
-          const pDate = p.createdAt ? new Date(p.createdAt) : null;
-          if (pDate && pDate.getMonth() === currentMonth && pDate.getFullYear() === currentYear && p.status === "Paid") {
-            monthTotal += Number(p.amount || 0);
-          }
-        });
-
-        setStats((prev) => ({ ...prev, collectedThisMonth: monthTotal }));
-      },
-      (error) => console.error("Error fetching payments:", error)
-    );
-
-    // 5. Listen to Maintenance Tickets
-    const unsubTickets = onSnapshot(
-      query(collection(db, "tickets"), where("ownerUid", "==", ownerId)),
-      (snapshot) => {
-        const fetchedTickets = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-        setTickets(fetchedTickets);
-
-        const pending = fetchedTickets.filter((t) => t.status !== "Resolved");
-        const urgent = pending.filter((t) => (t.priority || "").toLowerCase() === "urgent");
+        
+        const propertiesCount = propertiesDataRef.current.count;
+        const occRate = beds > 0 ? Math.min(Math.round((active / beds) * 100), 100) : 0;
 
         setStats((prev) => ({
           ...prev,
-          pendingMaintenance: pending.length,
-          urgentMaintenance: urgent.length,
+          totalProperties: propertiesCount,
+          totalBeds: beds,
+          activeTenants: active,
+          pendingTenants: pending,
+          occupiedBeds: active,
+          occupancyRate: occRate,
         }));
-        setLoading(false);
-      },
-      (error) => {
-        console.error("Error fetching tickets:", error);
-        setLoading(false);
-      }
-    );
+      };
+
+      // 0. Listen to Owner Profile
+      unsubOwner = onSnapshot(doc(db, "users", ownerId), (docSnap) => {
+        if (docSnap.exists()) {
+          setOwner(docSnap.data());
+        }
+      });
+
+      // 1. Listen to Properties Data
+      unsubProperties = onSnapshot(
+        query(collection(db, "properties"), where("ownerUid", "==", ownerId)),
+        (snapshot) => {
+          let totalCapacity = 0;
+          const propertyList = [];
+
+          snapshot.docs.forEach((docSnap) => {
+            const data = docSnap.data();
+            let roomCapacity = 0;
+            if (Array.isArray(data.rooms) && data.rooms.length > 0) {
+              data.rooms.forEach((room) => {
+                roomCapacity += Number(room.capacity || room.beds || room.totalBeds || 0);
+              });
+            }
+
+            const topLevelCapacity = Number(data.totalBeds) || Number(data.capacity) || Number(data.beds) || Number(data.totalCapacity) || 0;
+            const capacity = roomCapacity > 0 ? roomCapacity : topLevelCapacity;
+            totalCapacity += capacity;
+
+            propertyList.push({
+              id: docSnap.id,
+              propertyName: data.propertyName || "Unnamed Property",
+              propertyType: data.propertyType || "",
+              coverPhotoUrl: data.coverPhotoUrl || "",
+              totalRooms: Array.isArray(data.rooms) ? data.rooms.length : (Number(data.totalRooms) || 0),
+              totalBeds: capacity,
+            });
+          });
+
+          propertiesDataRef.current = {
+            count: snapshot.docs.length,
+            totalBeds: totalCapacity,
+            propertyIds: snapshot.docs.map((propertyDoc) => propertyDoc.id),
+          };
+
+          // Clean up old tenant property listeners
+          tenantPropertyUnsubscribers.forEach((unsubscribe) => unsubscribe());
+          tenantPropertyUnsubscribers = [];
+          
+          [...tenantSources.keys()]
+            .filter((sourceId) => sourceId.startsWith("property:"))
+            .forEach((sourceId) => tenantSources.delete(sourceId));
+
+          // Set up new tenant property listeners
+          propertiesDataRef.current.propertyIds.forEach((propertyId) => {
+            ["tenants", "users"].forEach((collectionName) => {
+              const sourceId = `property:${propertyId}:${collectionName}`;
+              const unsubscribe = onSnapshot(
+                query(collection(db, collectionName), where("propertyId", "==", propertyId)),
+                (tenantSnapshot) => updateTenantSource(sourceId, tenantSnapshot, collectionName === "users"),
+                (error) => console.error(`Error fetching tenants for property ${propertyId}:`, error)
+              );
+              tenantPropertyUnsubscribers.push(unsubscribe);
+            });
+          });
+
+          setProperties(propertyList);
+          recalculateOccupancy(ownerId);
+        },
+        (error) => console.error("Error fetching properties:", error)
+      );
+
+      // 2. Listen to Tenants Data
+      unsubTenants = onSnapshot(
+        query(collection(db, "tenants"), where("ownerUid", "==", ownerId)),
+        (snapshot) => updateTenantSource("owner:tenants", snapshot),
+        (error) => console.error("Error fetching tenants:", error)
+      );
+      unsubUserTenants = onSnapshot(
+        query(collection(db, "users"), where("ownerUid", "==", ownerId)),
+        (snapshot) => updateTenantSource("owner:users", snapshot, true),
+        (error) => console.error("Error fetching tenant user profiles:", error)
+      );
+
+      // 3. Listen to Caretakers Data
+      unsubCaretakers = onSnapshot(
+        query(collection(db, "users"), where("ownerUid", "==", ownerId), where("role", "==", "caretaker")),
+        (snapshot) => {
+          setStats((prev) => ({ ...prev, totalCaretakers: snapshot.docs.length }));
+        },
+        (error) => console.error("Error fetching caretakers:", error)
+      );
+
+      // 4. Listen to Payments Data
+      unsubPayments = onSnapshot(
+        query(collection(db, "payments"), where("ownerUid", "==", ownerId)),
+        (snapshot) => {
+          const fetchedPayments = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+          setPayments(fetchedPayments);
+
+          const currentMonth = new Date().getMonth();
+          const currentYear = new Date().getFullYear();
+
+          let monthTotal = 0;
+          fetchedPayments.forEach((p) => {
+            const pDate = p.createdAt ? new Date(p.createdAt) : null;
+            if (pDate && pDate.getMonth() === currentMonth && pDate.getFullYear() === currentYear && p.status === "Paid") {
+              monthTotal += Number(p.amount || 0);
+            }
+          });
+
+          setStats((prev) => ({ ...prev, collectedThisMonth: monthTotal }));
+        },
+        (error) => console.error("Error fetching payments:", error)
+      );
+
+      // 5. Listen to Maintenance Tickets
+      unsubTickets = onSnapshot(
+        query(collection(db, "maintenance_tickets"), where("ownerUid", "==", ownerId)),
+        (snapshot) => {
+          const fetchedTickets = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+          setTickets(fetchedTickets);
+
+          const pending = fetchedTickets.filter((t) => t.status !== "Resolved");
+          const urgent = pending.filter((t) => (t.priority || "").toLowerCase() === "urgent");
+
+          setStats((prev) => ({
+            ...prev,
+            pendingMaintenance: pending.length,
+            urgentMaintenance: urgent.length,
+          }));
+          setLoading(false);
+        },
+        (error) => {
+          console.error("Error fetching tickets:", error);
+          setLoading(false);
+        }
+      );
+    });
 
     return () => {
-      unsubOwner();
-      unsubProperties();
-      unsubTenants();
-      unsubUserTenants();
+      unsubscribeAuth(); // Detach auth listener
+      if (unsubOwner) unsubOwner();
+      if (unsubProperties) unsubProperties();
+      if (unsubTenants) unsubTenants();
+      if (unsubUserTenants) unsubUserTenants();
+      if (unsubCaretakers) unsubCaretakers();
+      if (unsubPayments) unsubPayments();
+      if (unsubTickets) unsubTickets();
       tenantPropertyUnsubscribers.forEach((unsubscribe) => unsubscribe());
-      unsubCaretakers();
-      unsubPayments();
-      unsubTickets();
     };
   }, []);
 
   // --- Forced Setup Handler ---
   const handleForcedSetup = async (e) => {
     e.preventDefault();
-    if (!idFile || !clearanceFile || !propertyName) return alert("Please fill out all fields and upload required documents.");
+    setSetupError("");
+    
+    if (!idFile || !clearanceFile || !propertyName) {
+      return setSetupError("Please fill out all fields and upload required documents.");
+    }
     
     setUploading(true);
     try {
@@ -350,13 +368,15 @@ export default function OwnerOverview() {
       await uploadBytes(clearanceRef, clearanceFile);
       const clearanceUrl = await getDownloadURL(clearanceRef);
 
-      // 3. Update User Verification Docs & maintain pending approval status
-      await updateDoc(doc(db, "users", ownerId), {
+      // 3. Update User Verification Docs (Using setDoc with merge to ensure doc creation if missing)
+      await setDoc(doc(db, "users", ownerId), {
         approvalStatus: "pending",
-        "verificationDocs.idUrl": idUrl,
-        "verificationDocs.clearanceUrl": clearanceUrl,
-        "verificationDocs.submittedAt": new Date().toISOString(),
-      });
+        verificationDocs: {
+          idUrl: idUrl,
+          clearanceUrl: clearanceUrl,
+          submittedAt: new Date().toISOString(),
+        }
+      }, { merge: true });
 
       // 4. Create the initial Property
       const newPropRef = doc(collection(db, "properties"));
@@ -371,6 +391,7 @@ export default function OwnerOverview() {
       setUploading(false);
     } catch (error) {
       console.error("Setup failed", error);
+      setSetupError("Failed to upload documents. Please try again.");
       setUploading(false);
     }
   };
@@ -396,6 +417,10 @@ export default function OwnerOverview() {
             Once completed, your profile will be sent to our admin team for approval.
           </Typography>
 
+          {setupError && (
+            <Alert severity="error" sx={{ mb: 3 }}>{setupError}</Alert>
+          )}
+
           <Box component="form" onSubmit={handleForcedSetup}>
             <TextField 
               fullWidth 
@@ -414,7 +439,7 @@ export default function OwnerOverview() {
             <Box sx={{ mb: 4, display: 'flex', alignItems: 'center', gap: 2 }}>
               <Button component="label" variant="outlined" startIcon={<UploadFileIcon />}>
                 Choose File
-                <input type="file" hidden required onChange={(e) => setIdFile(e.target.files[0])} />
+                <input type="file" hidden required onChange={(e) => setIdFile(e.target.files[0])} accept="image/*,.pdf" />
               </Button>
               <Typography variant="body2">{idFile ? idFile.name : "No file selected"}</Typography>
             </Box>
@@ -426,7 +451,7 @@ export default function OwnerOverview() {
             <Box sx={{ mb: 4, display: 'flex', alignItems: 'center', gap: 2 }}>
               <Button component="label" variant="outlined" startIcon={<UploadFileIcon />}>
                 Choose File
-                <input type="file" hidden required onChange={(e) => setClearanceFile(e.target.files[0])} />
+                <input type="file" hidden required onChange={(e) => setClearanceFile(e.target.files[0])} accept="image/*,.pdf" />
               </Button>
               <Typography variant="body2">{clearanceFile ? clearanceFile.name : "No file selected"}</Typography>
             </Box>
@@ -451,9 +476,6 @@ export default function OwnerOverview() {
   const isPending = owner?.approvalStatus === "pending";
   const isRejected = owner?.approvalStatus === "rejected";
 
-  // Field name for the owner's display name isn't settled in the schema
-  // shown here, so this falls back through the common possibilities before
-  // landing on the Firebase Auth profile name, then a generic label.
   const ownerName =
     owner?.fullName || owner?.name || owner?.ownerName || owner?.firstName || auth.currentUser?.displayName || "Owner";
 
@@ -513,8 +535,7 @@ export default function OwnerOverview() {
         </Alert>
       )}
 
-      {/* Your Properties — a visual overview (photo, name, quick counts)
-          before the numbers-only metrics below. */}
+      {/* Your Properties */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h6" fontWeight="700" sx={{ mb: 2 }}>
           Your Properties
@@ -540,7 +561,7 @@ export default function OwnerOverview() {
         ) : (
           <Grid container spacing={2.5}>
             {properties.map((property) => (
-              <Grid item xs={12} sm={6} md={4} key={property.id}>
+              <Grid size={{ xs: 12, sm: 6, md: 4 }} key={property.id}>
                 <PropertyCard property={property} onClick={() => navigate(`/owner/properties/${property.id}`)} />
               </Grid>
             ))}
@@ -550,16 +571,16 @@ export default function OwnerOverview() {
 
       {/* Top Metrics Row */}
       <Grid container spacing={2.5} sx={{ mb: 4 }}>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <MetricBox title="Total Properties" value={stats.totalProperties} subtitle={`${stats.totalBeds} Total Capacity`} icon={<HomeWorkIcon sx={{ color: "primary.main" }} />} />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <MetricBox title="Occupancy Rate" value={`${stats.occupancyRate}%`} subtitle={`${stats.occupiedBeds} / ${stats.totalBeds} Occupied`} icon={<PeopleIcon sx={{ color: "#0288d1" }} />} />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <MetricBox title="Rent Collected This Month" value={`₱${stats.collectedThisMonth.toLocaleString()}`} subtitle={`Target: ₱${stats.totalRevenue.toLocaleString()}`} icon={<AttachMoneyIcon sx={{ color: "#2e7d32" }} />} />
         </Grid>
-        <Grid item xs={12} sm={6} md={3}>
+        <Grid size={{ xs: 12, sm: 6, md: 3 }}>
           <MetricBox title="Pending Repairs" value={stats.pendingMaintenance} subtitle={`${stats.urgentMaintenance} Urgent Issues`} icon={<BuildOutlinedIcon sx={{ color: "#ed6c02" }} />} />
         </Grid>
       </Grid>
@@ -567,7 +588,7 @@ export default function OwnerOverview() {
       {/* Bottom Dashboard Panels */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         {/* Left Panel */}
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%" }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
               <Typography variant="h6" fontWeight="700">Recent Rent Collections</Typography>
@@ -594,7 +615,7 @@ export default function OwnerOverview() {
         </Grid>
 
         {/* Right Panel */}
-        <Grid item xs={12} md={6}>
+        <Grid size={{ xs: 12, md: 6 }}>
           <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%" }}>
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
               <Typography variant="h6" fontWeight="700">Tenant Onboarding & Caretakers</Typography>
@@ -614,13 +635,13 @@ export default function OwnerOverview() {
             </Box>
             
             <Grid container spacing={2}>
-              <Grid item xs={6}>
+              <Grid size={{ xs: 6 }}>
                 <Box sx={{ p: 2, borderRadius: 2, bgcolor: "rgba(46, 125, 50, 0.08)" }}>
                   <Typography variant="caption" color="text.secondary" fontWeight="600">Active Tenants</Typography>
                   <Typography variant="h5" fontWeight="800" color="success.main">{stats.activeTenants}</Typography>
                 </Box>
               </Grid>
-              <Grid item xs={6}>
+              <Grid size={{ xs: 6 }}>
                 <Box sx={{ p: 2, borderRadius: 2, bgcolor: "rgba(237, 108, 2, 0.08)" }}>
                   <Typography variant="caption" color="text.secondary" fontWeight="600">Pending Registration</Typography>
                   <Typography variant="h5" fontWeight="800" color="warning.main">{stats.pendingTenants}</Typography>

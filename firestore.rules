@@ -42,7 +42,27 @@ service cloud.firestore {
     }
 
     function isRecipient(docData) {
-      return docData.userId == request.auth.uid;
+      return docData.get('userId', '') == request.auth.uid;
+    }
+
+    function isOwnedProperty(propertyId) {
+      return propertyId != null && propertyId != '' &&
+        exists(/databases/$(database)/documents/properties/$(propertyId)) &&
+        get(/databases/$(database)/documents/properties/$(propertyId)).data.get('ownerUid', '') == request.auth.uid;
+    }
+
+    function isOwnedRecipient(userId) {
+      if (userId == null || userId == '') return false;
+      if (!exists(/databases/$(database)/documents/users/$(userId))) return false;
+
+      let recipient = get(/databases/$(database)/documents/users/$(userId)).data;
+      let role = recipient.get('role', '');
+      if (role != 'tenant' && role != 'caretaker') return false;
+
+      return recipient.get('ownerUid', '') == request.auth.uid ||
+        recipient.get('invitedBy', '') == request.auth.uid ||
+        isOwnedProperty(recipient.get('propertyId', '')) ||
+        isOwnedProperty(recipient.get('assignedPropertyId', ''));
     }
 
     // ===============================================================
@@ -80,12 +100,35 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    match /owner_announcements/{announcementId} {
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        (isOwner() && resource.data.get('ownerId', '') == request.auth.uid)
+      );
+      allow create: if isOwner() && request.resource.data.get('ownerId', '') == request.auth.uid;
+      allow update, delete: if isAdmin() || (
+        isOwner() &&
+        resource.data.get('ownerId', '') == request.auth.uid &&
+        request.resource.data.get('ownerId', '') == request.auth.uid
+      );
+    }
+
     // ===============================================================
     // NOTIFICATIONS
     // ===============================================================
     match /notifications/{notificationId} {
       allow read: if isSignedIn() && (isAdmin() || isRecipient(resource.data));
-      allow create: if isAdmin() || (isSignedIn() && isRecipient(request.resource.data));
+      allow create: if isAdmin() || (
+        isSignedIn() &&
+        (
+          isRecipient(request.resource.data) ||
+          (
+            isOwner() &&
+            request.resource.data.get('ownerId', '') == request.auth.uid &&
+            isOwnedRecipient(request.resource.data.get('userId', ''))
+          )
+        )
+      );
       allow update: if isAdmin() || (
         isSignedIn() &&
         isRecipient(resource.data) &&
