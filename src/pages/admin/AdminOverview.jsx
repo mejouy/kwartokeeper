@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Avatar, Box, Button, Card, CardContent, Chip, GlobalStyles, Paper, Skeleton, Typography } from "@mui/material";
+import { Alert, Avatar, Box, Button, Card, CardActionArea, CardContent, Chip, GlobalStyles, Paper, Skeleton, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import SupervisorAccountOutlinedIcon from "@mui/icons-material/SupervisorAccountOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
@@ -13,7 +13,7 @@ import PersonAddIcon from "@mui/icons-material/PersonAdd";
 import MapsHomeWorkIcon from "@mui/icons-material/MapsHomeWork";
 import GroupIcon from "@mui/icons-material/Group";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
-import { collection, onSnapshot } from "firebase/firestore";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../context/AuthContext";
 
@@ -99,29 +99,38 @@ function ApprovalWindows({ approved, total }) {
   );
 }
 
-function MetricBox({ title, value, subtitle, icon, subtitleColor = "text.secondary" }) {
-  return (
-    <Card elevation={0} sx={{ ...cardSx, height: "100%" }}>
-      <CardContent sx={{ p: { xs: 1.75, sm: 2.5 }, "&:last-child": { pb: { xs: 1.75, sm: 2.5 } } }}>
-        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, mb: 1 }}>
-          <Typography variant="body2" color="text.secondary" fontWeight="600" sx={{ lineHeight: 1.3 }}>
-            {title}
-          </Typography>
-          <Box sx={{ p: { xs: 0.75, sm: 1 }, borderRadius: 2, bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main", display: "flex", flexShrink: 0 }}>
-            {icon}
-          </Box>
+function MetricBox({ title, value, subtitle, icon, subtitleColor = "text.secondary", onClick }) {
+  const body = (
+    <CardContent sx={{ p: { xs: 1.75, sm: 2.5 }, "&:last-child": { pb: { xs: 1.75, sm: 2.5 } } }}>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, mb: 1 }}>
+        <Typography variant="body2" color="text.secondary" fontWeight="600" sx={{ lineHeight: 1.3 }}>
+          {title}
+        </Typography>
+        <Box sx={{ p: { xs: 0.75, sm: 1 }, borderRadius: 2, bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main", display: "flex", flexShrink: 0 }}>
+          {icon}
         </Box>
-        <Typography
-          variant="h4"
-          fontWeight="800"
-          sx={{ fontFamily: '"Inter", sans-serif', fontSize: { xs: "1.5rem", sm: "2.125rem" }, wordBreak: "break-word" }}
-        >
-          {value}
-        </Typography>
-        <Typography variant="caption" sx={{ color: subtitleColor }}>
-          {subtitle}
-        </Typography>
-      </CardContent>
+      </Box>
+      <Typography
+        variant="h4"
+        fontWeight="800"
+        sx={{ fontFamily: '"Inter", sans-serif', fontSize: { xs: "1.5rem", sm: "2.125rem" }, wordBreak: "break-word" }}
+      >
+        {value}
+      </Typography>
+      <Typography variant="caption" sx={{ color: subtitleColor, display: "block" }}>
+        {subtitle}
+      </Typography>
+    </CardContent>
+  );
+  return (
+    <Card elevation={0} sx={{ ...cardSx, height: "100%", overflow: "hidden" }}>
+      {onClick ? (
+        <CardActionArea onClick={onClick} sx={{ height: "100%", alignItems: "stretch", "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } }}>
+          {body}
+        </CardActionArea>
+      ) : (
+        body
+      )}
     </Card>
   );
 }
@@ -131,7 +140,7 @@ export default function AdminOverview() {
   const { currentUser } = useAuth();
   const [ready, setReady] = useState({ users: false, properties: false, tenants: false });
   const [error, setError] = useState("");
-  const [owners, setOwners] = useState({ approved: 0, pending: [] });
+  const [owners, setOwners] = useState({ approved: 0, suspended: 0, rejected: 0, pending: [] });
   const [totalProperties, setTotalProperties] = useState(0);
   const [totalTenants, setTotalTenants] = useState(0);
 
@@ -143,24 +152,27 @@ export default function AdminOverview() {
       markReady(what);
     };
 
-    // 1. ALL users, to split pending vs approved owners
+    // 1. Owners only, split by where they are in the approval flow.
+    //    "Pending" matches the owner page: status OR approvalStatus is pending
+    //    (that includes owners who resubmitted or replaced their documents).
     const unsubUsers = onSnapshot(
-      collection(db, "users"),
+      query(collection(db, "users"), where("role", "==", "owner")),
       (snapshot) => {
         let approved = 0;
+        let suspended = 0;
+        let rejected = 0;
         const pending = [];
 
         snapshot.docs.forEach((d) => {
           const data = d.data();
-          if (data.role === "owner") {
-            // Adjust "status" field based on what you saved in Firebase during registration
-            if (data.status === "pending") pending.push({ id: d.id, ...data });
-            else approved++;
-          }
+          if (data.status === "pending" || data.approvalStatus === "pending") pending.push({ id: d.id, ...data });
+          else if (data.approvalStatus === "rejected") rejected++;
+          else if (data.status === "suspended") suspended++;
+          else approved++;
         });
 
         pending.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
-        setOwners({ approved, pending });
+        setOwners({ approved, suspended, rejected, pending });
         markReady("users");
       },
       fail("users")
@@ -199,7 +211,9 @@ export default function AdminOverview() {
 
   const adminName =
     currentUser?.displayName || (currentUser?.email ? currentUser.email.split("@")[0] : "") || "Admin";
-  const totalOwners = owners.approved + pendingCount;
+  const totalOwners = owners.approved + owners.suspended + owners.rejected + pendingCount;
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
   // Pill tuned for the dark hero
   const statusTone =
@@ -277,7 +291,7 @@ export default function AdminOverview() {
               wordBreak: "break-word",
             }}
           >
-            Welcome, {adminName}
+            {greeting}, {adminName}
           </Typography>
           <Typography variant="body2" sx={{ color: "#cadcf6", mt: 1, maxWidth: 460 }}>
             {welcomeSubtitle}
@@ -305,8 +319,15 @@ export default function AdminOverview() {
           subtitle="Owners awaiting verification"
           subtitleColor={pendingCount > 0 ? "warning.main" : "text.secondary"}
           icon={<PersonAddIcon fontSize="small" />}
+          onClick={() => navigate("/admin/owners")}
         />
-        <MetricBox title="Approved Owners" value={owners.approved} subtitle="Active platform clients" icon={<SupervisorAccountOutlinedIcon fontSize="small" />} />
+        <MetricBox
+          title="Approved Owners"
+          value={owners.approved}
+          subtitle={owners.suspended + owners.rejected > 0 ? `${owners.suspended + owners.rejected} suspended or rejected` : "Active platform clients"}
+          icon={<SupervisorAccountOutlinedIcon fontSize="small" />}
+          onClick={() => navigate("/admin/owners")}
+        />
         <MetricBox title="Total Properties" value={totalProperties} subtitle="System-wide dorms/apts" icon={<MapsHomeWorkIcon fontSize="small" />} />
         <MetricBox title="Total Tenants" value={totalTenants} subtitle="Across all properties" icon={<GroupIcon fontSize="small" />} />
       </Box>
@@ -339,7 +360,7 @@ export default function AdminOverview() {
                     key={owner.id}
                     component="button"
                     type="button"
-                    onClick={() => navigate("/admin/owners")}
+                    onClick={() => navigate(`/admin/owners/${owner.id}`)}
                     sx={{
                       ...row,
                       gap: 1.5,
@@ -367,7 +388,7 @@ export default function AdminOverview() {
                         {owner.email || "No email"} · Applied {formatDate(owner.createdAt)}
                       </Typography>
                     </Box>
-                    <Chip label="Pending" color="warning" size="small" sx={{ flexShrink: 0 }} />
+                    <Chip label={owner.verificationDocs ? "Docs in" : "No docs"} color={owner.verificationDocs ? "warning" : "default"} size="small" sx={{ flexShrink: 0, fontWeight: 700 }} />
                   </Box>
                 );
               })}

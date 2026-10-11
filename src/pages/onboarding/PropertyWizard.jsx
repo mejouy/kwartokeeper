@@ -1,14 +1,11 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Button, Typography, Alert } from '@mui/material';
+import { Box, Button, Typography, Alert, IconButton } from '@mui/material';
+import CloseIcon from '@mui/icons-material/Close';
 import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
 import RuleOutlinedIcon from '@mui/icons-material/RuleOutlined';
 import GridViewOutlinedIcon from '@mui/icons-material/GridViewOutlined';
 
-import { auth, db } from '../../config/firebase';
-import { collection, addDoc, doc, updateDoc, serverTimestamp } from 'firebase/firestore';
-
-import { uploadPropertyPhoto } from '../services/propertyService';
 import Step1Basics from './components/Step1Basics';
 import Step2Rules from './components/Step2Policies';
 import Step3Rooms from './components/Step3Rooms';
@@ -129,8 +126,6 @@ export default function PropertyWizard() {
   const navigate = useNavigate();
   const [activeStep, setActiveStep] = useState(0);
   const [errors, setErrors] = useState({});
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState('');
 
   const [wizardData, setWizardData] = useState({
     propertyName: '',
@@ -152,12 +147,30 @@ export default function PropertyWizard() {
     amenities: [],
     curfewEnabled: false,
     curfewTime: '10:00 PM',
+    estimatedRooms: '',
     namingPattern: 'floor',
   });
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, [activeStep]);
+
+  // Nothing is saved until the last step, so warn before a refresh or closed tab wipes the form
+  const hasWork = Boolean(wizardData.propertyName.trim() || wizardData.street.trim() || wizardData.emergencyPhone.trim());
+  useEffect(() => {
+    if (!hasWork) return undefined;
+    const warn = (e) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [hasWork]);
+
+  const leave = () => {
+    if (hasWork && !window.confirm('Leave property setup? What you entered will be lost.')) return;
+    navigate('/owner', { replace: true });
+  };
 
   const updateWizardData = (newData) => {
     setWizardData((prev) => {
@@ -185,7 +198,9 @@ export default function PropertyWizard() {
     if (!wizardData.provinceCode) newErrors.provinceCode = 'Please select a province.';
     if (!wizardData.cityCode) newErrors.cityCode = 'Please select a city/municipality.';
     if (!wizardData.barangay) newErrors.barangay = 'Please select a barangay.';
+    const phoneDigits = String(wizardData.emergencyPhone || '').replace(/\D/g, '');
     if (!wizardData.emergencyPhone?.trim()) newErrors.emergencyPhone = 'Emergency phone is required.';
+    else if (phoneDigits.length < 7 || phoneDigits.length > 13) newErrors.emergencyPhone = 'Enter a valid phone number.';
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -209,11 +224,10 @@ export default function PropertyWizard() {
   };
 
   const handleNext = () => {
-    setSubmitError('');
-    if (activeStep === 0) {
-      if (!validateStep1()) return;
-    } else if (activeStep === 1) {
-      if (!validateStep2()) return;
+    const ok = activeStep === 0 ? validateStep1() : activeStep === 1 ? validateStep2() : true;
+    if (!ok) {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
     }
 
     setActiveStep((prev) => Math.min(prev + 1, STEPS.length - 1));
@@ -221,125 +235,15 @@ export default function PropertyWizard() {
 
   const handleBack = () => {
     if (activeStep === 0) {
-      navigate('/owner/dashboard', { replace: true });
+      leave();
       return;
     }
     setErrors({});
-    setSubmitError('');
     setActiveStep((prev) => Math.max(prev - 1, 0));
   };
 
-  const submitPropertyToFirebase = async (roomsData = [], layoutMetrics = {}) => {
-    setIsSubmitting(true);
-    setSubmitError('');
-
-    if (!wizardData.street?.trim() || !wizardData.propertyName?.trim()) {
-      setSubmitError('Validation Error: Basic details are incomplete. Please review Step 1.');
-      setIsSubmitting(false);
-      return;
-    }
-
-    try {
-      const currentUser = auth?.currentUser;
-      if (!currentUser) {
-        throw new Error('Authentication error: No property owner is currently logged in.');
-      }
-
-      // Extract photo string from base64 string or file preview
-      const fallbackPhotoString =
-        (typeof wizardData.coverPhotoUrl === 'string' && wizardData.coverPhotoUrl) ||
-        (typeof wizardData.coverPhotoPreview === 'string' && wizardData.coverPhotoPreview) ||
-        (typeof wizardData.coverPhoto === 'string' && wizardData.coverPhoto) ||
-        '';
-
-      let finalPhotoUrl = fallbackPhotoString;
-      let photoUploadWarning = null;
-
-      if (wizardData.coverPhoto instanceof File) {
-        try {
-          const uploadedPhoto = await uploadPropertyPhoto(
-            wizardData.coverPhoto,
-            currentUser.uid
-          );
-          finalPhotoUrl = uploadedPhoto.downloadUrl;
-        } catch (uploadError) {
-          console.error('Firebase Storage cover photo upload failed:', uploadError);
-          throw new Error(
-            `The cover photo could not be saved. ${uploadError.message || 'Please try another image.'}`
-          );
-        }
-      }
-
-      const normalizedPhotoUrl = finalPhotoUrl || null;
-
-      const finalPropertyData = {
-        ownerUid: currentUser.uid,
-        createdBy: currentUser.uid,
-        userId: currentUser.uid,
-
-        street: wizardData.street || '',
-        barangay: wizardData.barangay || '',
-        cityMunicipality: wizardData.cityMunicipality || '',
-        province: wizardData.province || '',
-        region: wizardData.region || '',
-        regionCode: wizardData.regionCode || '',
-        provinceCode: wizardData.provinceCode || '',
-        cityCode: wizardData.cityCode || '',
-
-        propertyName: wizardData.propertyName || '',
-        propertyType: wizardData.propertyType || '',
-        emergencyPhone: wizardData.emergencyPhone || '',
-
-        // Multi-field mapping to support any dashboard UI schema
-        coverPhotoUrl: normalizedPhotoUrl,
-        coverPhoto: normalizedPhotoUrl,
-        imageUrl: normalizedPhotoUrl,
-        photoUrl: normalizedPhotoUrl,
-
-        totalFloors: Number(wizardData.totalFloors) || 1,
-        amenities: wizardData.amenities || [],
-        curfewEnabled: Boolean(wizardData.curfewEnabled),
-        curfewTime: wizardData.curfewEnabled ? (wizardData.curfewTime || '') : '',
-
-        namingPattern: wizardData.namingPattern || 'floor',
-        configMode: wizardData.configMode || 'uniform',
-        rooms: roomsData,
-        totalRooms: Number(layoutMetrics.totalRooms) || roomsData.length,
-        totalBeds: Number(layoutMetrics.totalBeds) || 0,
-
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      };
-
-      const docRef = await addDoc(collection(db, 'properties'), finalPropertyData);
-
-      // Update owner's profile document to set hasProperty flag
-      try {
-        const userRef = doc(db, 'users', currentUser.uid);
-        await updateDoc(userRef, { hasProperty: true });
-      } catch (userErr) {
-        console.warn('Could not update user hasProperty flag:', userErr);
-      }
-
-      navigate('/wizard-success', {
-        state: {
-          propertyId: docRef.id,
-          propertyName: finalPropertyData.propertyName,
-          totalRooms: finalPropertyData.totalRooms,
-          totalBeds: finalPropertyData.totalBeds,
-          warning: photoUploadWarning,
-        },
-      });
-
-    } catch (error) {
-      console.error('Error saving property:', error);
-      setSubmitError(error.message || 'An error occurred while saving the property.');
-      setIsSubmitting(false);
-    }
-  };
-
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: { xs: 'column', md: 'row' } }}>
+    <Box sx={{ minHeight: '100dvh', display: 'flex', flexDirection: { xs: 'column', md: 'row' } }}>
       {/* Sidebar */}
       <Box
         sx={{
@@ -360,9 +264,12 @@ export default function PropertyWizard() {
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
           <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt="KwartoKeeper" sx={{ height: 28 }} />
-          <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 700, fontSize: '1rem' }}>
+          <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 700, fontSize: '1rem', flex: 1 }}>
             Property setup
           </Typography>
+          <IconButton aria-label="Leave property setup" onClick={leave} size="small" sx={{ color: '#cadcf6', display: { md: 'none' } }}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
         </Box>
 
         {/* Mobile Step Indicator */}
@@ -397,15 +304,14 @@ export default function PropertyWizard() {
       </Box>
 
       {/* Main Content Area */}
-      <Box sx={{ flex: 1, bgcolor: 'background.default', display: 'flex', justifyContent: 'center', px: { xs: 3, md: 6 }, py: { xs: 4, md: 6 } }}>
-        <Box sx={{ width: '100%', maxWidth: 760 }}>
-          {submitError && (
+      <Box sx={{ flex: 1, minWidth: 0, bgcolor: 'background.default', display: 'flex', justifyContent: 'center', px: { xs: 3, md: 6 }, pt: { xs: 4, md: 6 }, pb: 0 }}>
+        <Box sx={{ width: '100%', maxWidth: 760, display: 'flex', flexDirection: 'column' }}>
+          {activeStep < 2 && Object.keys(errors).length > 0 && (
             <Alert severity="error" sx={{ mb: 3 }}>
-              {submitError}
+              Please fix the highlighted fields.
             </Alert>
           )}
-
-          <Box sx={{ mb: 4 }}>
+          <Box sx={{ mb: 4, flex: 1 }}>
             {activeStep === 0 && (
               <Step1Basics
                 wizardData={wizardData}
@@ -427,18 +333,29 @@ export default function PropertyWizard() {
                 wizardData={wizardData}
                 updateWizardData={updateWizardData}
                 onBack={handleBack}
-                onSubmit={submitPropertyToFirebase}
-                isSubmitting={isSubmitting}
               />
             )}
           </Box>
 
           {activeStep < 2 && (
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', pt: 3, borderTop: '1px solid', borderColor: 'divider' }}>
+            <Box
+              sx={{
+                position: 'sticky',
+                bottom: 0,
+                zIndex: 2,
+                bgcolor: 'background.default',
+                display: 'flex',
+                justifyContent: 'space-between',
+                gap: 2,
+                pt: 2,
+                pb: 'calc(16px + env(safe-area-inset-bottom, 0px))',
+                borderTop: '1px solid',
+                borderColor: 'divider',
+              }}
+            >
               <Button
                 variant="outlined"
                 onClick={handleBack}
-                disabled={isSubmitting}
                 sx={{ py: 1.5, px: 3, fontWeight: 600 }}
               >
                 Back
@@ -446,7 +363,6 @@ export default function PropertyWizard() {
               <Button
                 variant="contained"
                 onClick={handleNext}
-                disabled={isSubmitting}
                 sx={{
                   py: 1.5,
                   px: 3,

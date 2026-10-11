@@ -2,7 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Avatar, Box, Button, Chip, IconButton, InputBase, LinearProgress, Paper, Skeleton, Typography } from "@mui/material";
+import { Alert, Avatar, Box, Button, Chip, IconButton, InputBase, LinearProgress, MenuItem, Paper, Skeleton, TextField, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import SearchIcon from "@mui/icons-material/Search";
 import CloseIcon from "@mui/icons-material/Close";
@@ -14,9 +14,15 @@ import { db } from "../../config/firebase";
 
 const row = { display: "flex", alignItems: "center" };
 const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
-const COLS = "minmax(0, 1.8fr) 84px minmax(0, 1.1fr) 84px 112px 24px";
+const COLS = "minmax(0, 1.8fr) 96px 84px minmax(0, 1.1fr) 84px 112px 24px";
 
-const toMillis = (ts) => (ts?.toMillis ? ts.toMillis() : 0);
+// Firestore timestamps and ISO strings both show up in these records
+const toMillis = (ts) => {
+  if (!ts) return 0;
+  if (ts.toMillis) return ts.toMillis();
+  const n = new Date(ts).getTime();
+  return Number.isNaN(n) ? 0 : n;
+};
 const fmtDate = (ts) => {
   const ms = toMillis(ts);
   return ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Recently";
@@ -26,14 +32,24 @@ const keyOf = (v) => String(v || "").trim().toLowerCase();
 const ownerNameOf = (o) =>
   o.fullName || o.name || (o.firstName && o.lastName ? `${o.firstName} ${o.lastName}` : "New owner");
 
-// The admin pages store "status"; the owner dashboard reads "approvalStatus".
-// Honour either so an owner shows up correctly whichever one was written.
-// "approved" is shown as Active; no status at all counts as Active too.
+// Same rule as the owner page and the dashboard: an owner is pending if either
+// status or approvalStatus says so (this includes owners who resubmitted their
+// documents), then rejected, then suspended, else active.
 const statusOf = (o) => {
+  if (o.status === "pending" || o.approvalStatus === "pending") return "pending";
   if (o.approvalStatus === "rejected") return "rejected";
-  const raw = o.status || o.approvalStatus || "active";
-  return raw === "approved" ? "active" : raw;
+  if (o.status === "suspended") return "suspended";
+  return "active";
 };
+
+const docsComplete = (o) => !!(o.verificationDocs?.idUrl && o.verificationDocs?.clearanceUrl);
+
+const SORTS = [
+  { value: "newest", label: "Newest first" },
+  { value: "oldest", label: "Oldest first" },
+  { value: "name", label: "Name A–Z" },
+  { value: "properties", label: "Most properties" },
+];
 
 const STATUS_META = {
   pending: { label: "Pending", tone: "warning" },
@@ -112,6 +128,7 @@ export default function ManageOwners() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [filterTab, setFilterTab] = useState("all");
+  const [sortBy, setSortBy] = useState("newest");
   const [properties, setProperties] = useState([]);
   const [tenantCounts, setTenantCounts] = useState({});
 
@@ -205,7 +222,7 @@ export default function ManageOwners() {
 
   const filteredOwners = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return owners.filter((o) => {
+    const list = owners.filter((o) => {
       const s = statusOf(o);
       if (filterTab !== "all" && s !== filterTab) return false;
       if (!term) return true;
@@ -214,7 +231,15 @@ export default function ManageOwners() {
       const phone = (o.phoneNumber || o.phone || "").toLowerCase();
       return name.includes(term) || email.includes(term) || phone.includes(term);
     });
-  }, [owners, filterTab, search]);
+    const byNew = (a, b) => toMillis(b.createdAt) - toMillis(a.createdAt);
+    const sorters = {
+      newest: byNew,
+      oldest: (a, b) => -byNew(a, b),
+      name: (a, b) => ownerNameOf(a).localeCompare(ownerNameOf(b)),
+      properties: (a, b) => (portfolioByOwner[keyOf(b.id)]?.properties || 0) - (portfolioByOwner[keyOf(a.id)]?.properties || 0) || byNew(a, b),
+    };
+    return list.sort(sorters[sortBy] || byNew);
+  }, [owners, filterTab, search, sortBy, portfolioByOwner]);
 
   const pendingOwners = useMemo(() => owners.filter((o) => statusOf(o) === "pending"), [owners]);
   // Pending applications get their own cards on the default view; the table below then lists everyone else.
@@ -252,21 +277,35 @@ export default function ManageOwners() {
 
           {owners.length > 0 && (
             <Box sx={{ mb: { xs: 2, sm: 2.5 } }}>
-              <Paper elevation={0} sx={{ ...row, gap: 1, px: 1.5, ...cardSx, height: 46, mb: 1.5 }}>
-                <SearchIcon sx={{ color: "text.secondary" }} />
-                <InputBase
-                  fullWidth
-                  placeholder="Search name, email or phone"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  inputProps={{ "aria-label": "Search owners" }}
-                />
-                {search && (
-                  <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
-                    <CloseIcon fontSize="small" />
-                  </IconButton>
-                )}
-              </Paper>
+              <Box sx={{ display: "flex", flexDirection: { xs: "column", sm: "row" }, gap: 1.25, mb: 1.5 }}>
+                <Paper elevation={0} sx={{ ...row, gap: 1, px: 1.5, ...cardSx, height: 46, flex: 1, maxWidth: { sm: 460 } }}>
+                  <SearchIcon sx={{ color: "text.secondary" }} />
+                  <InputBase
+                    fullWidth
+                    placeholder="Search name, email or phone"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    slotProps={{ input: { "aria-label": "Search owners" } }}
+                  />
+                  {search && (
+                    <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
+                      <CloseIcon fontSize="small" />
+                    </IconButton>
+                  )}
+                </Paper>
+                <TextField
+                  select
+                  size="small"
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value)}
+                  slotProps={{ htmlInput: { "aria-label": "Sort owners" } }}
+                  sx={{ minWidth: { sm: 190 }, "& .MuiOutlinedInput-root": { borderRadius: 3, height: 46 } }}
+                >
+                  {SORTS.map((o) => (
+                    <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
+                  ))}
+                </TextField>
+              </Box>
 
               <Box
                 sx={{
@@ -307,7 +346,9 @@ export default function ManageOwners() {
               <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))", xl: "repeat(3, minmax(0, 1fr))" }, gap: { xs: 1.5, sm: 2 } }}>
                 {pendingOwners.map((o) => {
                   const name = ownerNameOf(o);
-                  const hasDocs = !!o.verificationDocs;
+                  const hasDocs = docsComplete(o);
+                  const someDocs = !!o.verificationDocs && !hasDocs;
+                  const resubmitted = toMillis(o.reviewedAt) > 0 && toMillis(o.verificationDocs?.submittedAt) > toMillis(o.reviewedAt);
                   return (
                     <Paper
                       key={o.id}
@@ -335,14 +376,14 @@ export default function ManageOwners() {
                         </Box>
                       </Box>
                       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
-                        <Chip size="small" label={`Applied ${fmtDate(o.createdAt)}`} sx={{ fontWeight: 700 }} />
+                        <Chip size="small" label={`${resubmitted ? "Resubmitted" : "Applied"} ${fmtDate(resubmitted ? o.verificationDocs.submittedAt : o.createdAt)}`} sx={{ fontWeight: 700 }} />
                         <Chip
                           size="small"
-                          label={hasDocs ? "Documents uploaded" : "No documents yet"}
+                          label={hasDocs ? "Documents complete" : someDocs ? "Documents incomplete" : "No documents yet"}
                           sx={{
                             fontWeight: 700,
-                            bgcolor: (t) => alpha(t.palette[hasDocs ? "success" : "error"].main, 0.13),
-                            color: (t) => t.palette[hasDocs ? "success" : "error"].dark,
+                            bgcolor: (t) => alpha(t.palette[hasDocs ? "success" : someDocs ? "warning" : "error"].main, 0.13),
+                            color: (t) => t.palette[hasDocs ? "success" : someDocs ? "warning" : "error"].dark,
                           }}
                         />
                       </Box>
@@ -382,6 +423,11 @@ export default function ManageOwners() {
                   All owners
                 </Typography>
               )}
+              {(search.trim() || filterTab !== "all") && (
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1, fontWeight: 600 }}>
+                  Showing {listOwners.length} of {owners.length} owners
+                </Typography>
+              )}
               <Paper elevation={0} sx={{ ...cardSx, overflow: "hidden" }}>
                 {/* Column headings (desktop) */}
                 <Box
@@ -396,7 +442,7 @@ export default function ManageOwners() {
                     borderColor: "divider",
                   }}
                 >
-                  {["Owner", "Properties", "Beds occupied", "Tenants", "Status", ""].map((h, i) => (
+                  {["Owner", "Joined", "Properties", "Beds occupied", "Tenants", "Status", ""].map((h, i) => (
                     <Typography key={i} variant="caption" color="text.secondary" sx={{ fontWeight: 800, letterSpacing: 0.4 }}>
                       {h.toUpperCase()}
                     </Typography>
@@ -465,6 +511,9 @@ export default function ManageOwners() {
                       </Box>
 
                       {/* desktop columns */}
+                      <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "none", md: "block" } }}>
+                        {fmtDate(owner.createdAt)}
+                      </Typography>
                       <Typography variant="body2" sx={{ display: { xs: "none", md: "block" }, fontWeight: 700 }}>
                         {pf.properties}
                       </Typography>
@@ -501,6 +550,7 @@ export default function ManageOwners() {
                       <Box sx={{ display: { xs: "flex", md: "none" }, gridColumn: "1 / -1", gap: 0.75, flexWrap: "wrap" }}>
                         <Chip size="small" label={`${pf.properties} ${pf.properties === 1 ? "property" : "properties"}`} sx={{ fontWeight: 700 }} />
                         <Chip size="small" label={`${tenantsN} ${tenantsN === 1 ? "tenant" : "tenants"}`} sx={{ fontWeight: 700 }} />
+                        <Chip size="small" variant="outlined" label={`Joined ${fmtDate(owner.createdAt)}`} sx={{ fontWeight: 600 }} />
                         {pf.beds > 0 && <Chip size="small" label={`${pct}% occupied`} sx={{ fontWeight: 700 }} />}
                       </Box>
                     </Box>

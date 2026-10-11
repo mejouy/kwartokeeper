@@ -24,15 +24,19 @@ import PaymentsIcon from "@mui/icons-material/Payments";
 import BuildIcon from "@mui/icons-material/Build";
 import CampaignIcon from "@mui/icons-material/Campaign";
 import LogoutIcon from "@mui/icons-material/Logout";
+import ManageAccountsIcon from "@mui/icons-material/ManageAccounts";
+import AssessmentOutlinedIcon from "@mui/icons-material/AssessmentOutlined";
 import MenuIcon from "@mui/icons-material/Menu";
 import { alpha } from "@mui/material/styles";
 import NotificationFeed from "../components/NotificationFeed";
 
 // Firebase Auth imports
-import { signOut } from "firebase/auth";
-import { auth } from "../config/firebase";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "../config/firebase";
 
-const drawerWidth = 260;
+const drawerWidth = 288;
+const BAR_H = { xs: 56, md: 80 }; // shared by the top bar and the sidebar header so their dividers line up
 
 const formatToday = () =>
   new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
@@ -78,9 +82,33 @@ const BOTTOM_NAV_PATHS = ["/owner", "/owner/properties", "/owner/tenants", "/own
 
 export default function OwnerLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [approvalStatus, setApprovalStatus] = useState("loading");
   const navigate = useNavigate();
   const location = useLocation();
   const todayLabel = useTodayLabel();
+
+  useEffect(() => {
+    let active = true;
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        if (active) setApprovalStatus("");
+        return;
+      }
+      try {
+        const snapshot = await getDoc(doc(db, "users", user.uid));
+        const profile = snapshot.exists() ? snapshot.data() : {};
+        const status = String(profile.approvalStatus || profile.status || "").toLowerCase();
+        if (active) setApprovalStatus(status);
+      } catch (error) {
+        console.error("Failed to load owner approval status:", error);
+        if (active) setApprovalStatus("");
+      }
+    });
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, []);
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -102,22 +130,31 @@ export default function OwnerLayout() {
     { text: "Caretakers", path: "/owner/caretakers", icon: <AssignmentIndIcon /> },
     { text: "Payments", path: "/owner/payments", icon: <PaymentsIcon /> },
     { text: "Maintenance", path: "/owner/maintenance", icon: <BuildIcon /> },
+    { text: "Reports", path: "/owner/reports", icon: <AssessmentOutlinedIcon /> },
     { text: "Announcements", path: "/owner/announcements", icon: <CampaignIcon /> },
+    { text: "Account", path: "/owner/account", icon: <ManageAccountsIcon /> },
   ];
+  const isPendingOwner = approvalStatus === "pending";
+  const visibleMenuItems = isPendingOwner
+    ? [
+        menuItems[0],
+        { text: "Property setup", path: "/setup", icon: <HomeWorkIcon /> },
+      ]
+    : menuItems;
 
   const isActive = (item) =>
     location.pathname === item.path ||
     (item.aliases || []).includes(location.pathname) ||
     (item.path !== "/owner" && location.pathname.startsWith(item.path + "/"));
 
-  const activeItem = menuItems.find(isActive);
+  const activeItem = visibleMenuItems.find(isActive);
   // Overview opens with its own "Welcome" heading and is highlighted in the
   // nav, so the bar leaves the title empty there and shows today's date next
   // to the notification bell instead.
   const isOverview = activeItem?.path === "/owner";
   const currentTitle = isOverview ? "" : activeItem?.text || "Dashboard";
 
-  const bottomItems = menuItems.filter((item) => BOTTOM_NAV_PATHS.includes(item.path));
+  const bottomItems = visibleMenuItems.filter((item) => BOTTOM_NAV_PATHS.includes(item.path));
   const activeBottomIndex = bottomItems.findIndex(isActive);
   // Anything not in the bottom bar (Caretakers, Maintenance, ...) highlights "Menu".
   const bottomValue = activeBottomIndex === -1 ? bottomItems.length : activeBottomIndex;
@@ -125,12 +162,12 @@ export default function OwnerLayout() {
   const drawer = (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Brand header — same height as the app bar so the divider lines up */}
-      <Toolbar sx={{ px: 2.5, height: { xs: 56, md: 64 }, minHeight: { xs: 56, md: 64 } }}>
+      <Toolbar sx={{ px: 2.5, height: BAR_H, minHeight: BAR_H }}>
         <Box
           component="img"
           src="/KwartoKeeper-Secondary-Logo.png"
           alt="KwartoKeeper"
-          sx={{ display: "block", height: { xs: 34, md: 56 }, maxWidth: "100%", width: "auto", objectFit: "contain" }}
+          sx={{ display: "block", height: { xs: 34, md: 64 }, maxWidth: "100%", width: "auto", objectFit: "contain" }}
         />
       </Toolbar>
       <Divider />
@@ -138,7 +175,7 @@ export default function OwnerLayout() {
       {/* Main Navigation Links */}
       <Box sx={{ flexGrow: 1, overflowY: "auto" }}>
         <List sx={{ py: 1.5 }}>
-          {menuItems.map((item) => (
+          {visibleMenuItems.map((item) => (
             <ListItem key={item.text} disablePadding>
               <ListItemButton
                 selected={isActive(item)}
@@ -206,7 +243,7 @@ export default function OwnerLayout() {
           borderColor: "divider",
         }}
       >
-        <Toolbar>
+        <Toolbar sx={{ height: BAR_H, minHeight: BAR_H }}>
           {/* Phones: brand mark replaces the (now unneeded) hamburger. The
               drawer opens from "Menu" in the bottom bar. */}
           <Box
@@ -266,7 +303,7 @@ export default function OwnerLayout() {
           pb: { xs: "calc(88px + env(safe-area-inset-bottom, 0px))", md: 3 },
         }}
       >
-        <Toolbar />
+        <Box sx={{ height: BAR_H }} />
         <Outlet />
       </Box>
 

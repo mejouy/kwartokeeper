@@ -238,6 +238,7 @@ export default function PropertyDetails() {
   const [formData, setFormData] = useState({
     propertyName: "",
     propertyType: "Dormitory",
+    status: "Active",
     coverPhotoUrl: "",
     emergencyPhone: "",
     configMode: "uniform",
@@ -280,6 +281,7 @@ export default function PropertyDetails() {
           const loaded = {
             propertyName: data.propertyName || "",
             propertyType: data.propertyType || "Dormitory",
+            status: data.status || "Active",
             coverPhotoUrl: getPropertyCoverPhotoUrl(data),
             emergencyPhone: data.emergencyPhone || "",
             configMode: data.configMode || "uniform",
@@ -289,18 +291,18 @@ export default function PropertyDetails() {
             totalBeds: rooms.reduce((sum, r) => sum + (Number(r.capacity) || 0), 0),
             occupiedBeds: data.occupiedBeds || 0,
             address: {
-              street: data.address?.street || "",
+              street: (typeof data.address === "string" ? data.address : data.address?.street) || data.street || data.streetAddress || "",
               barangay: data.address?.barangay || "",
-              cityMunicipality: data.address?.cityMunicipality || "",
-              province: data.address?.province || "",
-              region: data.address?.region || ""
+              cityMunicipality: data.address?.cityMunicipality || data.cityMunicipality || data.city || "",
+              province: data.address?.province || data.province || "",
+              region: data.address?.region || data.region || ""
             },
-            curfew: {
-              enabled: Boolean(data.curfew?.enabled),
-              startTime: data.curfew?.startTime || "10:00 PM"
+              curfew: {
+              enabled: Boolean(data.curfew?.enabled ?? data.curfewEnabled),
+              startTime: data.curfew?.startTime || data.curfewTime || "10:00 PM"
             },
             amenities: Array.isArray(data.amenities) ? data.amenities : [],
-            rulesText: Array.isArray(data.rules) ? data.rules.join("\n") : "",
+            rulesText: Array.isArray(data.rules) ? data.rules.join("\n") : typeof data.rules === "string" ? data.rules : data.rulesText || "",
             ruleFiles: Array.isArray(data.ruleFiles) ? data.ruleFiles : [],
             rooms: rooms
           };
@@ -591,6 +593,7 @@ export default function PropertyDetails() {
       const updatePayload = {
         propertyName: formData.propertyName,
         propertyType: formData.propertyType,
+        status: formData.status,
         coverPhotoUrl: formData.coverPhotoUrl || null,
         emergencyPhone: formData.emergencyPhone,
         configMode: formData.configMode,
@@ -847,6 +850,10 @@ export default function PropertyDetails() {
                 <TextField fullWidth label="Property type" name="propertyType" value={formData.propertyType} onChange={handleChange} />
                 <TextField fullWidth label="Emergency phone" name="emergencyPhone" type="tel" value={formData.emergencyPhone} onChange={handleChange} />
               </Box>
+              <TextField select fullWidth label="Property status" name="status" value={formData.status} onChange={handleChange}>
+                <MenuItem value="Active">Active</MenuItem>
+                <MenuItem value="Inactive">Inactive</MenuItem>
+              </TextField>
               <Box>
                 <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
                   Cover photo

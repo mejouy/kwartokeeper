@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
+  Autocomplete,
   Box,
   Button,
   Chip,
@@ -33,8 +34,8 @@ import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import ErrorOutlinedIcon from "@mui/icons-material/ErrorOutlined";
 import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
+import ContentCopyOutlinedIcon from "@mui/icons-material/ContentCopyOutlined";
 import {
-  addDoc,
   collection,
   doc,
   getDocs,
@@ -104,6 +105,9 @@ const formatDate = (ts) => {
 const userProp = (u) => u.propertyId || u.assignedPropertyId;
 const userRoom = (u) => u.roomId || u.roomNumber;
 const userName = (u) => u.fullName || u.name || "Unnamed";
+const roleOf = (u) => String(u.role || "tenant").toLowerCase();
+const isReachable = (u) => ["tenant", "caretaker"].includes(roleOf(u));
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
 function Pill({ label, tone = "default", icon }) {
   return (
@@ -161,7 +165,7 @@ function SummaryStrip({ items }) {
   );
 }
 
-function AnnouncementCard({ a, scopeLabel }) {
+function AnnouncementCard({ a, scopeLabel, onReuse }) {
   const [open, setOpen] = useState(false);
   const meta = typeOf(a.type);
   const long = (a.message || "").length > 220 || (a.message || "").split("\n").length > 4;
@@ -214,11 +218,21 @@ function AnnouncementCard({ a, scopeLabel }) {
         <Typography variant="caption" color="text.secondary">
           {formatDate(a.createdAt)}
         </Typography>
-        {long && (
-          <Button size="small" onClick={() => setOpen((v) => !v)} sx={{ fontWeight: 700, minWidth: 0 }}>
-            {open ? "Show less" : "Show more"}
+        <Box sx={{ ...row, gap: 0.5 }}>
+          {long && (
+            <Button size="small" onClick={() => setOpen((v) => !v)} sx={{ fontWeight: 700, minWidth: 0 }}>
+              {open ? "Show less" : "Show more"}
+            </Button>
+          )}
+          <Button
+            size="small"
+            startIcon={<ContentCopyOutlinedIcon sx={{ fontSize: 16 }} />}
+            onClick={() => onReuse(a)}
+            sx={{ fontWeight: 700, minWidth: 0 }}
+          >
+            Reuse
           </Button>
-        )}
+        </Box>
       </Box>
     </Paper>
   );
@@ -268,7 +282,7 @@ export default function OwnerAnnouncements() {
           getDocs(query(collection(db, "users"), where("ownerUid", "==", ownerId))),
         ]);
         setProperties(propsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-        setUsers(usersSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setUsers(usersSnap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((u) => u.id !== ownerId && isReachable(u)));
       } catch (err) {
         console.error("Error fetching targeting metadata:", err);
       }
@@ -309,14 +323,14 @@ export default function OwnerAnnouncements() {
       const room = userRoom(u);
       if (room && (!selectedPropertyId || userProp(u) === selectedPropertyId)) rooms.add(room);
     });
-    return Array.from(rooms);
+    return Array.from(rooms).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
   }, [users, selectedPropertyId]);
 
   // Same targeting rules as before, in one place so the preview and the send agree.
   const recipients = useMemo(
     () =>
       users.filter((u) => {
-        const role = (u.role || "tenant").toLowerCase();
+        const role = roleOf(u);
         if (targetAudience === "tenants" && role !== "tenant") return false;
         if (targetAudience === "caretakers" && role !== "caretaker") return false;
         if (scope === "all") return true;
@@ -333,11 +347,11 @@ export default function OwnerAnnouncements() {
   const personOptions = useMemo(
     () =>
       users.filter((u) => {
-        const role = (u.role || "tenant").toLowerCase();
+        const role = roleOf(u);
         if (targetAudience === "tenants" && role !== "tenant") return false;
         if (targetAudience === "caretakers" && role !== "caretaker") return false;
         return true;
-      }),
+      }).sort((a, b) => userName(a).localeCompare(userName(b))),
     [users, targetAudience]
   );
 
@@ -377,6 +391,21 @@ export default function OwnerAnnouncements() {
     setFormError("");
   };
 
+  const reuse = (a) => {
+    const d = a.targetDetails || {};
+    setTitle(a.title || "");
+    setMessage(a.message || "");
+    setType(a.type || "info");
+    setScope(a.scope || "all");
+    setTargetAudience(a.targetAudience || "both");
+    setSelectedPropertyId(d.propertyId || "");
+    setSelectedRoomNumber(d.roomNumber || "");
+    setSelectedRecipientId(d.recipientId || "");
+    setTouched({});
+    setFormError("");
+    setComposeOpen(true);
+  };
+
   const closeCompose = () => {
     if (submitting) return;
     setComposeOpen(false);
@@ -398,7 +427,10 @@ export default function OwnerAnnouncements() {
     const cleanMessage = message.trim();
 
     try {
-      const announcementRef = await addDoc(collection(db, "owner_announcements"), {
+      // The announcement record goes in the very first batch with its first
+      // notifications, so a failure can't leave a "sent" record nobody received.
+      const announcementRef = doc(collection(db, "owner_announcements"));
+      const announcementData = {
         ownerId,
         createdBy: ownerId,
         title: cleanTitle,
@@ -413,11 +445,12 @@ export default function OwnerAnnouncements() {
         recipientCount: recipients.length,
         type,
         createdAt: timestamp,
-      });
+      };
 
-      // Notifications in batches (Firestore caps a batch at 500 writes)
+      // Firestore caps a batch at 500 writes
       for (let i = 0; i < recipients.length; i += 400) {
         const batch = writeBatch(db);
+        if (i === 0) batch.set(announcementRef, announcementData);
         recipients.slice(i, i + 400).forEach((r) => {
           batch.set(doc(collection(db, "notifications")), {
             userId: r.id,
@@ -437,7 +470,7 @@ export default function OwnerAnnouncements() {
       const n = recipients.length;
       resetForm();
       setComposeOpen(false);
-      notify(`Sent to ${n} ${n === 1 ? "person" : "people"}.`);
+      notify(`Sent to ${plural(n, "person", "people")}.`);
     } catch (err) {
       console.error("Error sending announcement:", err);
       setFormError("The announcement could not be sent. Please try again.");
@@ -475,10 +508,13 @@ export default function OwnerAnnouncements() {
   }, [announcements, filter, search]);
 
   const selectFieldProps = { select: true, fullWidth: true, size: "small" };
+  const nTenants = recipients.filter((u) => roleOf(u) === "tenant").length;
+  const nCaretakers = recipients.length - nTenants;
   const preview =
     recipients.length === 0
       ? "No matching recipients yet"
-      : `Will reach ${recipients.length} ${recipients.length === 1 ? "person" : "people"}`;
+      : `Will reach ${plural(recipients.length, "person", "people")}` +
+        (nTenants && nCaretakers ? ` (${plural(nTenants, "tenant", "tenants")}, ${plural(nCaretakers, "caretaker", "caretakers")})` : "");
 
   return (
     <Box>
@@ -533,7 +569,7 @@ export default function OwnerAnnouncements() {
                     placeholder="Search title or message"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
-                    inputProps={{ "aria-label": "Search announcements" }}
+                    slotProps={{ input: { "aria-label": "Search announcements" } }}
                   />
                   {search && (
                     <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
@@ -593,7 +629,7 @@ export default function OwnerAnnouncements() {
           ) : (
             <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: { xs: 1.5, sm: 2 } }}>
               {visible.map((a) => (
-                <AnnouncementCard key={a.id} a={a} scopeLabel={scopeLabelFor(a)} />
+                <AnnouncementCard key={a.id} a={a} scopeLabel={scopeLabelFor(a)} onReuse={reuse} />
               ))}
             </Box>
           )}
@@ -626,7 +662,7 @@ export default function OwnerAnnouncements() {
         fullScreen={isPhone}
         fullWidth
         maxWidth="sm"
-        PaperProps={{ sx: { borderRadius: isPhone ? 0 : 3, bgcolor: "background.default" } }}
+        slotProps={{ paper: { sx: { borderRadius: isPhone ? 0 : 3, bgcolor: "background.default" } } }}
       >
         <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
           New announcement
@@ -752,23 +788,34 @@ export default function OwnerAnnouncements() {
             )}
 
             {scope === "individual" && (
-              <TextField
-                {...selectFieldProps}
-                label="Person"
-                value={selectedRecipientId}
-                onChange={(e) => setSelectedRecipientId(e.target.value)}
+              <Autocomplete
+                size="small"
+                options={personOptions}
+                value={personOptions.find((u) => u.id === selectedRecipientId) || null}
+                onChange={(_, v) => setSelectedRecipientId(v ? v.id : "")}
                 onBlur={() => touch("person")}
-                error={!!show("person")}
-                helperText={show("person")}
-              >
-                {personOptions.length === 0 && <MenuItem value="" disabled>No people found</MenuItem>}
-                {personOptions.map((u) => (
-                  <MenuItem key={u.id} value={u.id}>
-                    {userName(u)} · {u.role || "tenant"}
-                    {userRoom(u) ? ` · Room ${userRoom(u)}` : ""}
-                  </MenuItem>
-                ))}
-              </TextField>
+                getOptionLabel={(u) => userName(u)}
+                isOptionEqualToValue={(o, v) => o.id === v.id}
+                noOptionsText="No people found"
+                renderOption={(props, u) => {
+                  const { key, ...rest } = props;
+                  return (
+                    <li key={key} {...rest}>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>{userName(u)}</Typography>
+                        <Typography variant="caption" color="text.secondary">
+                          {roleOf(u) === "caretaker" ? "Caretaker" : "Tenant"}
+                          {userRoom(u) ? ` · Room ${userRoom(u)}` : ""}
+                          {userProp(u) ? ` · ${propertyName(userProp(u))}` : ""}
+                        </Typography>
+                      </Box>
+                    </li>
+                  );
+                }}
+                renderInput={(params) => (
+                  <TextField {...params} label="Person" placeholder="Search by name" error={!!show("person")} helperText={show("person")} />
+                )}
+              />
             )}
 
             <TextField
@@ -810,11 +857,11 @@ export default function OwnerAnnouncements() {
           <Button
             variant="contained"
             onClick={handleSend}
-            disabled={submitting}
+            disabled={submitting || recipients.length === 0}
             startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : <SendIcon />}
             sx={{ borderRadius: 2.5, fontWeight: 700, px: 3 }}
           >
-            {submitting ? "Sending..." : "Send"}
+            {submitting ? "Sending..." : recipients.length > 1 ? `Send to ${recipients.length}` : "Send"}
           </Button>
         </DialogActions>
       </Dialog>

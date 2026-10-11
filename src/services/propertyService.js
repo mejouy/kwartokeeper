@@ -28,6 +28,7 @@ export async function saveProperty(wizardData, rooms, ownerUid) {
 
   const propertyDoc = {
     ownerUid,
+    status: "Active",
     propertyName: wizardData.propertyName || null,
     propertyType: wizardData.propertyType || null, // Dormitory | Apartment | Boarding House
     address: {

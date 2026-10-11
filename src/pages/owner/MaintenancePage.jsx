@@ -18,25 +18,27 @@ import {
   Skeleton,
   Snackbar,
   TextField,
-  Tooltip,
   Typography,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import AccessTimeOutlinedIcon from "@mui/icons-material/AccessTimeOutlined";
-import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
+import CancelOutlinedIcon from "@mui/icons-material/CancelOutlined";
 import NotesOutlinedIcon from "@mui/icons-material/NotesOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import CloseIcon from "@mui/icons-material/Close";
+import InventoryOutlinedIcon from "@mui/icons-material/Inventory2Outlined";
 
 import {
+  addDoc,
   collection,
   query,
   where,
   onSnapshot,
   doc,
   updateDoc,
-  deleteDoc,
+  deleteField,
+  serverTimestamp,
 } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../context/AuthContext";
@@ -45,13 +47,24 @@ import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
 const row = { display: "flex", alignItems: "center" };
 
 const TIER_TONE = { High: "error", Medium: "warning", Low: "default" };
-const STATUS_TONE = { Pending: "warning", "In Progress": "info", Resolved: "success" };
+const STATUS_TONE = { Pending: "warning", "In Progress": "info", Resolved: "success", Cancelled: "default" };
 
-const STATUS_OPTIONS = ["Pending", "In Progress", "Resolved"];
-const FILTER_OPTIONS = ["All", ...STATUS_OPTIONS];
+const STATUS_OPTIONS = ["Pending", "In Progress", "Resolved"]; // what the owner can set; cancelling has its own button
 const MAX_REMARKS = 500;
+const MAX_REASON = 200;
 
 const statusOf = (t) => t.status || "Pending";
+const isClosed = (t) => ["Resolved", "Cancelled"].includes(statusOf(t));
+
+// Views. "Active" is the default so finished work doesn't bury what needs attention.
+const VIEWS = [
+  { key: "active", label: "Active", test: (t) => !isClosed(t) },
+  { key: "pending", label: "Pending", test: (t) => statusOf(t) === "Pending" },
+  { key: "progress", label: "In progress", test: (t) => statusOf(t) === "In Progress" },
+  { key: "resolved", label: "Resolved", test: (t) => statusOf(t) === "Resolved" },
+  { key: "cancelled", label: "Cancelled", test: (t) => statusOf(t) === "Cancelled" },
+  { key: "all", label: "All", test: () => true },
+];
 
 // Helper to format Firestore timestamps beautifully
 const formatTimestamp = (timestamp) => {
@@ -65,6 +78,16 @@ const formatTimestamp = (timestamp) => {
     hour: "numeric",
     minute: "numeric",
   }).format(date);
+};
+
+const toDate = (v) => {
+  if (!v) return null;
+  const d = v.toDate ? v.toDate() : new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+const shortDate = (v) => {
+  const d = toDate(v);
+  return d ? d.toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
 };
 
 const cardSx = {
@@ -131,7 +154,7 @@ function SummaryStrip({ items }) {
 }
 
 // One ticket. Keeps its own remarks draft so typing never fights live updates.
-function TicketCard({ ticket, onStatusChange, onDelete, notify }) {
+function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
   const [remarks, setRemarks] = useState(ticket.remarks || "");
   const [editingRemarks, setEditingRemarks] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -146,7 +169,8 @@ function TicketCard({ ticket, onStatusChange, onDelete, notify }) {
   const hasUnsavedRemarks = remarks.trim() !== savedRemarks;
   const tier = ticket.priority?.tier || "Medium";
   const status = statusOf(ticket);
-  const resolved = status === "Resolved";
+  const resolved = status === "Resolved" || status === "Cancelled";
+  const closedOn = status === "Resolved" ? shortDate(ticket.resolvedAt) : status === "Cancelled" ? shortDate(ticket.cancelledAt) : "";
   const longDescription = (ticket.description || "").length > 180;
 
   const handleSaveRemarks = async () => {
@@ -197,9 +221,10 @@ function TicketCard({ ticket, onStatusChange, onDelete, notify }) {
           <Typography variant="caption" color="text.secondary" sx={{ ...row, gap: 0.5, mt: 0.5 }}>
             <AccessTimeOutlinedIcon sx={{ fontSize: 14 }} />
             Submitted {formatTimestamp(ticket.createdAt)}
+            {resolved && closedOn ? ` · ${status} ${closedOn}` : ""}
           </Typography>
         </Box>
-        <Pill label={`${tier} priority`} tone={TIER_TONE[tier] || "default"} outlined />
+        {resolved ? <Pill label={status} tone={STATUS_TONE[status] || "default"} /> : <Pill label={`${tier} priority`} tone={TIER_TONE[tier] || "default"} outlined />}
       </Box>
 
       {/* Description */}
@@ -255,6 +280,12 @@ function TicketCard({ ticket, onStatusChange, onDelete, notify }) {
             </Box>
           ))}
         </Box>
+      )}
+
+      {status === "Cancelled" && ticket.cancelReason && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, overflowWrap: "anywhere" }}>
+          <strong>Reason:</strong> {ticket.cancelReason}
+        </Typography>
       )}
 
       {/* Remarks */}
@@ -339,29 +370,31 @@ function TicketCard({ ticket, onStatusChange, onDelete, notify }) {
           select
           size="small"
           value={status}
-          onChange={(e) => onStatusChange(ticket.id, e.target.value)}
-          aria-label="Ticket status"
+          disabled={busy}
+          onChange={(e) => onStatusChange(ticket, e.target.value)}
+          slotProps={{ htmlInput: { "aria-label": "Ticket status" } }}
           sx={{
             flex: { xs: 1, sm: "none" },
             minWidth: { sm: 170 },
             "& .MuiOutlinedInput-root": {
               borderRadius: 2.5,
               fontWeight: 700,
-              bgcolor: (t) => alpha(t.palette[STATUS_TONE[status] || "warning"].main, 0.1),
-              color: (t) => t.palette[STATUS_TONE[status] || "warning"].dark,
+              bgcolor: (t) => (STATUS_TONE[status] === "default" ? alpha(t.palette.text.primary, 0.07) : alpha(t.palette[STATUS_TONE[status] || "warning"].main, 0.1)),
+              color: (t) => (STATUS_TONE[status] === "default" ? t.palette.text.secondary : t.palette[STATUS_TONE[status] || "warning"].dark),
             },
           }}
         >
-          {STATUS_OPTIONS.map((opt) => (
-            <MenuItem key={opt} value={opt}>{opt}</MenuItem>
+          {/* A cancelled request can still be reopened; "Cancelled" is only listed while it is the current value */}
+          {(status === "Cancelled" ? ["Cancelled", ...STATUS_OPTIONS] : STATUS_OPTIONS).map((opt) => (
+            <MenuItem key={opt} value={opt} disabled={opt === "Cancelled"}>{opt}</MenuItem>
           ))}
         </TextField>
 
-        <Tooltip title="Delete ticket">
-          <IconButton size="small" color="error" onClick={() => onDelete(ticket)} aria-label="Delete ticket">
-            <DeleteOutlinedIcon fontSize="small" />
-          </IconButton>
-        </Tooltip>
+        {!resolved && (
+          <Button size="small" color="error" startIcon={<CancelOutlinedIcon />} onClick={() => onCancel(ticket)} disabled={busy} sx={{ fontWeight: 700, minHeight: 40, textTransform: "none" }}>
+            Cancel request
+          </Button>
+        )}
       </Box>
     </Paper>
   );
@@ -372,10 +405,13 @@ export default function MaintenancePage() {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [statusFilter, setStatusFilter] = useState("All");
+  const [view, setView] = useState("active");
+  const [propertyFilter, setPropertyFilter] = useState("all");
   const [search, setSearch] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState(null);
-  const [deleting, setDeleting] = useState(false);
+  const [busyId, setBusyId] = useState("");
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelReason, setCancelReason] = useState("");
+  const [cancelling, setCancelling] = useState(false);
   const [toast, setToast] = useState({ open: false, severity: "success", message: "" });
 
   const notify = (message, severity = "success") => setToast({ open: true, severity, message });
@@ -386,10 +422,7 @@ export default function MaintenancePage() {
       return undefined;
     }
 
-    const q = query(
-      collection(db, "maintenance_tickets"),
-      where("ownerUid", "==", currentUser.uid)
-    );
+    const q = query(collection(db, "maintenance_tickets"), where("ownerUid", "==", currentUser.uid));
 
     const unsubscribeSnapshot = onSnapshot(
       q,
@@ -408,61 +441,135 @@ export default function MaintenancePage() {
     return () => unsubscribeSnapshot();
   }, [currentUser?.uid]);
 
-  const handleStatusChange = async (ticketId, newStatus) => {
+  // Tell the tenant (best effort: the change itself has already been saved)
+  const notifyTenant = (ticket, type, title, message) => {
+    const tenantId = ticket.tenantUid || ticket.tenantId;
+    if (!tenantId || !currentUser?.uid) return;
+    addDoc(collection(db, "notifications"), {
+      userId: tenantId,
+      kind: "notice",
+      category: "maintenance",
+      type,
+      title,
+      message,
+      ownerId: currentUser.uid,
+      createdBy: currentUser.uid,
+      createdByRole: "owner",
+      isRead: false,
+      createdAt: new Date().toISOString(),
+    }).catch((err) => console.warn("Repair notice failed:", err?.code || err));
+  };
+
+  const handleStatusChange = async (ticket, newStatus) => {
+    if (!ticket || busyId || newStatus === statusOf(ticket)) return;
+    const name = ticket.title || "your repair request";
+    setBusyId(ticket.id);
     try {
-      await updateDoc(doc(db, "maintenance_tickets", ticketId), {
+      await updateDoc(doc(db, "maintenance_tickets", ticket.id), {
         status: newStatus,
-        updatedAt: new Date(),
+        updatedAt: serverTimestamp(),
+        // Keep the dates honest when something is resolved, then reopened
+        resolvedAt: newStatus === "Resolved" ? serverTimestamp() : deleteField(),
+        ...(statusOf(ticket) === "Cancelled" ? { cancelledAt: deleteField(), cancelReason: deleteField() } : {}),
       });
-      notify(`Marked as ${newStatus}.`);
+      notifyTenant(
+        ticket,
+        newStatus === "Resolved" ? "success" : "info",
+        `Repair update: ${newStatus}`,
+        newStatus === "Resolved"
+          ? `"${name}" was marked resolved. If it isn't fixed, add an update from your dashboard.`
+          : newStatus === "In Progress"
+          ? `Work has started on "${name}".`
+          : `"${name}" is back to pending.`
+      );
+      notify(`Marked as ${newStatus.toLowerCase()}.${newStatus === "Resolved" ? " It moves to Resolved." : ""}`);
     } catch (err) {
       console.error("Failed to update ticket status:", err);
       notify("Failed to update status. You may not have permission.", "error");
-    }
-  };
-
-  const confirmDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await deleteDoc(doc(db, "maintenance_tickets", deleteTarget.id));
-      setDeleteTarget(null);
-      notify("Ticket deleted.");
-    } catch (err) {
-      console.error("Failed to delete ticket:", err);
-      notify("Failed to delete ticket.", "error");
     } finally {
-      setDeleting(false);
+      setBusyId("");
     }
   };
 
-  // Summary metrics. "High priority" only counts tickets still open.
+  const openCancel = (ticket) => {
+    setCancelReason("");
+    setCancelTarget(ticket);
+  };
+
+  const confirmCancel = async () => {
+    if (!cancelTarget || cancelling) return;
+    const ticket = cancelTarget;
+    const reason = cancelReason.trim();
+    setCancelling(true);
+    try {
+      await updateDoc(doc(db, "maintenance_tickets", ticket.id), {
+        status: "Cancelled",
+        cancelledAt: serverTimestamp(),
+        cancelledBy: "owner",
+        cancelReason: reason,
+        updatedAt: serverTimestamp(),
+      });
+      notifyTenant(
+        ticket,
+        "warning",
+        "Repair request cancelled",
+        `Your landlord cancelled "${ticket.title || "your repair request"}".${reason ? ` Reason: ${reason}` : ""} You can send a new request if the problem is still there.`
+      );
+      setCancelTarget(null);
+      notify("Request cancelled and kept under Cancelled.");
+    } catch (err) {
+      console.error("Failed to cancel ticket:", err);
+      notify("Failed to cancel request.", "error");
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const propertyNames = useMemo(
+    () => [...new Set(tickets.map((t) => t.propertyName).filter(Boolean))].sort((a, b) => a.localeCompare(b)),
+    [tickets]
+  );
+
+  // Everything below respects the property filter, so the numbers always match the list
+  const scoped = useMemo(
+    () => (propertyFilter === "all" ? tickets : tickets.filter((t) => t.propertyName === propertyFilter)),
+    [tickets, propertyFilter]
+  );
+
   const stats = useMemo(() => {
-    const open = tickets.filter((t) => statusOf(t) !== "Resolved");
+    const open = scoped.filter((t) => !isClosed(t));
     return {
-      total: tickets.length,
-      pending: tickets.filter((t) => statusOf(t) === "Pending").length,
-      inProgress: tickets.filter((t) => t.status === "In Progress").length,
-      resolved: tickets.filter((t) => statusOf(t) === "Resolved").length,
+      open: open.length,
+      pending: open.filter((t) => statusOf(t) === "Pending").length,
+      inProgress: open.filter((t) => statusOf(t) === "In Progress").length,
       highPriority: open.filter((t) => t.priority?.tier === "High").length,
     };
-  }, [tickets]);
+  }, [scoped]);
 
-  const rankedTickets = useMemo(() => rankMaintenanceRequests(tickets), [tickets]);
+  const rankedTickets = useMemo(() => {
+    const ranked = rankMaintenanceRequests(scoped);
+    // Open work first (already in priority order), finished work after, newest first
+    const closedTime = (t) => (toDate(t.resolvedAt) || toDate(t.cancelledAt) || toDate(t.updatedAt) || toDate(t.createdAt))?.getTime() || 0;
+    return [...ranked.filter((t) => !isClosed(t)), ...ranked.filter(isClosed).sort((a, b) => closedTime(b) - closedTime(a))];
+  }, [scoped]);
 
+  const activeView = VIEWS.find((v) => v.key === view) || VIEWS[0];
   const visibleTickets = useMemo(() => {
     const term = search.trim().toLowerCase();
     return rankedTickets.filter((t) => {
-      if (statusFilter !== "All" && statusOf(t) !== statusFilter) return false;
+      if (!activeView.test(t)) return false;
       if (!term) return true;
-      return [t.title, t.description, t.tenantName, t.propertyName, t.roomNumber].some((v) =>
-        String(v || "").toLowerCase().includes(term)
-      );
+      return [t.title, t.description, t.tenantName, t.propertyName, t.roomNumber].some((v) => String(v || "").toLowerCase().includes(term));
     });
-  }, [rankedTickets, statusFilter, search]);
+  }, [rankedTickets, activeView, search]);
 
-  const countFor = (opt) =>
-    opt === "All" ? stats.total : opt === "Pending" ? stats.pending : opt === "In Progress" ? stats.inProgress : stats.resolved;
+  const countFor = (v) => scoped.filter(v.test).length;
+  const filtersActive = view !== "active" || Boolean(search.trim()) || propertyFilter !== "all";
+  const clearFilters = () => {
+    setView("active");
+    setSearch("");
+    setPropertyFilter("all");
+  };
 
   if (loading) {
     return (
@@ -475,11 +582,25 @@ export default function MaintenancePage() {
     );
   }
 
+  const emptyTitle =
+    tickets.length === 0
+      ? "No maintenance requests yet"
+      : view === "active" && !search.trim() && propertyFilter === "all"
+      ? "Nothing needs attention"
+      : "No requests match";
+  const emptyBody =
+    tickets.length === 0
+      ? "When a tenant reports an issue, it will show up here."
+      : view === "active" && !search.trim() && propertyFilter === "all"
+      ? "All requests are resolved or cancelled. Look under Resolved to review them."
+      : search.trim()
+      ? "Try a different search."
+      : "Nothing in this view.";
+
   return (
     <Box sx={{ minWidth: 0 }}>
-      {/* The top bar already names the page, so just a line of context */}
       <Typography color="text.secondary" sx={{ mb: { xs: 2, sm: 2.5 } }}>
-        Monitor and prioritize repair requests across all your properties.
+        Repair requests from your tenants, most urgent first.
       </Typography>
 
       {error && (
@@ -491,36 +612,53 @@ export default function MaintenancePage() {
       {tickets.length > 0 && (
         <SummaryStrip
           items={[
-            { label: "Total requests", value: stats.total },
+            { label: "Open requests", value: stats.open },
             { label: "Pending review", value: stats.pending, color: stats.pending > 0 ? "warning.main" : undefined },
             { label: "In progress", value: stats.inProgress, color: stats.inProgress > 0 ? "info.main" : undefined },
-            { label: "High priority (open)", value: stats.highPriority, color: stats.highPriority > 0 ? "error.main" : undefined },
+            { label: "High priority", value: stats.highPriority, color: stats.highPriority > 0 ? "error.main" : undefined },
           ]}
         />
       )}
 
-      {/* Search + status filter */}
+      {/* Search, property, and view */}
       {tickets.length > 0 && (
         <Box sx={{ mb: { xs: 2, sm: 2.5 } }}>
-          {tickets.length > 5 && (
-            <Paper
-              elevation={0}
-              sx={{ ...row, gap: 1, px: 1.5, bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3, height: 46, mb: 1.5 }}
-            >
-              <SearchIcon sx={{ color: "text.secondary" }} />
-              <InputBase
-                fullWidth
-                placeholder="Search title, tenant, property or room"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                inputProps={{ "aria-label": "Search tickets" }}
-              />
-              {search && (
-                <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
-                  <CloseIcon fontSize="small" />
-                </IconButton>
+          {(tickets.length > 5 || propertyNames.length > 1) && (
+            <Box sx={{ display: "flex", flexDirection: { xs: "column", sm: "row" }, gap: 1.25, mb: 1.5 }}>
+              <Paper
+                elevation={0}
+                sx={{ ...row, flex: 1, gap: 1, px: 1.5, bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3, height: 46, maxWidth: { sm: 420 } }}
+              >
+                <SearchIcon sx={{ color: "text.secondary" }} />
+                <InputBase
+                  fullWidth
+                  placeholder="Search title, tenant or room"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  inputProps={{ "aria-label": "Search requests" }}
+                />
+                {search && (
+                  <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                )}
+              </Paper>
+              {propertyNames.length > 1 && (
+                <TextField
+                  select
+                  size="small"
+                  value={propertyFilter}
+                  onChange={(e) => setPropertyFilter(e.target.value)}
+                  slotProps={{ htmlInput: { "aria-label": "Filter by property" } }}
+                  sx={{ minWidth: { sm: 200 }, "& .MuiOutlinedInput-root": { borderRadius: 3, height: 46 } }}
+                >
+                  <MenuItem value="all">All properties</MenuItem>
+                  {propertyNames.map((p) => (
+                    <MenuItem key={p} value={p}>{p}</MenuItem>
+                  ))}
+                </TextField>
               )}
-            </Paper>
+            </Box>
           )}
 
           <Box
@@ -534,15 +672,15 @@ export default function MaintenancePage() {
               "&::-webkit-scrollbar": { display: "none" },
             }}
           >
-            {FILTER_OPTIONS.map((opt) => (
+            {VIEWS.map((v) => (
               <Chip
-                key={opt}
-                label={`${opt} · ${countFor(opt)}`}
+                key={v.key}
+                label={`${v.label} · ${countFor(v)}`}
                 clickable
-                onClick={() => setStatusFilter(opt)}
-                color={statusFilter === opt ? "primary" : "default"}
-                variant={statusFilter === opt ? "filled" : "outlined"}
-                sx={{ fontWeight: 700, flexShrink: 0, height: 34, borderRadius: 17 }}
+                onClick={() => setView(v.key)}
+                color={view === v.key ? "primary" : "default"}
+                variant={view === v.key ? "filled" : "outlined"}
+                sx={{ fontWeight: 700, flexShrink: 0, height: 36, borderRadius: 18 }}
               />
             ))}
           </Box>
@@ -553,21 +691,19 @@ export default function MaintenancePage() {
       {visibleTickets.length === 0 ? (
         <Paper elevation={0} sx={{ ...cardSx, borderStyle: tickets.length === 0 ? "dashed" : "solid", py: { xs: 5, sm: 7 }, px: 3, textAlign: "center" }}>
           <Box sx={{ width: 64, height: 64, borderRadius: "50%", mx: "auto", mb: 2, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
-            <BuildOutlinedIcon sx={{ fontSize: 30, color: "primary.main" }} />
+            {tickets.length > 0 && view === "active" && !filtersActive ? (
+              <InventoryOutlinedIcon sx={{ fontSize: 30, color: "primary.main" }} />
+            ) : (
+              <BuildOutlinedIcon sx={{ fontSize: 30, color: "primary.main" }} />
+            )}
           </Box>
-          <Typography sx={{ fontWeight: 700 }}>
-            {tickets.length === 0 ? "No maintenance requests yet" : "No tickets match"}
-          </Typography>
+          <Typography sx={{ fontWeight: 700 }}>{emptyTitle}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            {tickets.length === 0
-              ? "When a tenant reports an issue, it will show up here."
-              : search
-                ? "Try a different search."
-                : `No tickets with status "${statusFilter}".`}
+            {emptyBody}
           </Typography>
-          {tickets.length > 0 && (statusFilter !== "All" || search) && (
-            <Button size="small" onClick={() => { setStatusFilter("All"); setSearch(""); }} sx={{ mt: 1.5, fontWeight: 700 }}>
-              Clear filters
+          {tickets.length > 0 && filtersActive && (
+            <Button size="small" onClick={clearFilters} sx={{ mt: 1.5, fontWeight: 700 }}>
+              Back to active requests
             </Button>
           )}
         </Paper>
@@ -575,37 +711,47 @@ export default function MaintenancePage() {
         <Box
           sx={{
             display: "grid",
-            gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" },
+            gridTemplateColumns: "minmax(0, 1fr)",
             gap: 2,
-            alignItems: "start",
           }}
         >
           {visibleTickets.map((t) => (
-            <TicketCard
-              key={t.id}
-              ticket={t}
-              onStatusChange={handleStatusChange}
-              onDelete={setDeleteTarget}
-              notify={notify}
-            />
+            <TicketCard key={t.id} ticket={t} busy={busyId === t.id} onStatusChange={handleStatusChange} onCancel={openCancel} notify={notify} />
           ))}
         </Box>
       )}
 
-      {/* Delete confirmation */}
-      <Dialog open={Boolean(deleteTarget)} onClose={() => !deleting && setDeleteTarget(null)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Delete this ticket?</DialogTitle>
+      {/* Cancellation confirmation */}
+      <Dialog
+        open={Boolean(cancelTarget)}
+        onClose={() => !cancelling && setCancelTarget(null)}
+        maxWidth="xs"
+        fullWidth
+        slotProps={{ paper: { sx: { borderRadius: 3, m: 2, width: "calc(100% - 32px)" } } }}
+      >
+        <DialogTitle sx={{ fontWeight: 800 }}>Cancel this request?</DialogTitle>
         <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            {deleteTarget ? `"${deleteTarget.title || "Untitled request"}" will be removed for good. This can't be undone.` : ""}
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {cancelTarget ? `"${cancelTarget.title || "Untitled request"}" will move to Cancelled, and ${cancelTarget.tenantName || "the tenant"} will be notified.` : ""}
           </Typography>
+          <TextField
+            fullWidth
+            size="small"
+            multiline
+            minRows={2}
+            label="Reason (optional)"
+            placeholder="e.g. duplicate request, already fixed"
+            value={cancelReason}
+            onChange={(e) => setCancelReason(e.target.value.slice(0, MAX_REASON))}
+            helperText={`${cancelReason.length}/${MAX_REASON} · shown to the tenant`}
+          />
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button color="inherit" onClick={() => setDeleteTarget(null)} disabled={deleting} sx={{ fontWeight: 600 }}>
-            Keep it
+          <Button color="inherit" onClick={() => setCancelTarget(null)} disabled={cancelling} sx={{ fontWeight: 600 }}>
+            Keep request
           </Button>
-          <Button color="error" variant="contained" disableElevation onClick={confirmDelete} disabled={deleting} sx={{ fontWeight: 700, minWidth: 110 }}>
-            {deleting ? <CircularProgress size={20} color="inherit" /> : "Delete ticket"}
+          <Button color="error" variant="contained" disableElevation onClick={confirmCancel} disabled={cancelling} sx={{ fontWeight: 700, minWidth: 130 }}>
+            {cancelling ? <CircularProgress size={20} color="inherit" /> : "Cancel request"}
           </Button>
         </DialogActions>
       </Dialog>

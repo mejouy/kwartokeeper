@@ -68,10 +68,12 @@ import CloudOffOutlinedIcon from "@mui/icons-material/CloudOffOutlined";
 
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, collection, addDoc, updateDoc, deleteDoc, arrayUnion, query, where, onSnapshot, serverTimestamp } from "firebase/firestore";
-import { QRCodeCanvas } from "qrcode.react";
+import { doc, getDoc, collection, addDoc, updateDoc, arrayUnion, query, where, onSnapshot, serverTimestamp } from "firebase/firestore";
 
 import { auth, db } from "../../config/firebase";
+import { normalizePayment } from "../../utils/normalizePayment";
+import { printReceipt as printReceiptDoc } from "../../utils/receiptPrint";
+import { addMonthsClamped } from "../../utils/addMonthsClamped";
 import { uploadToCloudinary } from "../../utils/cloudinary";
 import { getPropertyCoverPhotoUrl } from "../../utils/getPropertyCoverPhotoUrl";
 import { CATEGORIES, rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
@@ -95,38 +97,32 @@ const NOTE_TONE = { info: "info", warning: "warning", success: "success", error:
 
 /*
 |--------------------------------------------------------------------------
-| DRAFT PAYMENT SETTINGS
+| PAYMENT ACCOUNTS
 |--------------------------------------------------------------------------
-| Temporary values for development/demo purposes.
-|
-| Before your defense:
-| - Replace the GCash / Maya account details and QR
-| - Replace the bank details
-| - Eventually move these settings to the owner's account/settings
+| The owner sets these up in Payments → Payment accounts. They are stored on
+| the property (properties/{id}.paymentMethods and .paymentNote) and read here.
 |--------------------------------------------------------------------------
 */
-const DRAFT_PAYMENT_METHODS = {
-  GCash: {
-    enabled: true,
-    accountName: "KwartoKeeper Owner",
-    accountNumber: "09XX-XXX-XXXX",
-    // This generates a real QR code, but it is NOT a real payment QR yet.
-    qrValue: "GCash DRAFT PAYMENT - Replace this QR with the owner's real GCash QR before defense",
-  },
-  Maya: {
-    enabled: true,
-    accountName: "KwartoKeeper Owner",
-    accountNumber: "09XX-XXX-XXXX",
-    qrValue: "Maya DRAFT PAYMENT - Replace this QR with the owner's real Maya QR before defense",
-  },
-  "Bank Transfer": {
-    enabled: true,
-    bankName: "Sample Bank",
-    accountName: "KwartoKeeper Owner",
-    accountNumber: "XXXX-XXXX-XXXX",
-    qrValue: "BANK TRANSFER DRAFT - Replace with actual bank details before defense",
-  },
-};
+const PAY_METHOD_DEFS = [
+  { key: "GCash", label: "GCash", kind: "wallet" },
+  { key: "Maya", label: "Maya", kind: "wallet" },
+  { key: "QR Ph", label: "QR Ph", kind: "qrph" },
+];
+
+// Only methods the owner switched on AND gave something to pay to
+const readPayMethods = (raw) =>
+  PAY_METHOD_DEFS.map((d) => {
+    const m = raw?.[d.key] || {};
+    return {
+      ...d,
+      enabled: Boolean(m.enabled),
+      accountName: String(m.accountName || ""),
+      accountNumber: String(m.accountNumber || ""),
+      qrUrl: String(m.qrUrl || ""),
+    };
+  }).filter((m) => m.enabled && (m.accountNumber.trim() || m.qrUrl));
+
+const prettyMobile = (n) => (/^09\d{9}$/.test(String(n)) ? `${n.slice(0, 4)} ${n.slice(4, 7)} ${n.slice(7)}` : n);
 
 /* ---------------------------------------------------------------------------
    Helpers
@@ -439,7 +435,7 @@ function PaymentRow({ p, onClick }) {
 function TicketCard({ t, compact, onAction }) {
   const tier = t.priority?.tier || "Low";
   const status = t.status || "Pending";
-  const statusTone = status === "Resolved" ? "success" : status === "In Progress" ? "info" : "warning";
+  const statusTone = status === "Resolved" ? "success" : status === "In Progress" ? "info" : status === "Cancelled" ? "default" : "warning";
   const date = fmtDate(t.createdAt);
   const stepIndex = status === "Resolved" ? 2 : status === "In Progress" ? 1 : 0;
 
@@ -468,7 +464,12 @@ function TicketCard({ t, compact, onAction }) {
           {t.description}
         </Typography>
       )}
-      {!compact && (
+      {status === "Cancelled" && t.cancelReason && !compact && (
+        <Typography variant="body2" color="text.secondary" sx={{ mt: 1.25, overflowWrap: "anywhere" }}>
+          <strong>Reason:</strong> {t.cancelReason}
+        </Typography>
+      )}
+      {!compact && status !== "Cancelled" && (
         <Box sx={{ mt: 2, px: 0.5 }}>
           <StepTrack steps={["Reported", "In progress", "Resolved"]} current={stepIndex} complete={stepIndex === 2} />
         </Box>
@@ -512,7 +513,7 @@ function TicketCard({ t, compact, onAction }) {
           ))}
         </Box>
       )}
-      {!compact && onAction && status !== "Resolved" && (
+      {!compact && onAction && !["Resolved", "Cancelled"].includes(status) && (
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1.5 }}>
           <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => onAction("update", t)} sx={{ minHeight: 40, fontWeight: 700, borderRadius: 2, textTransform: "none" }}>
             Add an update
@@ -859,17 +860,21 @@ class TabErrorBoundary extends React.Component {
   }
 }
 
-// Save the QR as an image (a phone can't scan its own screen)
-function downloadQr(canvasId, filename) {
+// Save the owner's QR image to the phone (a phone can't scan its own screen).
+// Resolves false when the browser won't let us, so the caller can explain what to do instead.
+async function saveImage(url, filename) {
   try {
-    const canvas = document.getElementById(canvasId);
-    if (!canvas) return false;
+    const res = await fetch(url, { mode: "cors" });
+    if (!res.ok) return false;
+    const blob = await res.blob();
+    const objectUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.href = canvas.toDataURL("image/png");
+    link.href = objectUrl;
     link.download = filename;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
     return true;
   } catch {
     return false;
@@ -982,7 +987,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const [rulesAcked, setRulesAcked] = useState(true);
   const [openPaymentModal, setOpenPaymentModal] = useState(false);
   const [payStep, setPayStep] = useState(0); // 0 pay, 1 details, 2 done
-  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("GCash");
+  const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("");
   const [paymentSubmitting, setPaymentSubmitting] = useState(false);
   const [paymentTouched, setPaymentTouched] = useState({});
   const [paymentForm, setPaymentForm] = useState({ amount: "", referenceNumber: "", paymentDate: getTodayInputValue(), remarks: "" });
@@ -1037,9 +1042,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     if (!startMs) return null;
     let endMs = getTimestampMillis(tenantInfo.leaseEndDate);
     if (!endMs && tenantInfo.leaseMonths) {
-      const e = new Date(startMs);
-      e.setMonth(e.getMonth() + tenantInfo.leaseMonths);
-      endMs = e.getTime();
+      endMs = addMonthsClamped(new Date(startMs), tenantInfo.leaseMonths)?.getTime() || 0;
     }
     const now = Date.now();
     if (!endMs || endMs <= startMs) {
@@ -1102,6 +1105,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 ruleFiles: Array.isArray(propData.ruleFiles) ? propData.ruleFiles.filter((f) => f?.url) : [],
                 amenities: Array.isArray(propData.amenities) ? propData.amenities.filter(Boolean) : [],
                 emergencyPhone: propData.emergencyPhone || "",
+                paymentMethods: readPayMethods(propData.paymentMethods),
+                paymentNote: String(propData.paymentNote || ""),
               };
 
               // The tenant's room (users.roomId is the room's name/id, e.g. "A2")
@@ -1126,14 +1131,16 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           ruleFiles: [],
           amenities: [],
           emergencyPhone: "",
+          paymentMethods: [],
+          paymentNote: "",
           ...propExtras,
           roomNumber: assignedRoom?.roomName || data.roomNumber || data.roomId || "N/A",
           bedId: data.bedId || "N/A",
-          // Rent comes from the assigned room; older accounts may store it on the user
-          monthlyRent: Number(assignedRoom?.monthlyRatePerBed || data.monthlyRent || data.rentAmount || data.roomMonthlyRate || 0),
+          // Preserve the tenant's agreed rent; use the room rate only for legacy records without one.
+          monthlyRent: Number(data.monthlyRent ?? data.rentAmount ?? data.roomMonthlyRate ?? data.monthlyRate ?? data.rent ?? assignedRoom?.monthlyRatePerBed ?? 0) || 0,
           status: data.status || "Active",
-          leaseStartDate: data.leaseStartDate || data.leaseStart || data.moveInDate || "Not specified",
-          leaseEndDate: data.leaseEndDate || data.leaseEnd || "",
+          leaseStartDate: data.leaseStartDate || data.leaseStart || data.startDate || data.moveInDate || "Not specified",
+          leaseEndDate: data.leaseEndDate || data.leaseEnd || data.endDate || data.moveOutDate || "",
           leaseMonths: LEASE_MONTHS[data.leaseDuration] || null,
           leaseDuration: formatLeaseDuration(data.leaseDuration),
           contact: data.phone || data.contact || "None provided",
@@ -1179,7 +1186,11 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         onSnapshot(
           query(collection(db, "payments"), where("tenantId", "==", user.uid)),
           (snapshot) => {
-            const docs = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+            const docs = snapshot.docs.map((d) => {
+              const raw = d.data();
+              // keep the receipt fields even if normalizePayment doesn't know about them
+              return { ...normalizePayment({ id: d.id, ...raw }), receiptNo: raw.receiptNo || "", receiptIssuer: raw.receiptIssuer || null };
+            });
             docs.sort((a, b) => getTimestampMillis(b.paymentDate || b.createdAt) - getTimestampMillis(a.paymentDate || a.createdAt) || getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt));
             setPayments(docs);
           },
@@ -1306,7 +1317,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     try {
       const ref = doc(db, "maintenance_tickets", t.id);
       if (ticketDlg.mode === "cancel") {
-        await deleteDoc(ref);
+        await updateDoc(ref, { status: "Cancelled", cancelledAt: serverTimestamp(), cancelledBy: "tenant", updatedAt: serverTimestamp() });
         notify("Request cancelled.");
       } else if (ticketDlg.mode === "edit") {
         await updateDoc(ref, { title: ticketDlg.title.trim(), description: ticketDlg.description.trim(), updatedAt: serverTimestamp() });
@@ -1429,7 +1440,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     setProofFile(null);
     setProofError("");
     setPayStep(0);
-    setSelectedPaymentMethod("GCash");
+    setSelectedPaymentMethod(tenantInfo.paymentMethods?.[0]?.key || "");
     setPaymentForm({
       amount: String(tenantInfo.monthlyRent || ""),
       referenceNumber: "",
@@ -1467,7 +1478,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         propertyName: tenantInfo.propertyName,
         roomNumber: tenantInfo.roomNumber,
         amount: amountNum,
-        paymentMethod: selectedPaymentMethod,
+        paymentMethod: payMethodKey,
         periodMonth: currentPeriod,
         status: "Pending",
         verificationStatus: "Pending",
@@ -1505,7 +1516,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         propertyName: tenantInfo.propertyName,
         roomNumber: tenantInfo.roomNumber,
         amount: amountNum,
-        paymentMethod: selectedPaymentMethod,
+        paymentMethod: payMethodKey,
         periodMonth: currentPeriod,
         // IMPORTANT: a tenant can never mark a payment as Paid.
         status: "Pending",
@@ -1551,9 +1562,11 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
   // ---- derived
   const rankedTickets = useMemo(() => rankMaintenanceRequests(tickets), [tickets]);
-  const activeTickets = rankedTickets.filter((t) => (t.status || "Pending") !== "Resolved");
-  const resolvedTickets = rankedTickets.filter((t) => (t.status || "Pending") === "Resolved");
-  const selectedMethodDetails = DRAFT_PAYMENT_METHODS[selectedPaymentMethod];
+  const activeTickets = rankedTickets.filter((t) => !["Resolved", "Cancelled"].includes(t.status || "Pending"));
+  const resolvedTickets = rankedTickets.filter((t) => ["Resolved", "Cancelled"].includes(t.status || "Pending"));
+  const payMethods = tenantInfo.paymentMethods || [];
+  const activePayMethod = payMethods.find((m) => m.key === selectedPaymentMethod) || payMethods[0] || null;
+  const payMethodKey = activePayMethod?.key || selectedPaymentMethod || "GCash";
 
   const statusTone = /suspend|inactive|terminated/i.test(tenantInfo.status) ? "error" : /pending/i.test(tenantInfo.status) ? "warning" : "success";
 
@@ -1673,6 +1686,26 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     attention.push({ key: "overdue", tone: "error", title: "Your rent is overdue", body: `${peso(tenantInfo.monthlyRent)} for ${currentPeriod} · ${dueText.toLowerCase()}`, actionLabel: "Pay now", onAction: openPayRentModal });
   } else if (canPay && daysToDue >= 0 && daysToDue <= 3) {
     attention.push({ key: "soon", tone: "warning", title: daysToDue === 0 ? "Rent is due today" : `Rent is due in ${daysToDue} ${daysToDue === 1 ? "day" : "days"}`, body: `${peso(tenantInfo.monthlyRent)} for ${currentPeriod}`, actionLabel: "Pay now", onAction: openPayRentModal });
+  }
+  // Lease: tell the tenant a month ahead, and again once it has ended
+  if (lease && !lease.open) {
+    if (lease.ended) {
+      attention.push({
+        key: "lease",
+        tone: "error",
+        icon: CalendarMonthOutlinedIcon,
+        title: "Your lease has ended",
+        body: `It ended on ${fmtDate(lease.endMs)}. Please talk to your landlord about renewing or moving out.`,
+      });
+    } else if (lease.daysLeft <= 30) {
+      attention.push({
+        key: "lease",
+        tone: "warning",
+        icon: CalendarMonthOutlinedIcon,
+        title: lease.daysLeft === 0 ? "Your lease ends today" : `Your lease ends in ${lease.daysLeft} ${lease.daysLeft === 1 ? "day" : "days"}`,
+        body: `Ends on ${fmtDate(lease.endMs)}. Talk to your landlord if you'd like to renew.`,
+      });
+    }
   }
   if (curfewMin !== null) {
     const nowMin = clock.getHours() * 60 + clock.getMinutes();
@@ -2317,7 +2350,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 endIcon={<ArrowForwardIcon fontSize="small" sx={{ transform: archiveOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }} />}
               >
                 <Box component="span" sx={{ flex: 1, textAlign: "left", ml: 0.5 }}>
-                  Archive · {resolvedTickets.length} resolved
+                  Archive · {resolvedTickets.length} closed
                 </Box>
               </Button>
               {archiveOpen && (
@@ -2453,86 +2486,106 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 </Typography>
               </Box>
 
-              <Box>
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                  Payment method
-                </Typography>
-                <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 0.75 }}>
-                  {Object.entries(DRAFT_PAYMENT_METHODS)
-                    .filter(([, m]) => m.enabled)
-                    .map(([method]) => (
-                      <Chip
-                        key={method}
-                        label={method}
-                        clickable
-                        onClick={() => setSelectedPaymentMethod(method)}
-                        color={selectedPaymentMethod === method ? "primary" : "default"}
-                        variant={selectedPaymentMethod === method ? "filled" : "outlined"}
-                        sx={{ fontWeight: 700, height: 40, borderRadius: 20 }}
-                      />
-                    ))}
-                </Box>
-              </Box>
-
-              {selectedPaymentMethod === "GCash" || selectedPaymentMethod === "Maya" ? (
-                <Box sx={{ textAlign: "center", p: 2, border: "1px solid", borderColor: "divider", borderRadius: 3, bgcolor: "background.paper" }}>
-                  <Box sx={{ ...row, justifyContent: "center", gap: 1, mb: 1 }}>
-                    <QrCode2Icon color="primary" />
-                    <Typography sx={{ fontWeight: 800 }}>Scan with {selectedPaymentMethod}</Typography>
-                  </Box>
-                  <Box sx={{ display: "flex", justifyContent: "center", mb: 1.5 }}>
-                    <QRCodeCanvas id="kk-pay-qr" value={selectedMethodDetails.qrValue} size={180} includeMargin />
-                  </Box>
-                  {isPhone && (
-                    <>
-                      <Button
-                        size="small"
-                        startIcon={<DownloadOutlinedIcon />}
-                        onClick={() => (downloadQr("kk-pay-qr", `${selectedPaymentMethod}-payment-qr.png`) ? notify("QR saved to your photos/downloads.") : notify("Couldn't save the QR. Take a screenshot instead.", "warning"))}
-                        sx={{ fontWeight: 700, mb: 0.5, minHeight: 40 }}
-                      >
-                        Save QR to my phone
-                      </Button>
-                      <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1.25 }}>
-                        Paying from this phone? Save the QR, then in {selectedPaymentMethod} choose <strong>Pay QR → Upload from gallery</strong>.
-                      </Typography>
-                    </>
-                  )}
-                  <Chip label="DRAFT QR — replace before defense" color="warning" size="small" sx={{ mb: 1.25 }} />
-                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                    {selectedMethodDetails.accountName}
-                  </Typography>
-                  <Box sx={{ ...row, justifyContent: "center", gap: 0.5 }}>
-                    <Typography variant="body2" color="text.secondary">
-                      {selectedMethodDetails.accountNumber}
-                    </Typography>
-                    <IconButton size="small" aria-label="Copy account number" onClick={() => copyText(selectedMethodDetails.accountNumber, "Account number copied.")}>
-                      <ContentCopyIcon sx={{ fontSize: 16 }} />
-                    </IconButton>
-                  </Box>
-                </Box>
-              ) : (
-                <Box sx={{ p: 2, border: "1px solid", borderColor: "divider", borderRadius: 3, bgcolor: "background.paper" }}>
-                  <Typography sx={{ fontWeight: 800, mb: 1 }}>Bank transfer details</Typography>
-                  <Facts
-                    items={[
-                      { label: "Bank", value: selectedMethodDetails.bankName },
-                      { label: "Account name", value: selectedMethodDetails.accountName },
-                      { label: "Account number", value: selectedMethodDetails.accountNumber },
-                    ]}
-                  />
-                  <Box sx={{ ...row, justifyContent: "space-between", mt: 1, gap: 1 }}>
-                    <Chip label="DRAFT DETAILS — replace before defense" color="warning" size="small" />
-                    <Button size="small" startIcon={<ContentCopyIcon />} onClick={() => copyText(selectedMethodDetails.accountNumber, "Account number copied.")} sx={{ fontWeight: 700 }}>
-                      Copy no.
-                    </Button>
-                  </Box>
-                </Box>
+              {tenantInfo.paymentNote.trim() && (
+                <Alert severity="info" icon={false} sx={{ borderRadius: 2, whiteSpace: "pre-line" }}>
+                  {tenantInfo.paymentNote.trim()}
+                </Alert>
               )}
 
-              <Typography variant="body2" color="text.secondary">
-                Send the payment first, then tap <strong>I've paid</strong> to enter your reference number.
-              </Typography>
+              {payMethods.length === 0 ? (
+                <Alert severity="info" sx={{ borderRadius: 2 }}>
+                  Your landlord hasn't added online payment details yet. Please ask them how to pay. They can record a cash payment for you.
+                </Alert>
+              ) : (
+                <>
+                  <Box>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                      Payment method
+                    </Typography>
+                    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 0.75 }}>
+                      {payMethods.map((m) => (
+                        <Chip
+                          key={m.key}
+                          label={m.label}
+                          clickable
+                          onClick={() => setSelectedPaymentMethod(m.key)}
+                          color={activePayMethod?.key === m.key ? "primary" : "default"}
+                          variant={activePayMethod?.key === m.key ? "filled" : "outlined"}
+                          sx={{ fontWeight: 700, height: 40, borderRadius: 20 }}
+                        />
+                      ))}
+                    </Box>
+                  </Box>
+
+                  {activePayMethod && (
+                    <Box sx={{ textAlign: "center", p: 2, border: "1px solid", borderColor: "divider", borderRadius: 3, bgcolor: "background.paper" }}>
+                      <Box sx={{ ...row, justifyContent: "center", gap: 1, mb: 1 }}>
+                        <QrCode2Icon color="primary" />
+                        <Typography sx={{ fontWeight: 800 }}>
+                          {activePayMethod.kind === "wallet" ? `Scan with ${activePayMethod.label}` : "Scan with any bank or e-wallet app"}
+                        </Typography>
+                      </Box>
+
+                      {activePayMethod.qrUrl && (
+                        <>
+                          <Box sx={{ display: "flex", justifyContent: "center", mb: 1.5 }}>
+                            <Box
+                              component="a"
+                              href={activePayMethod.qrUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label="Open QR code full size"
+                              sx={{ display: "block", width: "100%", maxWidth: 240 }}
+                            >
+                              <Box component="img" src={activePayMethod.qrUrl} alt={`${activePayMethod.label} QR code`} sx={{ display: "block", width: "100%", height: "auto", bgcolor: "#fff", borderRadius: 2, border: "1px solid", borderColor: "divider" }} />
+                            </Box>
+                          </Box>
+                          {isPhone && (
+                            <Box sx={{ textAlign: "center" }}>
+                              <Button
+                                size="small"
+                                startIcon={<DownloadOutlinedIcon />}
+                                onClick={async () => ((await saveImage(activePayMethod.qrUrl, `${activePayMethod.key}-payment-qr.png`)) ? notify("QR saved to your photos/downloads.") : notify("Couldn't save it here. Tap the QR to open it, then press and hold to save.", "warning"))}
+                                sx={{ fontWeight: 700, mb: 0.5, minHeight: 40 }}
+                              >
+                                Save QR to my phone
+                              </Button>
+                              <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1.25 }}>
+                                Paying from this phone? Save the QR, then in your {activePayMethod.kind === "wallet" ? activePayMethod.label : "bank or e-wallet"} app choose <strong>Pay QR → Upload from gallery</strong>.
+                              </Typography>
+                            </Box>
+                          )}
+                        </>
+                      )}
+
+                      <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                        {activePayMethod.accountName}
+                      </Typography>
+                      {activePayMethod.kind === "wallet" && activePayMethod.accountNumber && (
+                        <Box sx={{ ...row, justifyContent: "center", gap: 0.5 }}>
+                          <Typography variant="body2" color="text.secondary">
+                            {prettyMobile(activePayMethod.accountNumber)}
+                          </Typography>
+                          <IconButton size="small" aria-label="Copy number" onClick={() => copyText(activePayMethod.accountNumber, "Number copied.")}>
+                            <ContentCopyIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                        </Box>
+                      )}
+                      {activePayMethod.kind === "wallet" && !activePayMethod.qrUrl && (
+                        <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+                          Send to this number in your {activePayMethod.label} app.
+                        </Typography>
+                      )}
+                    </Box>
+                  )}
+                </>
+              )}
+
+              {payMethods.length > 0 && (
+                <Typography variant="body2" color="text.secondary">
+                  Send the payment first, then tap <strong>I've paid</strong> to enter your reference number.
+                </Typography>
+              )}
             </Box>
           )}
 
@@ -2549,7 +2602,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
                   Paid via
                 </Typography>
-                <Pill label={selectedPaymentMethod} />
+                <Pill label={payMethodKey} />
               </Box>
 
               <TextField
@@ -2667,7 +2720,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
               <Button onClick={closePayment} sx={{ fontWeight: 700 }}>
                 Cancel
               </Button>
-              <Button variant="contained" endIcon={<ArrowForwardIcon />} onClick={goNextStep} sx={{ fontWeight: 700, borderRadius: 2.5, px: 3 }}>
+              <Button variant="contained" endIcon={<ArrowForwardIcon />} onClick={goNextStep} disabled={payMethods.length === 0} sx={{ fontWeight: 700, borderRadius: 2.5, px: 3 }}>
                 I've paid
               </Button>
             </>
@@ -2794,6 +2847,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
               <Facts
                 items={[
                   { label: "Period", value: receipt.periodMonth || "—" },
+                  ...(receipt.receiptNo ? [{ label: "Receipt no.", value: receipt.receiptNo }] : []),
                   { label: "Method", value: receipt.paymentMethod || "—" },
                   { label: "Reference", value: receipt.referenceNumber || "—" },
                   { label: "Payment date", value: fmtDate(receipt.paymentDate) || "—" },
@@ -2815,6 +2869,28 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
               {receipt.referenceNumber && (
                 <Button startIcon={<ContentCopyIcon />} onClick={() => copyText(receipt.referenceNumber, "Reference copied.")} sx={{ fontWeight: 700 }}>
                   Copy reference
+                </Button>
+              )}
+              {receipt.receiptNo && String(receipt.status || "").toLowerCase() === "paid" && (
+                <Button
+                  startIcon={<ReceiptLongOutlinedIcon />}
+                  onClick={() =>
+                    printReceiptDoc({
+                      receiptNo: receipt.receiptNo,
+                      issuer: receipt.receiptIssuer,
+                      tenant: receipt.tenantName || tenantInfo.name,
+                      property: receipt.propertyName,
+                      room: receipt.roomNumber,
+                      period: receipt.periodMonth,
+                      dateText: fmtDate(receipt.paymentDate) || "—",
+                      method: receipt.paymentMethod,
+                      amountText: peso(receipt.amount),
+                      remarks: receipt.remarks,
+                    })
+                  }
+                  sx={{ fontWeight: 700 }}
+                >
+                  Official receipt
                 </Button>
               )}
               <Button startIcon={<IosShareOutlinedIcon />} onClick={() => sharePayment(receipt)} sx={{ fontWeight: 700 }}>

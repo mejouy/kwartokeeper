@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -10,12 +10,16 @@ import {
   Chip,
   Card,
   CardContent,
+  CardActionArea,
+  LinearProgress,
   CircularProgress,
   TextField,
   Alert,
   Tooltip,
+  ButtonBase,
   GlobalStyles,
   IconButton,
+  Skeleton,
 } from "@mui/material";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
 import PeopleIcon from "@mui/icons-material/People";
@@ -30,10 +34,14 @@ import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import LockIcon from "@mui/icons-material/Lock";
 import AddHomeWorkIcon from "@mui/icons-material/AddHomeWork";
+import EventBusyOutlinedIcon from "@mui/icons-material/EventBusyOutlined";
 import { collection, query, where, onSnapshot, doc, setDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 import { onAuthStateChanged } from "firebase/auth";
-import { auth, db, storage } from "../../config/firebase";
+import { auth, db } from "../../config/firebase";
+import { normalizePayment } from "../../utils/normalizePayment";
+import { addMonthsClamped } from "../../utils/addMonthsClamped";
+import { uploadFileToCloudinary } from "../../utils/cloudinary";
+import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
 import { alpha } from "@mui/material/styles";
 
 // Windows light up once on load; switched off for "reduce motion" users.
@@ -53,6 +61,51 @@ const AnimationStyles = (
     }}
   />
 );
+
+/* ---------------------------------------------------------------------------
+   Small helpers
+   ------------------------------------------------------------------------- */
+const toDate = (v) => {
+  if (!v) return null;
+  const d = typeof v?.toDate === "function" ? v.toDate() : new Date(v);
+  return Number.isNaN(d.getTime()) ? null : d;
+};
+const paymentDateOf = (p) => toDate(p.paymentDate) || toDate(p.createdAt);
+const peso = (n) => `₱${Number(n || 0).toLocaleString()}`;
+const currentPeriod = () => new Date().toLocaleDateString("en-US", { month: "long", year: "numeric" });
+const MAX_DOC_MB = 10;
+
+// Lease end for a tenant record: an explicit end date, else start + duration.
+const LEASE_MONTHS = { "3_months": 3, "6_months": 6, "12_months": 12 };
+const LEASE_WARN_DAYS = 30;
+function leaseDaysLeft(tenant) {
+  const start = toDate(tenant.leaseStartDate || tenant.leaseStart || tenant.startDate || tenant.moveInDate);
+  let end = toDate(tenant.leaseEndDate || tenant.leaseEnd || tenant.endDate || tenant.moveOutDate);
+  const months = LEASE_MONTHS[tenant.leaseDuration];
+  if (!end && start && months) end = addMonthsClamped(new Date(start), months);
+  if (!end || (start && end <= start)) return null; // open-ended
+  return Math.ceil((end.getTime() - Date.now()) / 86400000);
+}
+const tenantLabel = (t) => t.fullName || t.name || t.tenantName || "A tenant";
+
+// A file picker row used by both verification forms
+function FilePickRow({ label, hint, file, onChange }) {
+  return (
+    <Box sx={{ mb: 3 }}>
+      <Typography variant="subtitle2" fontWeight="700" sx={{ mb: 0.5 }}>{label}</Typography>
+      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>{hint}</Typography>
+      <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 1.5 }}>
+        <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} sx={{ minHeight: 44 }}>
+          {file ? "Change file" : "Choose file"}
+          <input type="file" hidden onChange={(e) => onChange(e.target.files?.[0] || null)} accept="image/*,.pdf" />
+        </Button>
+        <Typography variant="body2" color={file ? "text.primary" : "text.secondary"} sx={{ minWidth: 0, wordBreak: "break-word" }}>
+          {file ? file.name : "No file selected"}
+        </Typography>
+      </Box>
+    </Box>
+  );
+}
 
 /* ---------------------------------------------------------------------------
    Brand visual: the dorm-facade windows from the login/landing pages, used as
@@ -97,38 +150,46 @@ function OccupancyWindows({ rate, occupied, total }) {
   );
 }
 
-function MetricBox({ title, value, subtitle, icon, subtitleColor = "text.secondary" }) {
-  return (
-    <Card elevation={0} sx={{ bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%" }}>
-      <CardContent sx={{ p: { xs: 1.75, sm: 2.5 }, "&:last-child": { pb: { xs: 1.75, sm: 2.5 } } }}>
-        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, mb: 1 }}>
-          <Typography variant="body2" color="text.secondary" fontWeight="600" sx={{ lineHeight: 1.3 }}>
-            {title}
-          </Typography>
-          <Box
-            sx={{
-              p: { xs: 0.75, sm: 1 },
-              borderRadius: 2,
-              bgcolor: "rgba(255, 69, 0, 0.1)",
-              color: "primary.main",
-              display: "flex",
-              flexShrink: 0,
-            }}
-          >
-            {icon}
-          </Box>
+function MetricBox({ title, value, subtitle, icon, subtitleColor = "text.secondary", onClick, progress }) {
+  const body = (
+    <CardContent sx={{ p: { xs: 1.75, sm: 2.5 }, "&:last-child": { pb: { xs: 1.75, sm: 2.5 } } }}>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, mb: 1 }}>
+        <Typography variant="body2" color="text.secondary" fontWeight="600" sx={{ lineHeight: 1.3 }}>
+          {title}
+        </Typography>
+        <Box sx={{ p: { xs: 0.75, sm: 1 }, borderRadius: 2, bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main", display: "flex", flexShrink: 0 }}>
+          {icon}
         </Box>
-        <Typography
-          variant="h4"
-          fontWeight="800"
-          sx={{ fontFamily: '"Inter", sans-serif', fontSize: { xs: "1.5rem", sm: "2.125rem" }, wordBreak: "break-word" }}
-        >
-          {value}
-        </Typography>
-        <Typography variant="caption" sx={{ color: subtitleColor }}>
-          {subtitle}
-        </Typography>
-      </CardContent>
+      </Box>
+      <Typography
+        variant="h4"
+        fontWeight="800"
+        sx={{ fontFamily: '"Inter", sans-serif', fontSize: { xs: "1.5rem", sm: "2.125rem" }, wordBreak: "break-word" }}
+      >
+        {value}
+      </Typography>
+      {progress !== undefined && (
+        <LinearProgress
+          variant="determinate"
+          value={Math.min(100, Math.max(0, progress))}
+          sx={{ height: 5, borderRadius: 3, my: 0.75, bgcolor: (t) => alpha(t.palette.text.primary, 0.08) }}
+        />
+      )}
+      <Typography variant="caption" sx={{ color: subtitleColor, display: "block" }}>
+        {subtitle}
+      </Typography>
+    </CardContent>
+  );
+
+  return (
+    <Card elevation={0} sx={{ bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%", overflow: "hidden" }}>
+      {onClick ? (
+        <CardActionArea onClick={onClick} sx={{ height: "100%", alignItems: "stretch", "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } }}>
+          {body}
+        </CardActionArea>
+      ) : (
+        body
+      )}
     </Card>
   );
 }
@@ -333,6 +394,7 @@ export default function OwnerOverview() {
   const [loading, setLoading] = useState(true);
   const [owner, setOwner] = useState(null);
   const [properties, setProperties] = useState([]);
+  const [propsLoaded, setPropsLoaded] = useState(false);
   
   // Setup Form States
   const [propertyName, setPropertyName] = useState("");
@@ -340,19 +402,20 @@ export default function OwnerOverview() {
   const [clearanceFile, setClearanceFile] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [setupError, setSetupError] = useState("");
+  const [resubmitting, setResubmitting] = useState(false);
+  const [resubmitDone, setResubmitDone] = useState(false);
 
   const [stats, setStats] = useState({
     totalProperties: 0,
     totalBeds: 0,
     occupancyRate: 0,
     occupiedBeds: 0,
-    collectedThisMonth: 0,
-    totalRevenue: 0,
-    pendingMaintenance: 0,
-    urgentMaintenance: 0,
+    expectedRent: 0,
     activeTenants: 0,
     pendingTenants: 0,
     totalCaretakers: 0,
+    leaseEnded: [],
+    leaseSoon: [],
   });
 
   const [tickets, setTickets] = useState([]);
@@ -366,9 +429,21 @@ export default function OwnerOverview() {
     let tenantPropertyUnsubscribers = [];
     const tenantSources = new Map();
 
+    // Stops every listener (used when the user changes and when the page unmounts)
+    const cleanup = () => {
+      [unsubOwner, unsubProperties, unsubTenants, unsubUserTenants, unsubCaretakers, unsubPayments, unsubTickets].forEach((u) => u && u());
+      unsubOwner = unsubProperties = unsubTenants = unsubUserTenants = unsubCaretakers = unsubPayments = unsubTickets = undefined;
+      tenantPropertyUnsubscribers.forEach((u) => u());
+      tenantPropertyUnsubscribers = [];
+      tenantSources.clear();
+    };
+
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+      cleanup();
       if (!user) {
         setLoading(false);
+        setPropsLoaded(true);
+        setOwner((o) => o || {});
         return;
       }
       
@@ -405,10 +480,20 @@ export default function OwnerOverview() {
         
         let active = 0;
         let pending = 0;
+        let expected = 0;
+        const leaseEnded = [];
+        const leaseSoon = [];
         ownerTenants.forEach((tenant) => {
           const rawStatus = (tenant.status || "active").toString().trim().toLowerCase();
           if (rawStatus.includes("pending")) pending++;
-          else if (rawStatus !== "inactive" && rawStatus !== "archived") active++;
+          else if (rawStatus !== "inactive" && rawStatus !== "archived") {
+            active++;
+            expected += Number(tenant.monthlyRent ?? tenant.rentAmount ?? tenant.roomMonthlyRate ?? tenant.monthlyRate ?? tenant.rent ?? 0) || 0;
+
+            const left = leaseDaysLeft(tenant);
+            if (left !== null && left < 0) leaseEnded.push({ id: tenant.uid || tenant.id, name: tenantLabel(tenant), left });
+            else if (left !== null && left <= LEASE_WARN_DAYS) leaseSoon.push({ id: tenant.uid || tenant.id, name: tenantLabel(tenant), left });
+          }
         });
         
         const propertiesCount = propertiesDataRef.current.count;
@@ -421,16 +506,23 @@ export default function OwnerOverview() {
           activeTenants: active,
           pendingTenants: pending,
           occupiedBeds: active,
+          expectedRent: expected,
           occupancyRate: occRate,
+          leaseEnded,
+          leaseSoon: leaseSoon.sort((a, b) => a.left - b.left),
         }));
       };
 
       // 0. Listen to Owner Profile
-      unsubOwner = onSnapshot(doc(db, "users", ownerId), (docSnap) => {
-        if (docSnap.exists()) {
-          setOwner(docSnap.data());
+      unsubOwner = onSnapshot(
+        doc(db, "users", ownerId),
+        // A missing profile still opens the dashboard (treated as approved) instead of spinning forever
+        (docSnap) => setOwner(docSnap.exists() ? docSnap.data() : {}),
+        (error) => {
+          console.error("Error fetching owner profile:", error);
+          setOwner((o) => o || {});
         }
-      });
+      );
 
       // 1. Listen to Properties Data
       unsubProperties = onSnapshot(
@@ -488,9 +580,13 @@ export default function OwnerOverview() {
           });
 
           setProperties(propertyList);
+          setPropsLoaded(true);
           recalculateOccupancy(ownerId);
         },
-        (error) => console.error("Error fetching properties:", error)
+        (error) => {
+          console.error("Error fetching properties:", error);
+          setPropsLoaded(true);
+        }
       );
 
       // 2. Listen to Tenants Data
@@ -517,23 +613,7 @@ export default function OwnerOverview() {
       // 4. Listen to Payments Data
       unsubPayments = onSnapshot(
         query(collection(db, "payments"), where("ownerUid", "==", ownerId)),
-        (snapshot) => {
-          const fetchedPayments = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-          setPayments(fetchedPayments);
-
-          const currentMonth = new Date().getMonth();
-          const currentYear = new Date().getFullYear();
-
-          let monthTotal = 0;
-          fetchedPayments.forEach((p) => {
-            const pDate = p.createdAt ? new Date(p.createdAt) : null;
-            if (pDate && pDate.getMonth() === currentMonth && pDate.getFullYear() === currentYear && p.status === "Paid") {
-              monthTotal += Number(p.amount || 0);
-            }
-          });
-
-          setStats((prev) => ({ ...prev, collectedThisMonth: monthTotal }));
-        },
+        (snapshot) => setPayments(snapshot.docs.map((d) => normalizePayment({ id: d.id, ...d.data() }))),
         (error) => console.error("Error fetching payments:", error)
       );
 
@@ -541,17 +621,7 @@ export default function OwnerOverview() {
       unsubTickets = onSnapshot(
         query(collection(db, "maintenance_tickets"), where("ownerUid", "==", ownerId)),
         (snapshot) => {
-          const fetchedTickets = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-          setTickets(fetchedTickets);
-
-          const pending = fetchedTickets.filter((t) => t.status !== "Resolved");
-          const urgent = pending.filter((t) => (t.priority || "").toLowerCase() === "urgent");
-
-          setStats((prev) => ({
-            ...prev,
-            pendingMaintenance: pending.length,
-            urgentMaintenance: urgent.length,
-          }));
+          setTickets(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
           setLoading(false);
         },
         (error) => {
@@ -563,71 +633,118 @@ export default function OwnerOverview() {
 
     return () => {
       unsubscribeAuth();
-      if (unsubOwner) unsubOwner();
-      if (unsubProperties) unsubProperties();
-      if (unsubTenants) unsubTenants();
-      if (unsubUserTenants) unsubUserTenants();
-      if (unsubCaretakers) unsubCaretakers();
-      if (unsubPayments) unsubPayments();
-      if (unsubTickets) unsubTickets();
-      tenantPropertyUnsubscribers.forEach((unsubscribe) => unsubscribe());
+      cleanup();
     };
   }, []);
 
-  // --- Forced Setup Handler ---
+  // ---- Derived numbers (kept above the early returns below)
+  const thisPeriod = currentPeriod();
+
+  const collectedThisMonth = useMemo(() => {
+    const now = new Date();
+    return payments
+      .filter((p) => String(p.status || "").toLowerCase() === "paid")
+      .filter((p) => {
+        // The month the rent was FOR decides it; fall back to the payment date
+        if (p.periodMonth) return p.periodMonth === thisPeriod;
+        const d = paymentDateOf(p);
+        return Boolean(d) && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+      })
+      .reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  }, [payments, thisPeriod]);
+
+  const paymentsToReview = useMemo(() => payments.filter((p) => String(p.status || "").toLowerCase() === "pending").length, [payments]);
+
+  const recentPayments = useMemo(
+    () => [...payments].sort((a, b) => (paymentDateOf(b)?.getTime() || 0) - (paymentDateOf(a)?.getTime() || 0)).slice(0, 4),
+    [payments]
+  );
+
+  // Repairs: same ranking as the Maintenance page, so "high priority" means the same thing in both places
+  const repairStats = useMemo(() => {
+    const open = rankMaintenanceRequests(tickets.filter((t) => !["Resolved", "Cancelled"].includes(t.status || "Pending")));
+    return { open: open.length, high: open.filter((t) => t.priority?.tier === "High").length };
+  }, [tickets]);
+
+  // --- Verification documents (first setup, and resubmitting after a rejection) ---
+  const checkDoc = (file, label) => {
+    if (!file) return `Please choose your ${label}.`;
+    if (!/^image\//i.test(file.type) && file.type !== "application/pdf") return `The ${label} must be a photo or a PDF.`;
+    if (file.size > MAX_DOC_MB * 1024 * 1024) return `The ${label} is over ${MAX_DOC_MB} MB. Please use a smaller file.`;
+    return "";
+  };
+
+  const uploadVerificationDocs = async () => {
+    const [idUrl, clearanceUrl] = await Promise.all([uploadFileToCloudinary(idFile, MAX_DOC_MB), uploadFileToCloudinary(clearanceFile, MAX_DOC_MB)]);
+    return { idUrl, clearanceUrl, submittedAt: new Date().toISOString() };
+  };
+
   const handleForcedSetup = async (e) => {
     e.preventDefault();
+    if (uploading) return;
     setSetupError("");
-    
-    if (!idFile || !clearanceFile || !propertyName) {
-      return setSetupError("Please fill out all fields and upload required documents.");
-    }
-    
+
+    const name = propertyName.trim();
+    if (name.length < 2) return setSetupError("Enter your property's name.");
+    const problem = checkDoc(idFile, "government ID") || checkDoc(clearanceFile, "proof of ownership");
+    if (problem) return setSetupError(problem);
+
     setUploading(true);
     try {
       const ownerId = auth.currentUser.uid;
+      const verificationDocs = await uploadVerificationDocs();
 
-      const idRef = ref(storage, `verifications/${ownerId}/id_document`);
-      await uploadBytes(idRef, idFile);
-      const idUrl = await getDownloadURL(idRef);
-
-      const clearanceRef = ref(storage, `verifications/${ownerId}/clearance_document`);
-      await uploadBytes(clearanceRef, clearanceFile);
-      const clearanceUrl = await getDownloadURL(clearanceRef);
-
-      await setDoc(doc(db, "users", ownerId), {
-        approvalStatus: "pending",
-        verificationDocs: {
-          idUrl: idUrl,
-          clearanceUrl: clearanceUrl,
-          submittedAt: new Date().toISOString(),
-        }
-      }, { merge: true });
+      await setDoc(doc(db, "users", ownerId), { approvalStatus: "pending", verificationDocs }, { merge: true });
 
       const newPropRef = doc(collection(db, "properties"));
       await setDoc(newPropRef, {
         ownerUid: ownerId,
-        propertyName: propertyName,
+        status: "Active",
+        propertyName: name,
         totalRooms: 0,
         totalBeds: 0,
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
       });
-
-      setUploading(false);
     } catch (error) {
       console.error("Setup failed", error);
-      setSetupError("Failed to upload documents. Please try again.");
+      setSetupError(error?.message && /size limit|Cloudinary|upload/i.test(error.message) ? error.message : "Couldn't submit your documents. Check your connection and try again.");
+    } finally {
       setUploading(false);
     }
   };
 
-  const recentPayments = payments.slice(0, 4);
+  const handleResubmit = async () => {
+    if (resubmitting) return;
+    setSetupError("");
+    const problem = checkDoc(idFile, "government ID") || checkDoc(clearanceFile, "proof of ownership");
+    if (problem) return setSetupError(problem);
 
-  if (loading || !owner) {
+    setResubmitting(true);
+    try {
+      const verificationDocs = await uploadVerificationDocs();
+      await setDoc(doc(db, "users", auth.currentUser.uid), { approvalStatus: "pending", verificationDocs }, { merge: true });
+      setIdFile(null);
+      setClearanceFile(null);
+      setResubmitDone(true);
+    } catch (error) {
+      console.error("Resubmit failed", error);
+      setSetupError(error?.message && /size limit|Cloudinary|upload/i.test(error.message) ? error.message : "Couldn't resubmit. Check your connection and try again.");
+    } finally {
+      setResubmitting(false);
+    }
+  };
+
+  if (loading || !owner || !propsLoaded) {
     return (
-      <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh" }}>
-        <CircularProgress />
-      </Box>
+      <Container maxWidth="xl" disableGutters>
+        <Skeleton variant="rounded" height={190} sx={{ borderRadius: 4, mb: 3 }} />
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }, gap: { xs: 1.5, md: 2.5 }, mb: 3 }}>
+          {[0, 1, 2, 3].map((k) => (
+            <Skeleton key={k} variant="rounded" height={104} sx={{ borderRadius: 3 }} />
+          ))}
+        </Box>
+        <Skeleton variant="rounded" height={220} sx={{ borderRadius: 3 }} />
+      </Container>
     );
   }
 
@@ -648,44 +765,29 @@ export default function OwnerOverview() {
             <Alert severity="error" sx={{ mb: 3 }}>{setupError}</Alert>
           )}
 
-          <Box component="form" onSubmit={handleForcedSetup}>
+          <Box component="form" onSubmit={handleForcedSetup} noValidate>
             <TextField 
               fullWidth 
               label="Property Name" 
               placeholder="e.g., St. Jude Dormitory"
               required 
-              sx={{ mb: 4 }}
+              sx={{ mb: 3 }}
               value={propertyName} 
               onChange={(e) => setPropertyName(e.target.value)}
             />
             
-            <Typography variant="subtitle2" fontWeight="700" sx={{ mb: 1 }}>Government ID</Typography>
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-              Upload a clear photo of your valid ID (PhilID, Driver's License, etc.)
-            </Typography>
-            <Box sx={{ mb: 4, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
-              <Button component="label" variant="outlined" startIcon={<UploadFileIcon />}>
-                Choose File
-                <input type="file" hidden required onChange={(e) => setIdFile(e.target.files[0])} accept="image/*,.pdf" />
-              </Button>
-              <Typography variant="body2" sx={{ minWidth: 0, wordBreak: "break-word" }}>
-                {idFile ? idFile.name : "No file selected"}
-              </Typography>
-            </Box>
-
-            <Typography variant="subtitle2" fontWeight="700" sx={{ mb: 1 }}>Proof of Ownership / Barangay Clearance</Typography>
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-              Upload your business permit, barangay clearance, or utility bill.
-            </Typography>
-            <Box sx={{ mb: 4, display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 1.5 }}>
-              <Button component="label" variant="outlined" startIcon={<UploadFileIcon />}>
-                Choose File
-                <input type="file" hidden required onChange={(e) => setClearanceFile(e.target.files[0])} accept="image/*,.pdf" />
-              </Button>
-              <Typography variant="body2" sx={{ minWidth: 0, wordBreak: "break-word" }}>
-                {clearanceFile ? clearanceFile.name : "No file selected"}
-              </Typography>
-            </Box>
+            <FilePickRow
+              label="Government ID"
+              hint="Upload a clear photo of your valid ID (PhilID, Driver's License, etc.)"
+              file={idFile}
+              onChange={setIdFile}
+            />
+            <FilePickRow
+              label="Proof of Ownership"
+              hint="Land title, tax declaration, or a lease / authorization letter if you manage the property for the owner. A business permit also works."
+              file={clearanceFile}
+              onChange={setClearanceFile}
+            />
 
             <Button 
               type="submit" 
@@ -718,11 +820,77 @@ export default function OwnerOverview() {
     ? { label: "Pending Review", bg: "rgba(255, 167, 38, 0.18)", fg: "#ffcc80" }
     : { label: "Verified", bg: "rgba(76, 175, 80, 0.18)", fg: "#a5d6a7" };
 
+  const hour = new Date().getHours();
+  const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+
   const welcomeSubtitle = isRejected
     ? "There was an issue with your verification. Please review and resubmit your documents."
     : isPending
     ? "Your account is under review. You can explore the dashboard while you wait."
     : `Here's what's happening across your ${stats.totalProperties} ${stats.totalProperties === 1 ? "property" : "properties"} today.`;
+
+  // "Maria's lease ends in 5 days" / "3 tenant leases end within 30 days" / "2 tenant leases have ended"
+  const leaseText = (list, kind) => {
+    const n = list.length;
+    if (kind === "ended") {
+      return n === 1 ? `${list[0].name}'s lease has ended` : `${n} tenant leases have ended`;
+    }
+    if (n === 1) {
+      const d = list[0].left;
+      return `${list[0].name}'s lease ${d === 0 ? "ends today" : `ends in ${d} ${d === 1 ? "day" : "days"}`}`;
+    }
+    return `${n} tenant leases end within ${LEASE_WARN_DAYS} days`;
+  };
+
+  // One tenant: straight to their profile. Several: the tenant list.
+  const leaseLink = (list) => (list.length === 1 && list[0].id ? `/owner/tenants/${list[0].id}` : "/owner/tenants");
+
+  // Rows for "Needs your attention", most urgent first
+  const names = (list) => `${list.slice(0, 2).map((x) => x.name).join(", ")}${list.length > 2 ? ` +${list.length - 2} more` : ""}`;
+  const attentionItems = [
+    {
+      show: stats.leaseEnded.length > 0,
+      tone: "error",
+      icon: <EventBusyOutlinedIcon fontSize="small" />,
+      text: leaseText(stats.leaseEnded, "ended"),
+      caption: stats.leaseEnded.length === 1
+        ? `Ended ${Math.abs(stats.leaseEnded[0].left)} ${Math.abs(stats.leaseEnded[0].left) === 1 ? "day" : "days"} ago · Open profile`
+        : names(stats.leaseEnded),
+      to: leaseLink(stats.leaseEnded),
+    },
+    {
+      show: repairStats.high > 0,
+      tone: "error",
+      icon: <BuildOutlinedIcon fontSize="small" />,
+      text: `${repairStats.high} high-priority ${repairStats.high === 1 ? "repair is" : "repairs are"} still open`,
+      caption: "Open Maintenance",
+      to: "/owner/maintenance",
+    },
+    {
+      show: paymentsToReview > 0,
+      tone: "warning",
+      icon: <ReceiptLongIcon fontSize="small" />,
+      text: `${paymentsToReview} ${paymentsToReview === 1 ? "payment is" : "payments are"} waiting for your review`,
+      caption: "Verify or reject in Payments",
+      to: "/owner/payments",
+    },
+    {
+      show: stats.leaseSoon.length > 0,
+      tone: "warning",
+      icon: <EventBusyOutlinedIcon fontSize="small" />,
+      text: leaseText(stats.leaseSoon, "soon"),
+      caption: stats.leaseSoon.length === 1 ? "Open profile" : names(stats.leaseSoon),
+      to: leaseLink(stats.leaseSoon),
+    },
+    {
+      show: stats.pendingTenants > 0,
+      tone: "info",
+      icon: <PersonAddIcon fontSize="small" />,
+      text: `${stats.pendingTenants} ${stats.pendingTenants === 1 ? "tenant hasn't" : "tenants haven't"} finished registering`,
+      caption: "See who in Tenants",
+      to: "/owner/tenants",
+    },
+  ].filter((item) => item.show);
 
   const handleAddPropertyClick = () => {
     if (isPending) return;
@@ -783,7 +951,7 @@ export default function OwnerOverview() {
               wordBreak: "break-word",
             }}
           >
-            Welcome, {ownerName}
+            {greeting}, {ownerName}
           </Typography>
           <Typography variant="body2" sx={{ color: "#cadcf6", mt: 1, maxWidth: 460 }}>
             {welcomeSubtitle}
@@ -820,6 +988,78 @@ export default function OwnerOverview() {
         </Alert>
       )}
 
+      {/* Rejected: let them fix it right here */}
+      {isRejected && (
+        <Paper elevation={0} sx={{ bgcolor: "background.default", p: { xs: 2, sm: 3 }, mb: 3, border: "1px solid", borderColor: "error.main", borderRadius: 3 }}>
+          <Typography variant="h6" fontWeight="700" sx={{ mb: 0.5, fontFamily: '"Inter", sans-serif' }}>
+            Resubmit your documents
+          </Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
+            {owner?.rejectionReason ? `Reason given: ${owner.rejectionReason}` : "Upload clearer or updated copies and our admin team will review them again."}
+          </Typography>
+          {setupError && <Alert severity="error" sx={{ mb: 2 }}>{setupError}</Alert>}
+          {resubmitDone && <Alert severity="success" sx={{ mb: 2 }}>Submitted. You'll see your status update here once it's reviewed.</Alert>}
+          <FilePickRow label="Government ID" hint="A clear photo or PDF of a valid ID." file={idFile} onChange={setIdFile} />
+          <FilePickRow label="Proof of Ownership" hint="Land title, tax declaration, lease / authorization letter, or business permit." file={clearanceFile} onChange={setClearanceFile} />
+          <Button variant="contained" onClick={handleResubmit} disabled={resubmitting} sx={{ fontWeight: 700, minHeight: 46, width: { xs: "100%", sm: "auto" } }}>
+            {resubmitting ? <CircularProgress size={22} color="inherit" /> : "Resubmit for approval"}
+          </Button>
+        </Paper>
+      )}
+
+      {/* Needs your attention: only shows when there is something to do */}
+      {attentionItems.length > 0 && (
+        <Paper elevation={0} sx={{ bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3, mb: 3, overflow: "hidden" }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 2, pt: 1.75, pb: 1.25 }}>
+            <Typography variant="subtitle2" fontWeight="800">
+              Needs your attention
+            </Typography>
+            <Chip size="small" label={attentionItems.length} sx={{ height: 20, fontWeight: 800, bgcolor: "primary.main", color: "#fff" }} />
+          </Box>
+          {attentionItems.map((item) => (
+            <ButtonBase
+              key={item.text}
+              onClick={() => navigate(item.to)}
+              sx={{
+                width: "100%",
+                justifyContent: "flex-start",
+                alignItems: "center",
+                gap: 1.5,
+                px: 2,
+                py: 1.25,
+                minHeight: 60,
+                textAlign: "left",
+                borderTop: "1px solid",
+                borderColor: "divider",
+                "&:hover": { bgcolor: "action.hover" },
+                "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 },
+              }}
+            >
+              <Box
+                sx={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 2,
+                  flexShrink: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: `${item.tone}.main`,
+                  bgcolor: (t) => alpha(t.palette[item.tone].main, 0.12),
+                }}
+              >
+                {item.icon}
+              </Box>
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography variant="body2" sx={{ fontWeight: 700, overflowWrap: "anywhere" }}>{item.text}</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: "block", overflowWrap: "anywhere" }}>{item.caption}</Typography>
+              </Box>
+              <ChevronRightIcon fontSize="small" sx={{ color: "text.secondary", flexShrink: 0 }} />
+            </ButtonBase>
+          ))}
+        </Paper>
+      )}
+
       {/* Top Metrics — 2x2 on phones, 4 across on desktop */}
       <Box
         sx={{
@@ -834,25 +1074,31 @@ export default function OwnerOverview() {
           value={stats.totalProperties}
           subtitle={`${stats.totalBeds} total beds`}
           icon={<HomeWorkIcon fontSize="small" />}
+          onClick={() => navigate("/owner/properties")}
         />
         <MetricBox
           title="Occupancy"
           value={`${stats.occupancyRate}%`}
           subtitle={`${stats.occupiedBeds} / ${stats.totalBeds} occupied`}
           icon={<PeopleIcon fontSize="small" />}
+          onClick={() => navigate("/owner/tenants")}
+          progress={stats.occupancyRate}
         />
         <MetricBox
           title="Collected This Month"
-          value={`₱${stats.collectedThisMonth.toLocaleString()}`}
-          subtitle={stats.totalRevenue > 0 ? `Target: ₱${stats.totalRevenue.toLocaleString()}` : "Paid rent this month"}
+          value={peso(collectedThisMonth)}
+          subtitle={stats.expectedRent > 0 ? `of ${peso(stats.expectedRent)} expected` : "Paid rent this month"}
           icon={<AttachMoneyIcon fontSize="small" />}
+          onClick={() => navigate("/owner/payments")}
+          progress={stats.expectedRent > 0 ? (collectedThisMonth / stats.expectedRent) * 100 : undefined}
         />
         <MetricBox
-          title="Pending Repairs"
-          value={stats.pendingMaintenance}
-          subtitle={`${stats.urgentMaintenance} urgent`}
-          subtitleColor={stats.urgentMaintenance > 0 ? "warning.main" : "text.secondary"}
+          title="Open Repairs"
+          value={repairStats.open}
+          subtitle={`${repairStats.high} high priority`}
+          subtitleColor={repairStats.high > 0 ? "warning.main" : "text.secondary"}
           icon={<BuildOutlinedIcon fontSize="small" />}
+          onClick={() => navigate("/owner/maintenance")}
         />
       </Box>
 
@@ -912,12 +1158,23 @@ export default function OwnerOverview() {
           </Box>
           <Stack spacing={1.5}>
             {recentPayments.length === 0 ? (
-              <Typography variant="body2" color="text.secondary">No payments logged recently.</Typography>
+              <Box sx={{ textAlign: "center", py: 3 }}>
+                <ReceiptLongIcon sx={{ fontSize: 32, color: "text.disabled", mb: 0.5 }} />
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>No payments yet</Typography>
+                <Typography variant="caption" color="text.secondary">Rent your tenants pay will show up here.</Typography>
+              </Box>
             ) : (
               recentPayments.map((p) => (
                 <Box
                   key={p.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => navigate("/owner/payments")}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate("/owner/payments"); } }}
                   sx={{
+                    cursor: "pointer",
+                    "&:hover": { borderColor: "primary.main" },
+                    "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
                     p: 1.5,
                     borderRadius: 2,
                     bgcolor: (theme) => alpha(theme.palette.background.paper, 0.35),
@@ -931,15 +1188,16 @@ export default function OwnerOverview() {
                 >
                   <Box sx={{ minWidth: 0 }}>
                     <Typography variant="subtitle2" fontWeight="700" sx={{ wordBreak: "break-word" }}>
-                      {p.tenantName} — ₱{Number(p.amount).toLocaleString()}
+                      {p.tenantName || "Tenant"} — {peso(p.amount)}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-word" }}>
-                      {p.propertyName} (Room {p.roomNumber})
+                      {p.propertyName || "Property"} (Room {p.roomNumber || "—"})
+                      {paymentDateOf(p) ? ` · ${paymentDateOf(p).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
                     </Typography>
                   </Box>
                   <Chip
                     label={p.status || "Paid"}
-                    color={p.status === "Paid" ? "success" : "warning"}
+                    color={String(p.status || "Paid").toLowerCase() === "paid" ? "success" : ["rejected", "overdue"].includes(String(p.status).toLowerCase()) ? "error" : "warning"}
                     size="small"
                     sx={{ flexShrink: 0 }}
                   />

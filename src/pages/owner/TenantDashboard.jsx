@@ -49,6 +49,7 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../config/firebase";
+import { normalizePayment } from "../../utils/normalizePayment";
 import { QRCodeCanvas } from "qrcode.react";
 
 import {
@@ -146,6 +147,7 @@ export default function TenantDashboard() {
     monthlyRent: 0,
     status: "Active",
     leaseStartDate: "Not specified",
+    leaseEndDate: "",
     leaseDuration: "Not specified",
     contact: "None provided",
     ownerUid: "",
@@ -368,12 +370,9 @@ if (propertyId) {
     data.bedId ||
     "N/A",
 
-  // Rent comes from the assigned room
+  // Preserve the agreed rent; use the current room rate only for legacy records.
   monthlyRent:
-    Number(
-      assignedRoom?.monthlyRatePerBed ||
-        0
-    ),
+    Number(data.monthlyRent ?? data.rentAmount ?? data.roomMonthlyRate ?? data.monthlyRate ?? data.rent ?? assignedRoom?.monthlyRatePerBed ?? 0) || 0,
 
   status:
     data.status ||
@@ -381,8 +380,17 @@ if (propertyId) {
 
   leaseStartDate:
     data.leaseStartDate ||
+    data.leaseStart ||
+    data.startDate ||
     data.moveInDate ||
     "Not specified",
+
+  leaseEndDate:
+    data.leaseEndDate ||
+    data.leaseEnd ||
+    data.endDate ||
+    data.moveOutDate ||
+    "",
 
   leaseDuration:
     formatLeaseDuration(
@@ -435,7 +443,7 @@ if (propertyId) {
     const unsubscribeTickets = onSnapshot(
       qTickets,
       (snapshot) => {
-        const docs = snapshot.docs.map((d) => ({
+        const docs = snapshot.docs.map((d) => normalizePayment({
           id: d.id,
           ...d.data(),
         }));
@@ -1012,6 +1020,9 @@ if (propertyId) {
                 {
                   tenantInfo.leaseStartDate
                 }
+              </Typography>
+              <Typography variant="caption" color="text.secondary" display="block">
+                Ends: {tenantInfo.leaseEndDate ? formatLeaseStart(tenantInfo.leaseEndDate) : "Open-ended"}
               </Typography>
             </CardContent>
           </Card>

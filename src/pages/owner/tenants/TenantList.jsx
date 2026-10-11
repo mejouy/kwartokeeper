@@ -36,6 +36,8 @@ import {
 } from "firebase/firestore";
 
 import { auth, db } from "../../../config/firebase";
+import { normalizePayment } from "../../../utils/normalizePayment";
+import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
 
 const row = { display: "flex", alignItems: "center" };
 
@@ -274,7 +276,7 @@ export default function TenantList() {
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const paymentData = snapshot.docs.map((doc) => ({
+        const paymentData = snapshot.docs.map((doc) => normalizePayment({
           id: doc.id,
           ...doc.data(),
         }));
@@ -387,7 +389,7 @@ export default function TenantList() {
   const groupedByProperty = properties.reduce((acc, property) => {
     acc[property.id] = {
       propertyName: property.name || property.propertyName || "Unnamed Property",
-      propertyAddress: property.address || "",
+      propertyAddress: formatPropertyAddress(property),
       tenants: filteredTenants.filter(
         (t) => t.propertyId === property.id || t.propertyId === property.name
       ),

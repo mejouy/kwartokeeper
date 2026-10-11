@@ -138,6 +138,7 @@ export const saveProperty = async (
   const normalizedCoverPhotoUrl = uploadedCoverPhotoUrl || null;
 
   const propertyPayload = {
+    status: "Active",
     // Basic Details
     propertyName:
       normalizeText(wizardData.propertyName) ||

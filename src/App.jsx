@@ -11,6 +11,7 @@ import NotFound from './pages/NotFound';
 import LandingWelcome from './pages/LandingWelcome';
 import Login from './pages/auth/Login';
 import OwnerRegister from './pages/auth/OwnerRegister';
+import OwnerWelcome from './pages/onboarding/OwnerWelcome';
 import PropertyWizard from './pages/onboarding/PropertyWizard';
 import WizardSuccess from './pages/onboarding/components/WizardSuccess';
 
@@ -23,6 +24,8 @@ import TenantLayout from './layouts/TenantLayout';
 // --- Owner Pages ---
 import OwnerOverview from './pages/owner/OwnerOverview';
 import OwnerAnnouncements from './pages/owner/OwnerAnnouncements';
+import OwnerAccount from './pages/owner/OwnerAccount';
+import OwnerReports from './pages/owner/OwnerReports';
 
 // Properties
 import PropertyList from './pages/owner/properties/PropertyList';
@@ -74,6 +77,14 @@ function App() {
         <Route path="/register-sub-user" element={<RegisterTenant />} />
 
         {/* --- Onboarding Wizard (Owner Protected) --- */}
+        <Route 
+          path="/welcome" 
+          element={
+            <ProtectedRoute allowedRoles={['owner']}>
+              <OwnerWelcome />
+            </ProtectedRoute>
+          } 
+        />
         <Route 
           path="/setup" 
           element={
@@ -184,6 +195,8 @@ function App() {
           <Route path="payments" element={<PaymentsPage />} />
           <Route path="maintenance" element={<MaintenancePage />} />
           <Route path="announcements" element={<OwnerAnnouncements />} />
+          <Route path="account" element={<OwnerAccount />} />
+          <Route path="reports" element={<OwnerReports />} />
         </Route>
 
         {/* --- 404 Fallback Route --- */}

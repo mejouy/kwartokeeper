@@ -13,6 +13,7 @@ import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth, db } from "../../config/firebase";
+import { normalizePayment } from "../../../utils/normalizePayment";
 
 const ORANGE = "#FF6B35";
 const CREAM = "#F5EFE6";
@@ -119,16 +120,16 @@ export default function TenantOverview() {
   useEffect(() => {
     if (!uid) return undefined;
     const unsubs = [];
-    const watch = (q, setter, label, merge) =>
+    const watch = (q, setter, label, merge, normalize = (record) => record) =>
       unsubs.push(
         onSnapshot(
           q,
-          (snap) => setter((prev) => merge(prev, snap.docs.map((d) => ({ id: d.id, ...d.data() })))),
+          (snap) => setter((prev) => merge(prev, snap.docs.map((d) => normalize({ id: d.id, ...d.data() })))),
           (e) => console.error(`Error loading ${label}:`, e)
         )
       );
 
-    watch(query(collection(db, "payments"), where("tenantId", "==", uid)), setPayments, "payments", (_, next) => next);
+    watch(query(collection(db, "payments"), where("tenantId", "==", uid)), setPayments, "payments", (_, next) => next, normalizePayment);
 
     // Tickets might be keyed by tenantId or tenantUid depending on how they were created
     const bySource = {};
@@ -182,9 +183,9 @@ export default function TenantOverview() {
   const nextDue = getNextDueDate(tenant?.leaseStartDate, paidThisMonth);
   const daysToDue = nextDue ? daysBetween(today, nextDue) : null;
 
-  const monthlyRent = Number(tenant?.monthlyRent || tenant?.rentAmount || tenant?.roomMonthlyRate || 0);
-  const leaseEnd = toDate(tenant?.leaseEndDate || tenant?.leaseEnd);
-  const leaseStart = toDate(tenant?.leaseStartDate);
+  const monthlyRent = Number(tenant?.monthlyRent ?? tenant?.rentAmount ?? tenant?.roomMonthlyRate ?? tenant?.monthlyRate ?? tenant?.rent ?? 0);
+  const leaseEnd = toDate(tenant?.leaseEndDate || tenant?.leaseEnd || tenant?.endDate || tenant?.moveOutDate);
+  const leaseStart = toDate(tenant?.leaseStartDate || tenant?.leaseStart || tenant?.startDate || tenant?.moveInDate);
   const leaseDaysLeft = leaseEnd ? daysBetween(today, leaseEnd) : null;
   const leaseProgress =
     leaseStart && leaseEnd && leaseEnd > leaseStart

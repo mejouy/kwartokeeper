@@ -79,6 +79,13 @@ export default function ProtectedRoute({ children, allowedRoles = [] }) {
     if (!allowedRoles.includes(role)) {
       return <Navigate to={ROLE_HOME_PATHS[role] || "/login"} replace />;
     }
+
+    const isPendingOwner = role === "owner" && [userDoc?.status, userDoc?.approvalStatus]
+      .some((status) => String(status || "").toLowerCase() === "pending");
+    const pendingOwnerPaths = ["/owner", "/welcome", "/setup", "/wizard-success"];
+    if (isPendingOwner && !pendingOwnerPaths.includes(location.pathname)) {
+      return <Navigate to="/owner" replace />;
+    }
   }
 
   // 4. If logged in, not suspended, and authorized, render the requested page.

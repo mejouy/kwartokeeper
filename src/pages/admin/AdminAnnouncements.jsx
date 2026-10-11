@@ -1,8 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   Box,
   Container,
-  Grid,
   Paper,
   Typography,
   Button,
@@ -12,66 +11,117 @@ import {
   Select,
   MenuItem,
   Stack,
-  Card,
-  CardContent,
   Chip,
   Alert,
   CircularProgress,
   IconButton,
-  Divider,
   Dialog,
   DialogTitle,
   DialogContent,
+  DialogContentText,
   DialogActions,
-  Snackbar
+  FormControlLabel,
+  Checkbox,
+  Snackbar,
+  Skeleton,
 } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import CampaignIcon from "@mui/icons-material/Campaign";
 import SendIcon from "@mui/icons-material/Send";
-import DeleteIcon from "@mui/icons-material/Delete";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import GroupIcon from "@mui/icons-material/Group";
 import InfoIcon from "@mui/icons-material/Info";
 import WarningIcon from "@mui/icons-material/Warning";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import ErrorIcon from "@mui/icons-material/Error";
-import { 
-  collection, 
-  addDoc, 
-  deleteDoc, 
-  doc, 
-  query, 
-  orderBy, 
+import {
+  collection,
+  doc,
+  query,
+  orderBy,
   onSnapshot,
   getDocs,
-  where
+  where,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "../../config/firebase";
+
+const TITLE_MAX = 80;
+const MESSAGE_MAX = 1000;
+const BATCH_SIZE = 400; // Firestore allows 500 writes per batch
+
+const AUDIENCES = [
+  { value: "all", label: "All users", noun: "users" },
+  { value: "owner", label: "Owners only", noun: "owners" },
+  { value: "caretaker", label: "Caretakers only", noun: "caretakers" },
+  { value: "tenant", label: "Tenants only", noun: "tenants" },
+];
+
+const TYPES = [
+  { value: "info", label: "Info", color: "info", Icon: InfoIcon },
+  { value: "warning", label: "Warning", color: "warning", Icon: WarningIcon },
+  { value: "success", label: "Success", color: "success", Icon: CheckCircleIcon },
+  { value: "error", label: "Urgent", color: "error", Icon: ErrorIcon },
+];
+
+const typeOf = (v) => TYPES.find((t) => t.value === v) || TYPES[0];
+const audienceOf = (v) => AUDIENCES.find((a) => a.value === v) || AUDIENCES[0];
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
+
+// Who can actually receive a broadcast: real app roles, not suspended / awaiting approval / rejected.
+const isReachable = (u) =>
+  ["owner", "caretaker", "tenant"].includes(u.role) &&
+  u.status !== "suspended" &&
+  u.status !== "pending" &&
+  u.approvalStatus !== "pending" &&
+  u.approvalStatus !== "rejected";
+
+const chunk = (arr, size) => {
+  const out = [];
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
+  return out;
+};
+
+const formatDate = (timestamp) => {
+  if (!timestamp) return "N/A";
+  const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+  if (Number.isNaN(date.getTime())) return "N/A";
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+};
 
 export default function AdminAnnouncements() {
   const [announcements, setAnnouncements] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [users, setUsers] = useState([]);
+  const [usersLoading, setUsersLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
-  // Form State
+  // Form state
   const [title, setTitle] = useState("");
   const [message, setMessage] = useState("");
-  const [targetAudience, setTargetAudience] = useState("all"); // 'all', 'owner', 'caretaker', 'tenant'
-  const [type, setType] = useState("info"); // 'info', 'warning', 'success', 'error'
-  
-  // UI State
-  const [deleteId, setDeleteId] = useState(null);
+  const [targetAudience, setTargetAudience] = useState("all");
+  const [type, setType] = useState("info");
+
+  // UI state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [deleteItem, setDeleteItem] = useState(null);
+  const [alsoRemoveNotifs, setAlsoRemoveNotifs] = useState(true);
+  const [deleting, setDeleting] = useState(false);
   const [snackbar, setSnackbar] = useState({ open: false, message: "", severity: "success" });
 
-  // Fetch announcements in real-time
+  // History, live
   useEffect(() => {
     const q = query(collection(db, "announcements"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(
       q,
       (snapshot) => {
-        const list = snapshot.docs.map((docSnap) => ({
-          id: docSnap.id,
-          ...docSnap.data()
-        }));
-        setAnnouncements(list);
+        setAnnouncements(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
         setLoading(false);
       },
       (err) => {
@@ -79,103 +129,128 @@ export default function AdminAnnouncements() {
         setLoading(false);
       }
     );
-
     return () => unsubscribe();
   }, []);
 
-  const handleCreateAnnouncement = async (e) => {
-    e.preventDefault();
-    if (!title.trim() || !message.trim()) return;
+  // Users, once, so we can show "this will reach N people" before sending
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDocs(collection(db, "users"));
+        if (!cancelled) setUsers(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      } catch (err) {
+        console.error("Error loading recipients:", err);
+      } finally {
+        if (!cancelled) setUsersLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
+  const recipients = useMemo(
+    () => users.filter((u) => isReachable(u) && (targetAudience === "all" || u.role === targetAudience)),
+    [users, targetAudience]
+  );
+
+  const aud = audienceOf(targetAudience);
+  const typeMeta = typeOf(type);
+  const canSubmit = title.trim() && message.trim() && !submitting && !usersLoading && recipients.length > 0;
+
+  const handlePublish = async () => {
     setSubmitting(true);
     const timestamp = new Date().toISOString();
+    const cleanTitle = title.trim();
+    const cleanMessage = message.trim();
 
     try {
-      // 1. Save broadcast announcement entry
-      const annRef = await addDoc(collection(db, "announcements"), {
-        title: title.trim(),
-        message: message.trim(),
-        targetAudience,
-        type,
-        createdAt: timestamp,
-        createdBy: "Admin"
-      });
+      const annRef = doc(collection(db, "announcements"));
+      const groups = chunk(recipients, BATCH_SIZE);
 
-      // 2. Optional: Dispatch direct notifications to target users in bulk
-      let userQuery = collection(db, "users");
-      if (targetAudience !== "all") {
-        userQuery = query(collection(db, "users"), where("role", "==", targetAudience));
+      for (let i = 0; i < groups.length; i++) {
+        const batch = writeBatch(db);
+        // The history entry goes in the first batch, so it only exists if delivery started.
+        if (i === 0) {
+          batch.set(annRef, {
+            title: cleanTitle,
+            message: cleanMessage,
+            targetAudience,
+            type,
+            recipientCount: recipients.length,
+            createdAt: timestamp,
+            createdBy: "Admin",
+          });
+        }
+        groups[i].forEach((u) => {
+          batch.set(doc(collection(db, "notifications")), {
+            userId: u.id,
+            title: cleanTitle,
+            message: cleanMessage,
+            type,
+            announcementId: annRef.id,
+            isRead: false,
+            createdAt: timestamp,
+          });
+        });
+        await batch.commit();
       }
 
-      const usersSnap = await getDocs(userQuery);
-      const notificationPromises = usersSnap.docs.map((userDoc) =>
-        addDoc(collection(db, "notifications"), {
-          userId: userDoc.id,
-          title: title.trim(),
-          message: message.trim(),
-          type,
-          announcementId: annRef.id,
-          isRead: false,
-          createdAt: timestamp
-        })
-      );
-
-      await Promise.all(notificationPromises);
-
-      // Reset Form
       setTitle("");
       setMessage("");
       setTargetAudience("all");
       setType("info");
-
       setSnackbar({
         open: true,
-        message: `Broadcast published successfully to ${usersSnap.docs.length} user(s)!`,
-        severity: "success"
+        message: `Sent to ${plural(recipients.length, "person", "people")}.`,
+        severity: "success",
       });
     } catch (err) {
       console.error("Error sending announcement:", err);
       setSnackbar({
         open: true,
-        message: "Failed to publish announcement. Please try again.",
-        severity: "error"
+        message: "Couldn't send the announcement. Please try again.",
+        severity: "error",
       });
     } finally {
       setSubmitting(false);
+      setConfirmOpen(false);
     }
   };
 
-  const handleDeleteAnnouncement = async () => {
-    if (!deleteId) return;
+  const handleDelete = async () => {
+    if (!deleteItem) return;
+    setDeleting(true);
     try {
-      await deleteDoc(doc(db, "announcements", deleteId));
-      setSnackbar({ open: true, message: "Announcement deleted.", severity: "info" });
+      let removed = 0;
+      if (alsoRemoveNotifs) {
+        const snap = await getDocs(
+          query(collection(db, "notifications"), where("announcementId", "==", deleteItem.id))
+        );
+        for (const group of chunk(snap.docs, BATCH_SIZE)) {
+          const batch = writeBatch(db);
+          group.forEach((d) => batch.delete(d.ref));
+          await batch.commit();
+          removed += group.length;
+        }
+      }
+      const batch = writeBatch(db);
+      batch.delete(doc(db, "announcements", deleteItem.id));
+      await batch.commit();
+      setSnackbar({
+        open: true,
+        message: alsoRemoveNotifs
+          ? `Deleted, and removed from ${plural(removed, "inbox", "inboxes")}.`
+          : "Removed from history.",
+        severity: "info",
+      });
     } catch (err) {
       console.error("Error deleting announcement:", err);
-      setSnackbar({ open: true, message: "Failed to delete announcement.", severity: "error" });
+      setSnackbar({ open: true, message: "Couldn't delete the announcement.", severity: "error" });
     } finally {
-      setDeleteId(null);
-    }
-  };
-
-  const formatDate = (timestamp) => {
-    if (!timestamp) return "N/A";
-    const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
-    return date.toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
-  };
-
-  const getTypeIcon = (severity) => {
-    switch (severity) {
-      case "warning": return <WarningIcon color="warning" fontSize="small" />;
-      case "success": return <CheckCircleIcon color="success" fontSize="small" />;
-      case "error": return <ErrorIcon color="error" fontSize="small" />;
-      default: return <InfoIcon color="info" fontSize="small" />;
+      setDeleting(false);
+      setDeleteItem(null);
     }
   };
 
@@ -183,185 +258,270 @@ export default function AdminAnnouncements() {
     <Container maxWidth="xl" disableGutters>
       <Box sx={{ mb: 3 }}>
         <Typography variant="h5" fontWeight="800" gutterBottom>
-          System Announcements & Broadcasts
+          Announcements
         </Typography>
         <Typography variant="body2" color="text.secondary">
-          Publish system notifications and updates directly to owner and user feeds.
+          Send a notice to owners, caretakers and tenants. It shows up in their notifications.
         </Typography>
       </Box>
 
-      <Grid container spacing={3}>
-        {/* Left Column: Create Announcement Form */}
-        <Grid item xs={12} md={5}>
-          <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
-              <CampaignIcon color="primary" />
-              <Typography variant="h6" fontWeight="700">
-                Create New Broadcast
-              </Typography>
+      <Box
+        sx={{
+          display: "grid",
+          gap: 3,
+          gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "minmax(0, 5fr) minmax(0, 7fr)" },
+          alignItems: "start",
+        }}
+      >
+        {/* Composer */}
+        <Paper elevation={0} sx={{ p: { xs: 2, sm: 3 }, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 2 }}>
+            <CampaignIcon color="primary" />
+            <Typography variant="h6" fontWeight="700">
+              New announcement
+            </Typography>
+          </Box>
+
+          <Stack
+            component="form"
+            spacing={2.5}
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (canSubmit) setConfirmOpen(true);
+            }}
+          >
+            <TextField
+              label="Title"
+              placeholder="e.g., Scheduled maintenance this Saturday"
+              value={title}
+              onChange={(e) => setTitle(e.target.value.slice(0, TITLE_MAX))}
+              required
+              fullWidth
+              size="small"
+              helperText={`${title.length}/${TITLE_MAX}`}
+            />
+
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
+              <FormControl fullWidth size="small">
+                <InputLabel>Send to</InputLabel>
+                <Select value={targetAudience} label="Send to" onChange={(e) => setTargetAudience(e.target.value)}>
+                  {AUDIENCES.map((a) => (
+                    <MenuItem key={a.value} value={a.value}>
+                      {a.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+
+              <FormControl fullWidth size="small">
+                <InputLabel>Importance</InputLabel>
+                <Select value={type} label="Importance" onChange={(e) => setType(e.target.value)}>
+                  {TYPES.map((t) => (
+                    <MenuItem key={t.value} value={t.value}>
+                      {t.label}
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
             </Box>
 
-            <form onSubmit={handleCreateAnnouncement}>
-              <Stack spacing={2.5}>
-                <TextField
-                  label="Announcement Title"
-                  placeholder="e.g., Scheduled Platform Maintenance"
-                  value={title}
-                  onChange={(e) => setTitle(e.target.value)}
-                  required
-                  fullWidth
-                  size="small"
-                />
+            <TextField
+              label="Message"
+              placeholder="Write the details here..."
+              value={message}
+              onChange={(e) => setMessage(e.target.value.slice(0, MESSAGE_MAX))}
+              required
+              multiline
+              minRows={5}
+              maxRows={12}
+              fullWidth
+              helperText={`${message.length}/${MESSAGE_MAX}`}
+            />
 
-                <Grid container spacing={2}>
-                  <Grid item xs={6}>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>Target Audience</InputLabel>
-                      <Select
-                        value={targetAudience}
-                        label="Target Audience"
-                        onChange={(e) => setTargetAudience(e.target.value)}
-                      >
-                        <MenuItem value="all">All Users</MenuItem>
-                        <MenuItem value="owner">Owners Only</MenuItem>
-                        <MenuItem value="caretaker">Caretakers Only</MenuItem>
-                        <MenuItem value="tenant">Tenants Only</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-
-                  <Grid item xs={6}>
-                    <FormControl fullWidth size="small">
-                      <InputLabel>Severity / Type</InputLabel>
-                      <Select
-                        value={type}
-                        label="Severity / Type"
-                        onChange={(e) => setType(e.target.value)}
-                      >
-                        <MenuItem value="info">Info</MenuItem>
-                        <MenuItem value="warning">Warning</MenuItem>
-                        <MenuItem value="success">Success</MenuItem>
-                        <MenuItem value="error">Urgent / Error</MenuItem>
-                      </Select>
-                    </FormControl>
-                  </Grid>
-                </Grid>
-
-                <TextField
-                  label="Message Content"
-                  placeholder="Write full broadcast details here..."
-                  value={message}
-                  onChange={(e) => setMessage(e.target.value)}
-                  required
-                  multiline
-                  rows={5}
-                  fullWidth
-                />
-
-                <Button
-                  type="submit"
-                  variant="contained"
-                  startIcon={submitting ? <CircularProgress size={20} color="inherit" /> : <SendIcon />}
-                  disabled={submitting || !title.trim() || !message.trim()}
-                  fullWidth
-                  sx={{ py: 1.2, borderRadius: 2 }}
-                >
-                  {submitting ? "Publishing..." : "Broadcast Announcement"}
-                </Button>
-              </Stack>
-            </form>
-          </Paper>
-        </Grid>
-
-        {/* Right Column: History Feed */}
-        <Grid item xs={12} md={7}>
-          <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
-            <Typography variant="h6" fontWeight="700" sx={{ mb: 2 }}>
-              Broadcast History ({announcements.length})
-            </Typography>
-
-            {loading ? (
-              <Box sx={{ display: "flex", justifyContent: "center", py: 5 }}>
-                <CircularProgress />
-              </Box>
-            ) : announcements.length === 0 ? (
-              <Box sx={{ textAlign: "center", py: 5 }}>
-                <Typography variant="body2" color="text.secondary">
-                  No announcements published yet.
-                </Typography>
-              </Box>
+            {usersLoading ? (
+              <Skeleton variant="rounded" height={40} />
+            ) : recipients.length === 0 ? (
+              <Alert severity="warning" sx={{ borderRadius: 2 }}>
+                No active {aud.noun} to send to yet.
+              </Alert>
             ) : (
-              <Stack spacing={2}>
-                {announcements.map((item) => (
-                  <Card key={item.id} elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2 }}>
-                    <CardContent sx={{ p: 2.5, "&:last-child": { pb: 2.5 } }}>
-                      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: 1 }}>
-                        <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-                          {getTypeIcon(item.type)}
-                          <Typography variant="subtitle1" fontWeight="700">
-                            {item.title}
-                          </Typography>
-                        </Box>
-                        <IconButton size="small" color="error" onClick={() => setDeleteId(item.id)}>
-                          <DeleteIcon fontSize="small" />
-                        </IconButton>
-                      </Box>
-
-                      <Typography variant="body2" color="text.primary" sx={{ mb: 2, whitespace: "pre-wrap" }}>
-                        {item.message}
-                      </Typography>
-
-                      <Divider sx={{ mb: 1.5 }} />
-
-                      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1 }}>
-                        <Stack direction="row" spacing={1}>
-                          <Chip
-                            icon={<GroupIcon fontSize="small" />}
-                            label={item.targetAudience.toUpperCase()}
-                            size="small"
-                            variant="outlined"
-                          />
-                          <Chip
-                            label={item.type.toUpperCase()}
-                            size="small"
-                            color={item.type === "error" ? "error" : item.type === "warning" ? "warning" : item.type === "success" ? "success" : "default"}
-                          />
-                        </Stack>
-                        <Typography variant="caption" color="text.secondary">
-                          {formatDate(item.createdAt)}
-                        </Typography>
-                      </Box>
-                    </CardContent>
-                  </Card>
-                ))}
-              </Stack>
+              <Typography variant="body2" color="text.secondary" sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
+                <GroupIcon fontSize="small" />
+                Will reach <strong>{plural(recipients.length, "person", "people")}</strong>
+                {targetAudience === "all" ? "" : ` (${aud.noun})`}. Suspended and unapproved accounts are skipped.
+              </Typography>
             )}
-          </Paper>
-        </Grid>
-      </Grid>
 
-      {/* Delete Dialog */}
-      <Dialog open={Boolean(deleteId)} onClose={() => setDeleteId(null)}>
-        <DialogTitle>Delete Announcement?</DialogTitle>
+            <Button
+              type="submit"
+              variant="contained"
+              startIcon={<SendIcon />}
+              disabled={!canSubmit}
+              fullWidth
+              sx={{ py: 1.2, borderRadius: 2 }}
+            >
+              Review &amp; send
+            </Button>
+          </Stack>
+        </Paper>
+
+        {/* History */}
+        <Paper elevation={0} sx={{ p: { xs: 2, sm: 3 }, border: "1px solid", borderColor: "divider", borderRadius: 3, minWidth: 0 }}>
+          <Typography variant="h6" fontWeight="700" sx={{ mb: 2 }}>
+            Sent announcements ({announcements.length})
+          </Typography>
+
+          {loading ? (
+            <Stack spacing={2}>
+              {[0, 1, 2].map((i) => (
+                <Skeleton key={i} variant="rounded" height={110} />
+              ))}
+            </Stack>
+          ) : announcements.length === 0 ? (
+            <Box sx={{ textAlign: "center", py: 5 }}>
+              <CampaignIcon sx={{ fontSize: 40, color: "text.disabled", mb: 1 }} />
+              <Typography variant="body2" color="text.secondary">
+                Nothing sent yet. Your announcements will be listed here.
+              </Typography>
+            </Box>
+          ) : (
+            <Stack spacing={1.5}>
+              {announcements.map((item) => {
+                const t = typeOf(item.type);
+                const a = audienceOf(item.targetAudience);
+                const TypeIcon = t.Icon;
+                return (
+                  <Box
+                    key={item.id}
+                    sx={{
+                      p: 2,
+                      border: "1px solid",
+                      borderColor: "divider",
+                      borderLeft: "4px solid",
+                      borderLeftColor: `${t.color}.main`,
+                      borderRadius: 2,
+                    }}
+                  >
+                    <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1 }}>
+                      <TypeIcon color={t.color} fontSize="small" sx={{ mt: 0.3 }} />
+                      <Typography variant="subtitle1" fontWeight="700" sx={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>
+                        {item.title}
+                      </Typography>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        aria-label="Delete announcement"
+                        onClick={() => {
+                          setAlsoRemoveNotifs(true);
+                          setDeleteItem(item);
+                        }}
+                        sx={{ mt: -0.5, mr: -0.5 }}
+                      >
+                        <DeleteOutlineIcon fontSize="small" />
+                      </IconButton>
+                    </Box>
+
+                    <Typography
+                      variant="body2"
+                      sx={{ mt: 0.75, mb: 1.5, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+                    >
+                      {item.message}
+                    </Typography>
+
+                    <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1 }}>
+                      <Stack direction="row" spacing={1} useFlexGap sx={{ flexWrap: "wrap" }}>
+                        <Chip icon={<GroupIcon />} label={a.label} size="small" variant="outlined" />
+                        {typeof item.recipientCount === "number" && (
+                          <Chip label={plural(item.recipientCount, "recipient", "recipients")} size="small" variant="outlined" />
+                        )}
+                      </Stack>
+                      <Typography variant="caption" color="text.secondary">
+                        {formatDate(item.createdAt)}
+                      </Typography>
+                    </Box>
+                  </Box>
+                );
+              })}
+            </Stack>
+          )}
+        </Paper>
+      </Box>
+
+      {/* Confirm send */}
+      <Dialog open={confirmOpen} onClose={() => !submitting && setConfirmOpen(false)} fullWidth maxWidth="xs">
+        <DialogTitle>Send this announcement?</DialogTitle>
         <DialogContent>
-          Are you sure you want to delete this announcement from the history record?
+          <Box
+            sx={(theme) => ({
+              p: 1.5,
+              mb: 2,
+              borderRadius: 2,
+              borderLeft: "4px solid",
+              borderLeftColor: `${typeMeta.color}.main`,
+              bgcolor: alpha(theme.palette[typeMeta.color].main, 0.08),
+            })}
+          >
+            <Typography variant="subtitle2" fontWeight="700" sx={{ overflowWrap: "anywhere" }}>
+              {title.trim()}
+            </Typography>
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", mt: 0.5, maxHeight: 140, overflow: "auto" }}
+            >
+              {message.trim()}
+            </Typography>
+          </Box>
+          <DialogContentText>
+            This goes to <strong>{plural(recipients.length, "person", "people")}</strong> right away. It can be
+            deleted afterwards, but anyone who already read it will have seen it.
+          </DialogContentText>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setDeleteId(null)}>Cancel</Button>
-          <Button onClick={handleDeleteAnnouncement} color="error" variant="contained">
-            Delete
+          <Button onClick={() => setConfirmOpen(false)} disabled={submitting}>
+            Back
+          </Button>
+          <Button
+            onClick={handlePublish}
+            variant="contained"
+            disabled={submitting}
+            startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : <SendIcon />}
+          >
+            {submitting ? "Sending..." : "Send now"}
           </Button>
         </DialogActions>
       </Dialog>
 
-      {/* Notification Snackbar */}
+      {/* Delete */}
+      <Dialog open={Boolean(deleteItem)} onClose={() => !deleting && setDeleteItem(null)} fullWidth maxWidth="xs">
+        <DialogTitle>Delete announcement?</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ mb: 1 }}>
+            "{deleteItem?.title}" will be removed from the sent list.
+          </DialogContentText>
+          <FormControlLabel
+            control={<Checkbox checked={alsoRemoveNotifs} onChange={(e) => setAlsoRemoveNotifs(e.target.checked)} />}
+            label="Also remove it from users' notifications"
+          />
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setDeleteItem(null)} disabled={deleting}>
+            Cancel
+          </Button>
+          <Button onClick={handleDelete} color="error" variant="contained" disabled={deleting}>
+            {deleting ? "Deleting..." : "Delete"}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
       <Snackbar
         open={snackbar.open}
         autoHideDuration={4000}
         onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+        sx={{ bottom: { xs: "calc(80px + env(safe-area-inset-bottom, 0px)) !important", md: 24 } }}
       >
-        <Alert severity={snackbar.severity} sx={{ borderRadius: 2 }}>
+        <Alert severity={snackbar.severity} variant="filled" sx={{ borderRadius: 2 }}>
           {snackbar.message}
         </Alert>
       </Snackbar>

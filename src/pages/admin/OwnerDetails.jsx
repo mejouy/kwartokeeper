@@ -11,6 +11,7 @@ import {
   CircularProgress,
   Dialog,
   GlobalStyles,
+  IconButton,
   DialogActions,
   DialogContent,
   DialogContentText,
@@ -43,6 +44,8 @@ import PersonOutlinedIcon from "@mui/icons-material/PersonOutlined";
 import FolderSharedOutlinedIcon from "@mui/icons-material/FolderSharedOutlined";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import ListAltOutlinedIcon from "@mui/icons-material/ListAltOutlined";
+import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
+import ChecklistOutlinedIcon from "@mui/icons-material/ChecklistOutlined";
 import {
   doc,
   collection,
@@ -50,9 +53,11 @@ import {
   where,
   onSnapshot,
   updateDoc,
-  addDoc,
+  writeBatch,
+  deleteField,
 } from "firebase/firestore";
 import { db } from "../../config/firebase";
+import FilePreviewDialog from "../../components/FilePreviewDialog";
 
 const row = { display: "flex", alignItems: "center" };
 const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
@@ -230,9 +235,10 @@ function Facts({ items }) {
 }
 
 // An uploaded document: image preview when it is an image, file tile otherwise.
-function DocTile({ title, url }) {
+function DocTile({ title, url, onPreview }) {
   const [imgFailed, setImgFailed] = useState(false);
   const missing = !url;
+  const isPdf = /\.pdf(\?|$)/i.test(url || "");
 
   return (
     <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 2.5, overflow: "hidden", bgcolor: "background.paper" }}>
@@ -245,13 +251,14 @@ function DocTile({ title, url }) {
           position: "relative",
         }}
       >
-        {!missing && !imgFailed ? (
+        {!missing && !imgFailed && !isPdf ? (
           <Box
             component="img"
             src={url}
             alt={title}
             onError={() => setImgFailed(true)}
-            sx={{ width: "100%", height: "100%", objectFit: "cover" }}
+            onClick={() => onPreview?.({ url, name: title })}
+            sx={{ width: "100%", height: "100%", objectFit: "cover", cursor: onPreview ? "zoom-in" : "default" }}
           />
         ) : (
           <DescriptionOutlinedIcon sx={{ fontSize: 40, color: "text.disabled" }} />
@@ -261,20 +268,25 @@ function DocTile({ title, url }) {
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="body2" noWrap sx={{ fontWeight: 700 }}>{title}</Typography>
           <Typography variant="caption" color={missing ? "warning.main" : "text.secondary"}>
-            {missing ? "Not uploaded" : imgFailed ? "File (open to view)" : "Image"}
+            {missing ? "Not uploaded" : isPdf ? "PDF document" : imgFailed ? "File (open to view)" : "Image"}
           </Typography>
         </Box>
-        <Button
-          size="small"
-          endIcon={<OpenInNewIcon fontSize="small" />}
-          href={url || undefined}
-          target="_blank"
-          rel="noopener noreferrer"
-          disabled={missing}
-          sx={{ fontWeight: 700, flexShrink: 0 }}
-        >
-          Open
-        </Button>
+        <Box sx={{ ...row, gap: 0.5, flexShrink: 0 }}>
+          <Button size="small" onClick={() => onPreview?.({ url, name: title })} disabled={missing} sx={{ fontWeight: 700 }}>
+            View
+          </Button>
+          <IconButton
+            size="small"
+            component="a"
+            href={url || undefined}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Open ${title} in a new tab`}
+            disabled={missing}
+          >
+            <OpenInNewIcon fontSize="small" />
+          </IconButton>
+        </Box>
       </Box>
     </Box>
   );
@@ -322,6 +334,27 @@ function OccupancyWindows({ occupied, total }) {
   );
 }
 
+// What an admin should be able to tick off before approving
+function ReviewChecklist({ items }) {
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+      {items.map((it) => (
+        <Box key={it.label} sx={{ ...row, gap: 1.25, alignItems: "flex-start" }}>
+          {it.ok ? (
+            <CheckCircleOutlinedIcon sx={{ fontSize: 20, color: "success.main", mt: "1px" }} />
+          ) : (
+            <RadioButtonUncheckedIcon sx={{ fontSize: 20, color: "warning.main", mt: "1px" }} />
+          )}
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="body2" sx={{ fontWeight: 700, color: it.ok ? "text.primary" : "text.secondary" }}>{it.label}</Typography>
+            {it.note && <Typography variant="caption" color="text.secondary">{it.note}</Typography>}
+          </Box>
+        </Box>
+      ))}
+    </Box>
+  );
+}
+
 function MetricBox({ title, value, subtitle, icon }) {
   return (
     <Paper elevation={0} sx={{ ...cardSx, p: { xs: 1.75, sm: 2.25 }, height: "100%" }}>
@@ -361,6 +394,7 @@ export default function OwnerDetails() {
   const [confirm, setConfirm] = useState(null); // "approve" | "reject" | "suspend" | "activate"
   const [reason, setReason] = useState("");
   const [toast, setToast] = useState({ open: false, message: "" });
+  const [previewFile, setPreviewFile] = useState(null);
 
   useEffect(() => {
     if (!targetId) {
@@ -441,13 +475,6 @@ export default function OwnerDetails() {
     try {
       const timestamp = new Date().toISOString();
 
-      await updateDoc(doc(db, "users", targetId), {
-        approvalStatus: newApprovalStatus,
-        status: newApprovalStatus === "approved" ? "active" : "suspended",
-        ...(newApprovalStatus === "rejected" && rejectionReason ? { rejectionReason } : {}),
-        updatedAt: timestamp,
-      });
-
       let notificationTitle = "";
       let notificationMessage = "";
       let notificationType = "info";
@@ -458,11 +485,20 @@ export default function OwnerDetails() {
         notificationType = "success";
       } else if (newApprovalStatus === "rejected") {
         notificationTitle = "Application Rejected";
-        notificationMessage = `Unfortunately, your account verification was declined. Please contact support or resubmit valid documentation.${rejectionReason ? ` Reason: ${rejectionReason}` : ""}`;
+        notificationMessage = `Unfortunately, your account verification was declined. Please review the reason and resubmit your documents.${rejectionReason ? ` Reason: ${rejectionReason}` : ""}`;
         notificationType = "error";
       }
 
-      await addDoc(collection(db, "notifications"), {
+      // One batch: the status change and the owner's notification succeed or fail together.
+      const batch = writeBatch(db);
+      batch.update(doc(db, "users", targetId), {
+        approvalStatus: newApprovalStatus,
+        status: newApprovalStatus === "approved" ? "active" : "suspended",
+        ...(newApprovalStatus === "rejected" ? { rejectionReason } : { rejectionReason: deleteField() }),
+        reviewedAt: timestamp,
+        updatedAt: timestamp,
+      });
+      batch.set(doc(collection(db, "notifications")), {
         userId: targetId,
         title: notificationTitle,
         message: notificationMessage,
@@ -470,6 +506,7 @@ export default function OwnerDetails() {
         isRead: false,
         createdAt: timestamp,
       });
+      await batch.commit();
 
       setToast({ open: true, message: newApprovalStatus === "approved" ? "Owner approved and notified." : "Application rejected and owner notified." });
     } catch (err) {
@@ -483,6 +520,7 @@ export default function OwnerDetails() {
   const runConfirmed = async () => {
     const action = confirm;
     const why = reason.trim();
+    if (action === "reject" && why.length < 5) return; // the button is disabled too
     setConfirm(null);
     setReason("");
     if (action === "approve") await handleApproval("approved");
@@ -549,6 +587,15 @@ export default function OwnerDetails() {
   const view = STATUS_VIEW[viewKey];
 
   const docs = owner.verificationDocs;
+  const docsComplete = !!(docs?.idUrl && docs?.clearanceUrl);
+  const resubmitted =
+    isPending && toMillis(owner.reviewedAt) > 0 && toMillis(docs?.submittedAt) > toMillis(owner.reviewedAt);
+  const checklist = [
+    { label: "Government ID uploaded", ok: !!docs?.idUrl, note: docs?.idUrl ? "Open it and check the name and photo are readable." : undefined },
+    { label: "Proof of ownership uploaded", ok: !!docs?.clearanceUrl, note: docs?.clearanceUrl ? "Check it matches the property they registered." : undefined },
+    { label: "Name and contact details", ok: !!(owner.email && phone), note: !phone ? "No phone number on file." : undefined },
+    { label: "Registered a property", ok: properties.length > 0, note: properties.length === 0 ? "They haven't added a property yet." : undefined },
+  ];
   const occPct = portfolio.beds > 0 ? Math.round((portfolio.occupied / portfolio.beds) * 100) : 0;
 
   const heroTone = {
@@ -582,7 +629,7 @@ export default function OwnerDetails() {
   const copy = confirm ? CONFIRM_COPY[confirm] : null;
 
   return (
-    <Box>
+    <Box sx={{ pb: isPending ? { xs: 9, md: 0 } : 0 }}>
       {AnimationStyles}
       <Button
         startIcon={<ArrowBackIcon />}
@@ -670,14 +717,23 @@ export default function OwnerDetails() {
               Rejected: {owner.rejectionReason}
             </Typography>
           )}
+          {resubmitted && (
+            <Typography variant="body2" sx={{ color: "#cadcf6", mt: 1.5, fontWeight: 600 }}>
+              Resubmitted their documents on {formatDate(docs.submittedAt, true)}, after being rejected.
+            </Typography>
+          )}
           {isPending && (
             <Typography variant="body2" sx={{ color: "#ffcc80", mt: 1.5 }}>
-              {docs ? "Check the verification documents below, then approve or reject." : "No verification documents uploaded yet."}
+              {docsComplete
+                ? "Check the verification documents below, then approve or reject."
+                : docs
+                ? "Some documents are missing. Reject with a reason so the owner can resubmit."
+                : "No verification documents uploaded yet. Reject with a reason so the owner can submit them."}
             </Typography>
           )}
 
           {/* actions */}
-          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.25, mt: 2.5 }}>
+          <Box sx={{ display: isPending ? { xs: "none", md: "flex" } : "flex", flexWrap: "wrap", gap: 1.25, mt: 2.5 }}>
             {isPending ? (
               <>
                 <Button
@@ -685,7 +741,7 @@ export default function OwnerDetails() {
                   color="success"
                   startIcon={<CheckCircleOutlinedIcon />}
                   onClick={() => setConfirm("approve")}
-                  disabled={updatingStatus}
+                  disabled={updatingStatus || !docsComplete}
                   sx={{ fontWeight: 700, borderRadius: 2.5, flex: { xs: 1, sm: "none" } }}
                 >
                   Approve
@@ -878,6 +934,16 @@ export default function OwnerDetails() {
 
         {/* SIDE: account + verification */}
         <Box sx={{ display: "flex", flexDirection: "column", gap: { xs: 2, sm: 2.5 }, minWidth: 0 }}>
+          {isPending && (
+            <Panel
+              title="Review checklist"
+              icon={<ChecklistOutlinedIcon fontSize="small" />}
+              action={<Pill label={`${checklist.filter((c) => c.ok).length}/${checklist.length}`} tone={checklist.every((c) => c.ok) ? "success" : "warning"} />}
+            >
+              <ReviewChecklist items={checklist} />
+            </Panel>
+          )}
+
           <Panel title="Account" icon={<PersonOutlinedIcon fontSize="small" />}>
             <Facts
               items={[
@@ -901,12 +967,12 @@ export default function OwnerDetails() {
           <Panel
             title="Verification documents"
             icon={<FolderSharedOutlinedIcon fontSize="small" />}
-            action={docs ? <Pill label={docs.idUrl && docs.clearanceUrl ? "Complete" : "Incomplete"} tone={docs.idUrl && docs.clearanceUrl ? "success" : "warning"} /> : <Pill label="None" tone="warning" />}
+            action={docs ? <Pill label={docsComplete ? "Complete" : "Incomplete"} tone={docsComplete ? "success" : "warning"} /> : <Pill label="None" tone="warning" />}
           >
             {docs ? (
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-                <DocTile title="Government ID" url={docs.idUrl} />
-                <DocTile title="Proof of ownership" url={docs.clearanceUrl} />
+                <DocTile title="Government ID" url={docs.idUrl} onPreview={setPreviewFile} />
+                <DocTile title="Proof of ownership" url={docs.clearanceUrl} onPreview={setPreviewFile} />
                 {docs.submittedAt && (
                   <Typography variant="caption" color="text.secondary">
                     Submitted {formatDate(docs.submittedAt, true)}
@@ -922,8 +988,51 @@ export default function OwnerDetails() {
         </Box>
       </Box>
 
+      {/* Phones: Approve / Reject stay within reach while scrolling through the documents */}
+      {isPending && (
+        <Box
+          sx={{
+            display: { xs: "flex", md: "none" },
+            position: "fixed",
+            left: 0,
+            right: 0,
+            bottom: "calc(64px + env(safe-area-inset-bottom, 0px))",
+            zIndex: (t) => t.zIndex.appBar - 1,
+            gap: 1.25,
+            px: 2,
+            py: 1.25,
+            bgcolor: "background.default",
+            borderTop: "1px solid",
+            borderColor: "divider",
+          }}
+        >
+          <Button
+            variant="outlined"
+            color="error"
+            startIcon={<CancelOutlinedIcon />}
+            onClick={() => setConfirm("reject")}
+            disabled={updatingStatus}
+            sx={{ flex: 1, fontWeight: 700, borderRadius: 2.5, minHeight: 44 }}
+          >
+            Reject
+          </Button>
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<CheckCircleOutlinedIcon />}
+            onClick={() => setConfirm("approve")}
+            disabled={updatingStatus || !docsComplete}
+            sx={{ flex: 1, fontWeight: 700, borderRadius: 2.5, minHeight: 44 }}
+          >
+            Approve
+          </Button>
+        </Box>
+      )}
+
+      <FilePreviewDialog file={previewFile} onClose={() => setPreviewFile(null)} />
+
       {/* Confirm dialog */}
-      <Dialog open={!!confirm} onClose={() => setConfirm(null)} fullWidth maxWidth="xs" PaperProps={{ sx: { borderRadius: 3 } }}>
+      <Dialog open={!!confirm} onClose={() => setConfirm(null)} fullWidth maxWidth="xs" slotProps={{ paper: { sx: { borderRadius: 3 } } }}>
         {copy && (
           <>
             <DialogTitle sx={{ fontWeight: 800 }}>{copy.title}</DialogTitle>
@@ -931,7 +1040,7 @@ export default function OwnerDetails() {
               <DialogContentText>{copy.body}</DialogContentText>
               {confirm === "reject" && (
                 <TextField
-                  label="Reason (optional)"
+                  label="Reason (required)"
                   placeholder="e.g. ID photo is unreadable"
                   value={reason}
                   onChange={(e) => setReason(e.target.value.slice(0, 300))}
@@ -940,7 +1049,8 @@ export default function OwnerDetails() {
                   fullWidth
                   size="small"
                   sx={{ mt: 2 }}
-                  helperText={`${reason.length}/300 · included in the notification`}
+                  required
+                  helperText={`${reason.length}/300 · the owner will see this, so say what to fix`}
                 />
               )}
             </DialogContent>
@@ -948,7 +1058,13 @@ export default function OwnerDetails() {
               <Button onClick={() => { setConfirm(null); setReason(""); }} sx={{ fontWeight: 700 }}>
                 Cancel
               </Button>
-              <Button variant="contained" color={copy.color} onClick={runConfirmed} sx={{ fontWeight: 700, borderRadius: 2.5 }}>
+              <Button
+                variant="contained"
+                color={copy.color}
+                onClick={runConfirmed}
+                disabled={confirm === "reject" && reason.trim().length < 5}
+                sx={{ fontWeight: 700, borderRadius: 2.5 }}
+              >
                 {copy.cta}
               </Button>
             </DialogActions>
@@ -968,7 +1084,7 @@ export default function OwnerDetails() {
         autoHideDuration={4000}
         onClose={() => setToast((t) => ({ ...t, open: false }))}
         anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        sx={{ bottom: { xs: "calc(64px + 16px + env(safe-area-inset-bottom)) !important", sm: undefined } }}
+        sx={{ bottom: { xs: `calc(${isPending ? 136 : 80}px + env(safe-area-inset-bottom)) !important`, sm: undefined } }}
       >
         <Alert severity="success" variant="filled" sx={{ borderRadius: 2 }}>
           {toast.message}

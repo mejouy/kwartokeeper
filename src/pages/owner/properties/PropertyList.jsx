@@ -5,6 +5,7 @@ import {
   Paper,
   Typography,
   Button,
+  Chip,
   LinearProgress,
   Skeleton,
   Alert,
@@ -23,6 +24,7 @@ import { db, auth } from "../../../config/firebase";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { onAuthStateChanged } from "firebase/auth";
 import { getPropertyCoverPhotoUrl } from "../../../utils/getPropertyCoverPhotoUrl";
+import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
 
 // Occupancy colour tiers (same rule as before: 80%+ is healthy, below is "room to fill").
 const occupancyColor = (pct) => (pct >= 80 ? "success" : "warning");
@@ -80,7 +82,7 @@ function PropertyTile({ p, onOpen }) {
   const occ = p.totalBeds > 0 ? Math.min(Math.round(((p.occupiedBeds || 0) / p.totalBeds) * 100), 100) : 0;
   const coverPhotoUrl = getPropertyCoverPhotoUrl(p);
   const propertyName = p.propertyName || p.name || "Untitled Property";
-  const place = [p.address, p.city].filter((v) => typeof v === "string" && v.trim()).join(", ");
+  const place = formatPropertyAddress(p);
 
   return (
     <Paper
@@ -148,6 +150,9 @@ function PropertyTile({ p, onOpen }) {
             <Typography variant="body2" color="text.secondary" noWrap>
               {p.propertyType || "Dormitory"}
             </Typography>
+            {["inactive", "archived", "deactivated"].includes(String(p.status || "Active").trim().toLowerCase()) && (
+              <Chip label="Inactive" size="small" sx={{ mt: 0.75, fontWeight: 700, width: "fit-content" }} />
+            )}
             {place && (
               <Box sx={{ ...row, gap: 0.5, color: "text.secondary", mt: 0.25, minWidth: 0 }}>
                 <PlaceOutlinedIcon sx={{ fontSize: 15, flexShrink: 0 }} />
@@ -329,9 +334,12 @@ export default function PropertyList() {  const navigate = useNavigate();
   }, [properties, search]);
 
   const totals = useMemo(() => {
-    const beds = properties.reduce((sum, p) => sum + (p.totalBeds || 0), 0);
-    const occupied = properties.reduce((sum, p) => sum + (p.occupiedBeds || 0), 0);
-    return { beds, occupied, pct: beds > 0 ? Math.min(Math.round((occupied / beds) * 100), 100) : 0 };
+    const activeProperties = properties.filter(
+      (property) => !["inactive", "archived", "deactivated"].includes(String(property.status || "Active").trim().toLowerCase())
+    );
+    const beds = activeProperties.reduce((sum, p) => sum + (p.totalBeds || 0), 0);
+    const occupied = activeProperties.reduce((sum, p) => sum + (p.occupiedBeds || 0), 0);
+    return { beds, occupied, activeCount: activeProperties.length, pct: beds > 0 ? Math.min(Math.round((occupied / beds) * 100), 100) : 0 };
   }, [properties]);
 
   const openProperty = (id) => navigate(`/owner/properties/${id}`);
@@ -363,7 +371,7 @@ export default function PropertyList() {  const navigate = useNavigate();
       {!loading && properties.length > 0 && (
         <SummaryStrip
           items={[
-            { label: "Properties", value: properties.length },
+            { label: "Active properties", value: totals.activeCount },
             { label: "Beds occupied", value: totals.occupied, suffix: `/ ${totals.beds}` },
             { label: "Occupancy", value: `${totals.pct}%` },
           ]}

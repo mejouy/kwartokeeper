@@ -34,9 +34,22 @@ service cloud.firestore {
       return userExists() && getUserData().role == 'caretaker';
     }
 
-    // Verify document ownership by matching ownerUid OR createdBy OR direct owner association
+    function getCaretakerData() {
+      return get(/databases/$(database)/documents/caretakers/$(request.auth.uid)).data;
+    }
+
+    // Checks if the user is a caretaker with a specific permission flag set to true
+    function caretakerHasPermission(permKey) {
+      return isCaretaker() && (
+        (getUserData().get('permissions', {}).get(permKey, false) == true) ||
+        (exists(/databases/$(database)/documents/caretakers/$(request.auth.uid)) && 
+         getCaretakerData().get('permissions', {}).get(permKey, false) == true)
+      );
+    }
+
     function isDocOwner(docData) {
-      return docData.get('ownerUid', '') == request.auth.uid ||
+      return docData.get('ownerUid', '') == request.auth.uid || 
+             docData.get('ownerId', '') == request.auth.uid ||
              docData.get('createdBy', '') == request.auth.uid ||
              docData.get('userId', '') == request.auth.uid;
     }
@@ -72,16 +85,24 @@ service cloud.firestore {
       allow read: if isSignedIn();
 
       allow create: if isSignedIn() && (
-        isAdmin() || (
+        isAdmin() || 
+        (
           request.auth.uid == userId &&
           request.resource.data.role != 'admin'
+        ) ||
+        (
+          isOwner() && 
+          isDocOwner(request.resource.data)
         )
       );
 
-      // Users can update their own profile EXCEPT restricted security fields
       allow update: if isAdmin() || (
         request.auth.uid == userId &&
         !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'approvalStatus', 'status'])
+      ) || (
+        isOwner() && 
+        isDocOwner(resource.data) &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'approvalStatus', 'ownerUid'])
       );
 
       allow delete: if isAdmin();
@@ -102,14 +123,16 @@ service cloud.firestore {
 
     match /owner_announcements/{announcementId} {
       allow read: if isSignedIn() && (
-        isAdmin() ||
-        (isOwner() && resource.data.get('ownerId', '') == request.auth.uid)
+        isAdmin() || 
+        isOwner() || 
+        isCaretaker() || 
+        isTenant() || 
+        isDocOwner(resource.data)
       );
       allow create: if isOwner() && request.resource.data.get('ownerId', '') == request.auth.uid;
       allow update, delete: if isAdmin() || (
-        isOwner() &&
-        resource.data.get('ownerId', '') == request.auth.uid &&
-        request.resource.data.get('ownerId', '') == request.auth.uid
+        isOwner() && 
+        (resource.data.get('ownerId', '') == request.auth.uid || isDocOwner(resource.data))
       );
     }
 
@@ -118,78 +141,209 @@ service cloud.firestore {
     // ===============================================================
     match /notifications/{notificationId} {
       allow read: if isSignedIn() && (isAdmin() || isRecipient(resource.data));
-      allow create: if isAdmin() || (
-        isSignedIn() &&
+      
+      allow create: if isSignedIn() && (
+        isAdmin() || 
+        request.resource.data.get('createdBy', '') == request.auth.uid ||
+        isRecipient(request.resource.data) || 
         (
-          isRecipient(request.resource.data) ||
-          (
-            isOwner() &&
-            request.resource.data.get('ownerId', '') == request.auth.uid &&
-            isOwnedRecipient(request.resource.data.get('userId', ''))
-          )
-        )
+          isOwner() &&
+          request.resource.data.get('ownerId', '') == request.auth.uid &&
+          isOwnedRecipient(request.resource.data.get('userId', ''))
+        ) ||
+        isDocOwner(request.resource.data)
       );
+
       allow update: if isAdmin() || (
-        isSignedIn() &&
-        isRecipient(resource.data) &&
+        isSignedIn() && 
+        isRecipient(resource.data) && 
         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isRead'])
       );
+
       allow delete: if isAdmin() || (isSignedIn() && isRecipient(resource.data));
     }
 
     // ===============================================================
-    // PROPERTIES, TENANTS, CARETAKERS, PAYMENTS, MAINTENANCE TICKETS
+    // PROPERTIES, TENANTS, CARETAKERS, PAYMENTS
     // ===============================================================
-
+    
     match /properties/{propertyId} {
       allow read: if isSignedIn();
       allow create: if isAdmin() || (isOwner() && isDocOwner(request.resource.data));
-      allow update: if isAdmin() || (isOwner() && isDocOwner(resource.data));
-      allow delete: if isAdmin() || (isOwner() && isDocOwner(resource.data));
+      allow update: if isAdmin() || (
+        isOwner() && isDocOwner(resource.data)
+      ) || (
+        caretakerHasPermission('modifyLayout') &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['rooms', 'totalRooms', 'totalBeds', 'totalFloors', 'updatedAt'])
+      );
+      // ✅ Enforce Soft Deletion: Hard delete disabled to protect dependent occupancy and lease history
+      allow delete: if false;
     }
 
     match /tenants/{tenantId} {
-      allow read: if isSignedIn() && (isAdmin() || isOwner() || resource.data.get('tenantId', '') == request.auth.uid || resource.data.get('userId', '') == request.auth.uid);
+      allow read: if isSignedIn() && (
+        tenantId == request.auth.uid || 
+        isAdmin() || 
+        isOwner() || 
+        isCaretaker() || 
+        resource.data.get('tenantId', '') == request.auth.uid || 
+        resource.data.get('userId', '') == request.auth.uid
+      );
       allow create: if isAdmin() || (isOwner() && isDocOwner(request.resource.data));
-      allow update, delete: if isAdmin() || (isOwner() && isDocOwner(resource.data));
+      allow update: if isAdmin() || (isOwner() && isDocOwner(resource.data));
+      // ✅ Enforce Soft Deletion: Use status = 'Inactive' instead of hard deleting to preserve financial audit trail
+      allow delete: if false;
     }
 
     match /caretakers/{caretakerId} {
-      allow read: if isSignedIn() && (isAdmin() || isOwner() || resource.data.get('caretakerId', '') == request.auth.uid);
+      allow read: if isSignedIn() && (
+        caretakerId == request.auth.uid || 
+        isAdmin() || 
+        isOwner() || 
+        resource.data.get('caretakerId', '') == request.auth.uid ||
+        resource.data.get('userId', '') == request.auth.uid
+      );
       allow create: if isAdmin() || (isOwner() && isDocOwner(request.resource.data));
-      allow update, delete: if isAdmin() || (isOwner() && isDocOwner(resource.data));
+      allow update: if isAdmin() || (isOwner() && isDocOwner(resource.data));
+      // ✅ Enforce Soft Deletion: Use status = 'Inactive' instead of hard deleting
+      allow delete: if false;
     }
 
     match /payments/{paymentId} {
-      // Tenant queries constrain tenantId; owner queries constrain ownerUid.
-      allow read: if isAdmin() ||
-        (isTenant() && resource.data.get('tenantId', '') == request.auth.uid) ||
-        (isOwner() && resource.data.get('ownerUid', '') == request.auth.uid);
-
-      // Tenants may submit their own pending payment; owners may record payments for their properties.
-      allow create: if isAdmin() ||
-        (isTenant() &&
-          request.resource.data.get('tenantId', '') == request.auth.uid &&
-          request.resource.data.get('status', '') == 'Pending') ||
-        (isOwner() && request.resource.data.get('ownerUid', '') == request.auth.uid);
-
-      // Only the owning owner may update or delete a payment. Keep its ownership fields immutable.
-      allow update: if isAdmin() ||
-        (isOwner() &&
-          resource.data.get('ownerUid', '') == request.auth.uid &&
-          request.resource.data.get('ownerUid', '') == resource.data.get('ownerUid', '') &&
-          request.resource.data.get('tenantId', '') == resource.data.get('tenantId', ''));
-      allow delete: if isAdmin() ||
-        (isOwner() && resource.data.get('ownerUid', '') == request.auth.uid);
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        isOwner() || 
+        isCaretaker() || 
+        isDocOwner(resource.data) || 
+        resource.data.get('tenantId', '') == request.auth.uid 
+      );
+      allow create: if isAdmin() || (isOwner() && isDocOwner(request.resource.data)) || (
+        caretakerHasPermission('viewFinancials') && 
+        request.resource.data.get('paymentMethod', '') == 'Cash'
+      );
+      allow update: if isAdmin() || (isOwner() && isDocOwner(resource.data));
+      // ✅ Financial records must never be hard deleted
+      allow delete: if false;
     }
 
-    // RENAMED from /tickets/{ticketId} to match the React app collection name
-    match /maintenance_tickets/{ticketId} {
-      // Allow owners, system admins, or the user who created/owns the ticket to read & write
-      allow read: if isSignedIn() && (isAdmin() || isOwner() || isTenant() || isCaretaker() || isDocOwner(resource.data));
+    // ===============================================================
+    // OCCUPANCY & CURFEW LOGS / RECORDS
+    // ===============================================================
+    
+    // Private record per tenant per night
+    match /curfew_records/{recordId} {
+      allow read: if isSignedIn() && (
+        isAdmin() ||
+        resource.data.get('tenantId', '') == request.auth.uid ||
+        resource.data.get('ownerUid', '') == request.auth.uid ||
+        caretakerHasPermission('logOccupancy')
+      );
+      allow create, update, delete: if isSignedIn() && (
+        isAdmin() || 
+        caretakerHasPermission('logOccupancy')
+      );
+    }
 
-      // When creating/updating, ensure the user has the right relationship to the ticket
-      allow create, update, delete: if isSignedIn() && (isAdmin() || isOwner() || isDocOwner(request.resource.data) || isDocOwner(resource.data));
+    // Night's full sheet (tenants strictly prohibited)
+    match /occupancy_logs/{logId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        isOwner() || 
+        caretakerHasPermission('logOccupancy')
+      );
+      allow write: if isSignedIn() && (
+        isAdmin() || 
+        caretakerHasPermission('logOccupancy')
+      );
+    }
+
+    // ===============================================================
+    // MAINTENANCE TICKETS (Handles 'maintenance' & 'maintenance_tickets')
+    // ===============================================================
+    
+    match /maintenance/{ticketId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || 
+        isOwner() || 
+        isCaretaker() || 
+        isTenant() || 
+        resource.data.get('ownerUid', '') == request.auth.uid ||
+        resource.data.get('createdBy', '') == request.auth.uid ||
+        resource.data.get('tenantId', '') == request.auth.uid ||
+        resource.data.get('tenantUid', '') == request.auth.uid ||
+        resource.data.get('userId', '') == request.auth.uid
+      );
+      
+      allow create: if isSignedIn();
+
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        isOwner() || 
+        caretakerHasPermission('handleReports') ||
+        (
+          resource.data.get('tenantUid', '') == request.auth.uid &&
+          (
+            (
+              resource.data.get('status', 'Pending') == 'Pending' &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'description', 'followUps', 'updatedAt'])
+            ) ||
+            (
+              resource.data.get('status', 'Pending') != 'Pending' &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followUps', 'updatedAt'])
+            )
+          )
+        )
+      );
+
+      allow delete: if isSignedIn() && (
+        isAdmin() || 
+        isOwner() ||
+        (
+          resource.data.get('tenantUid', '') == request.auth.uid &&
+          resource.data.get('status', 'Pending') == 'Pending'
+        )
+      );
+    }
+
+    match /maintenance_tickets/{ticketId} {
+      allow read: if isSignedIn() && (
+        isAdmin() || isOwner() || isCaretaker() || isTenant() || 
+        resource.data.get('ownerUid', '') == request.auth.uid ||
+        resource.data.get('createdBy', '') == request.auth.uid ||
+        resource.data.get('tenantId', '') == request.auth.uid ||
+        resource.data.get('tenantUid', '') == request.auth.uid ||
+        resource.data.get('userId', '') == request.auth.uid
+      );
+      
+      allow create: if isSignedIn();
+
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        isOwner() || 
+        caretakerHasPermission('handleReports') ||
+        (
+          resource.data.get('tenantUid', '') == request.auth.uid &&
+          (
+            (
+              resource.data.get('status', 'Pending') == 'Pending' &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['title', 'description', 'followUps', 'updatedAt'])
+            ) ||
+            (
+              resource.data.get('status', 'Pending') != 'Pending' &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followUps', 'updatedAt'])
+            )
+          )
+        )
+      );
+
+      allow delete: if isSignedIn() && (
+        isAdmin() || 
+        isOwner() ||
+        (
+          resource.data.get('tenantUid', '') == request.auth.uid &&
+          resource.data.get('status', 'Pending') == 'Pending'
+        )
+      );
     }
   }
 }

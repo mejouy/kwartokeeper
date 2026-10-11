@@ -46,6 +46,7 @@ import {
   where,
 } from "firebase/firestore";
 import { auth, db } from "../../../config/firebase";
+import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
 import { useAuth } from "../../../context/AuthContext";
 
 const PERMISSION_LABELS = {
@@ -79,13 +80,6 @@ function formatDate(value) {
   return d && !Number.isNaN(d.getTime())
     ? d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : null;
-}
-
-function formatAddress(address) {
-  if (!address) return "No address listed";
-  if (typeof address === "string") return address;
-  const parts = [address.street, address.barangay, address.cityMunicipality, address.province].filter(Boolean);
-  return parts.length ? parts.join(", ") : "No address listed";
 }
 
 function FormSectionTitle({ children }) {
@@ -477,7 +471,7 @@ export default function CaretakerDetail() {
 
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, wordBreak: "break-word" }}>
             {property
-              ? formatAddress(property.address || property)
+              ? formatPropertyAddress(property)
               : propertyMissing
               ? "The assigned property couldn't be found."
               : "This caretaker isn't assigned to a property yet."}

@@ -16,6 +16,7 @@ import {
   Paper,
   BottomNavigation,
   BottomNavigationAction,
+  Badge,
 } from "@mui/material";
 import DashboardIcon from "@mui/icons-material/Dashboard";
 import SupervisorAccountIcon from "@mui/icons-material/SupervisorAccount";
@@ -26,7 +27,8 @@ import { alpha } from "@mui/material/styles";
 
 // Firebase Auth imports
 import { signOut } from "firebase/auth";
-import { auth } from "../config/firebase";
+import { collection, onSnapshot, query, where } from "firebase/firestore";
+import { auth, db } from "../config/firebase";
 
 const drawerWidth = 288;
 const BAR_H = { xs: 56, md: 80 }; // shared by the top bar and the sidebar header so their dividers line up
@@ -69,10 +71,25 @@ function useTodayLabel() {
   return label;
 }
 
+// How many owner applications are waiting, so the admin sees it from any page.
+// Same rule as the owner page: status or approvalStatus is "pending".
+function usePendingOwners() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    return onSnapshot(
+      query(collection(db, "users"), where("role", "==", "owner")),
+      (snap) => setCount(snap.docs.filter((d) => d.data().status === "pending" || d.data().approvalStatus === "pending").length),
+      () => setCount(0)
+    );
+  }, []);
+  return count;
+}
+
 export default function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const todayLabel = useTodayLabel();
+  const pendingOwners = usePendingOwners();
 
   const handleLogout = async () => {
     try {
@@ -85,7 +102,7 @@ export default function AdminLayout() {
 
   const menuItems = [
     { text: "Overview", path: "/admin/overview", aliases: ["/admin", "/admin/dashboard"], icon: <DashboardIcon /> },
-    { text: "Owners", path: "/admin/owners", icon: <SupervisorAccountIcon /> },
+    { text: "Owners", path: "/admin/owners", icon: <SupervisorAccountIcon />, badge: pendingOwners },
     { text: "Announcements", path: "/admin/announcements", icon: <CampaignIcon /> },
     { text: "Settings", path: "/admin/settings", icon: <SettingsIcon /> },
   ];
@@ -155,7 +172,9 @@ export default function AdminLayout() {
                   "&.Mui-selected .MuiListItemIcon-root": { color: "#ff6a33" },
                 }}
               >
-                <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
+                <ListItemIcon sx={{ minWidth: 40 }}>
+                  <Badge badgeContent={item.badge || 0} color="primary" max={99}>{item.icon}</Badge>
+                </ListItemIcon>
                 <ListItemText primary={item.text} slotProps={{ primary: { sx: { fontWeight: 600 } } }} />
               </ListItemButton>
             </ListItem>
@@ -169,7 +188,7 @@ export default function AdminLayout() {
   );
 
   return (
-    <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: (theme) => alpha(theme.palette.background.paper, 0.35) }}>
+    <Box sx={{ display: "flex", minHeight: "100dvh", bgcolor: (theme) => alpha(theme.palette.background.paper, 0.35) }}>
       <AppBar
         position="fixed"
         elevation={0}
@@ -270,7 +289,7 @@ export default function AdminLayout() {
             <BottomNavigationAction
               key={item.text}
               label={item.text}
-              icon={item.icon}
+              icon={<Badge badgeContent={item.badge || 0} color="error" max={99}>{item.icon}</Badge>}
               sx={{ minWidth: 0, "& .MuiBottomNavigationAction-label": { fontWeight: 600 } }}
             />
           ))}

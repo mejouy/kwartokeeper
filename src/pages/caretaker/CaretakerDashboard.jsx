@@ -74,6 +74,7 @@ import { auth, db } from "../../config/firebase";
 import { uploadToCloudinary } from "../../utils/cloudinary";
 import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
 import { getPropertyCoverPhotoUrl } from "../../utils/getPropertyCoverPhotoUrl";
+import { normalizePayment } from "../../utils/normalizePayment";
 
 /* ---------------------------------------------------------------------------
    Constants + small helpers
@@ -89,7 +90,7 @@ const CHECK_WORD = { present: "in", late: "late", out: "out" };
 const SMS_URL = typeof import.meta !== "undefined" ? import.meta.env?.VITE_SMS_WORKER_URL || "" : "";
 const HISTORY_NIGHTS = 14;
 const STATUS_OPTIONS = ["Pending", "In Progress", "Resolved"];
-const STATUS_TONE = { Pending: "warning", "In Progress": "info", Resolved: "success" };
+const STATUS_TONE = { Pending: "warning", "In Progress": "info", Resolved: "success", Cancelled: "default" };
 const TIER_TONE = { High: "error", Medium: "warning", Low: "default" };
 const CHECK_OPTIONS = [
   { id: "present", label: "In", tone: "success" },
@@ -1045,7 +1046,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           unsubs.push(
             onSnapshot(
               query(collection(db, "payments"), where("propertyId", "==", propertyId)),
-              (snap) => setPayments(snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }))),
+              (snap) => setPayments(snap.docs.map((d) => normalizePayment({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }))),
               fail("payments")
             )
           );
@@ -1109,7 +1110,9 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           phone: t.contact || t.phone || t.phoneNumber || t.contactNumber || "",
           status,
           inactive: isInactiveStatus(status),
-          rent: Number(room?.monthlyRatePerBed ?? t.monthlyRent ?? 0) || 0,
+          leaseStartDate: t.leaseStartDate || t.leaseStart || t.startDate || t.moveInDate || "",
+          leaseEndDate: t.leaseEndDate || t.leaseEnd || t.endDate || t.moveOutDate || "",
+          rent: Number(t.monthlyRent ?? t.rentAmount ?? t.roomMonthlyRate ?? t.monthlyRate ?? t.rent ?? room?.monthlyRatePerBed ?? 0) || 0,
         };
       })
       .sort((a, b) => a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }) || a.name.localeCompare(b.name));
@@ -1158,8 +1161,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
 
   // ---- derived: maintenance
   const rankedTickets = useMemo(() => rankMaintenanceRequests(tickets), [tickets]);
-  const activeTickets = rankedTickets.filter((t) => (t.status || "Pending") !== "Resolved");
-  const resolvedTickets = rankedTickets.filter((t) => (t.status || "Pending") === "Resolved");
+  const activeTickets = rankedTickets.filter((t) => !["Resolved", "Cancelled"].includes(t.status || "Pending"));
+  const resolvedTickets = rankedTickets.filter((t) => ["Resolved", "Cancelled"].includes(t.status || "Pending"));
   const highTickets = activeTickets.filter((t) => t.priority?.tier === "High");
   const progressTickets = activeTickets.filter((t) => (t.status || "Pending") === "In Progress");
   const shownTickets = ticketFilter === "high" ? highTickets : ticketFilter === "progress" ? progressTickets : activeTickets;
@@ -2251,7 +2254,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                 sx={{ ...cardSx, justifyContent: "space-between", px: 2, minHeight: 52, fontWeight: 700, color: "text.primary", textTransform: "none" }}
               >
                 <Box component="span" sx={{ flex: 1, textAlign: "left", ml: 0.5 }}>
-                  Archive · {resolvedTickets.length} resolved
+                  Archive · {resolvedTickets.length} closed
                 </Box>
               </Button>
               {archiveOpen && (

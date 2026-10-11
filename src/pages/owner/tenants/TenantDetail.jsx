@@ -60,6 +60,9 @@ import {
   setDoc,
 } from "firebase/firestore";
 import { auth, db } from "../../../config/firebase";
+import { normalizePayment } from "../../../utils/normalizePayment";
+import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
+import { addMonthsClamped } from "../../../utils/addMonthsClamped";
 import { reconcilePropertyOccupancy } from "../../../utils/reconcilePropertyOccupancy";
 import { useAuth } from "../../../context/AuthContext";
 
@@ -137,8 +140,7 @@ function toInputDate(value) {
 function addMonthsToInput(inputDate, months) {
   const d = toDate(inputDate);
   if (!d) return "";
-  d.setMonth(d.getMonth() + months);
-  return toInputDate(d);
+  return toInputDate(addMonthsClamped(d, months));
 }
 
 function monthsBetween(start, end) {
@@ -165,19 +167,12 @@ function formatAmount(amount) {
   });
 }
 
-function formatAddress(address) {
-  if (!address) return "No address listed";
-  if (typeof address === "string") return address;
-  const parts = [address.street, address.barangay, address.cityMunicipality, address.province].filter(Boolean);
-  return parts.length ? parts.join(", ") : "No address listed";
-}
-
 // Reads lease data in the same precedence the page always used, so tenants
 // edited before this version (which updated leaseStart/leaseEnd/startDate/
 // endDate but not the registration fields) still show their latest dates.
 function getLeaseInfo(tenant) {
-  const start = toDate(tenant.leaseStart || tenant.startDate || tenant.leaseStartDate);
-  const end = toDate(tenant.leaseEnd || tenant.endDate || tenant.leaseEndDate);
+  const start = toDate(tenant.leaseStart || tenant.startDate || tenant.leaseStartDate || tenant.moveInDate);
+  const end = toDate(tenant.leaseEnd || tenant.endDate || tenant.leaseEndDate || tenant.moveOutDate);
 
   const stored = tenant.leaseDuration;
   let durationLabel = null;
@@ -601,7 +596,7 @@ export default function TenantDetail() {
     const unsubscribe = onSnapshot(
       query(collection(db, "payments"), where("tenantId", "==", tenantId)),
       (snapshot) => {
-        setPayments(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+        setPayments(snapshot.docs.map((d) => normalizePayment({ id: d.id, ...d.data() })));
       },
       (err) => {
         console.error("Error fetching tenant payments:", err);
@@ -765,10 +760,12 @@ export default function TenantDetail() {
       roomId: tenant.roomId || "",
       bedId: tenant.bedId || "",
       monthlyRent:
-        tenant.monthlyRent ||
-        tenant.rentAmount ||
-        tenant.roomMonthlyRate ||
-        assignedRoomForForm?.monthlyRatePerBed ||
+        tenant.monthlyRent ??
+        tenant.rentAmount ??
+        tenant.roomMonthlyRate ??
+        tenant.monthlyRate ??
+        tenant.rent ??
+        assignedRoomForForm?.monthlyRatePerBed ??
         "",
       leaseStart: toInputDate(lease.start),
       leaseDuration,
@@ -987,7 +984,7 @@ export default function TenantDetail() {
       room.id === tenant.roomId
   );
   const monthlyRentValue =
-    tenant.monthlyRent || tenant.rentAmount || tenant.roomMonthlyRate || assignedRoom?.monthlyRatePerBed || 0;
+    tenant.monthlyRent ?? tenant.rentAmount ?? tenant.roomMonthlyRate ?? tenant.monthlyRate ?? tenant.rent ?? assignedRoom?.monthlyRatePerBed ?? 0;
   const roomSub =
     [tenant.bedId, assignedRoom?.floor ? `Floor ${assignedRoom.floor}` : null].filter(Boolean).join(" · ") ||
     "No bed assigned";
@@ -1099,7 +1096,7 @@ export default function TenantDetail() {
           icon={HomeWorkOutlinedIcon}
           label="Property"
           value={property?.name || property?.propertyName || tenant.propertyName || "Unassigned"}
-          sub={formatAddress(property?.address || property)}
+          sub={formatPropertyAddress(property)}
         />
         <OverviewItem
           icon={MeetingRoomOutlinedIcon}

@@ -26,6 +26,7 @@ import NotificationFeed from "../components/NotificationFeed";
 import { signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
+import { checkLeaseEndsOnOwnerAppOpen } from "../utils/leaseEndNotifications";
 
 const drawerWidth = 288;
 const BAR_H = { xs: 56, md: 80 }; // shared by the top bar and the sidebar header so their dividers line up
@@ -109,6 +110,12 @@ export default function CaretakerLayout({ children }) {
           ...(userProfile.exists() ? userProfile.data() : {}),
           ...(caretakerProfile.exists() ? caretakerProfile.data() : {}),
         };
+        const ownerUid = profile.ownerUid || profile.invitedBy || "";
+        if (ownerUid) {
+          checkLeaseEndsOnOwnerAppOpen(ownerUid, user.uid).catch((error) =>
+            console.error("Unable to check lease-end notifications:", error)
+          );
+        }
         if (active) setPermissions(profile.permissions || {});
       } catch (err) {
         console.error("Failed to load caretaker permissions for layout:", err);

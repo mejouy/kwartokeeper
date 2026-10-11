@@ -22,8 +22,9 @@ import PaymentIcon from "@mui/icons-material/Payment";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import LogoutIcon from "@mui/icons-material/Logout";
 import NotificationFeed from "../components/NotificationFeed";
-import { signOut } from "firebase/auth";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import { auth } from "../config/firebase";
+import { checkLeaseEndsOnTenantAppOpen } from "../utils/leaseEndNotifications";
 
 const drawerWidth = 288;
 const BAR_H = { xs: 56, md: 80 }; // shared by the top bar and the sidebar header so their dividers line up
@@ -88,6 +89,27 @@ export default function TenantLayout({ children }) {
   const todayLabel = useTodayLabel();
   const activeNavItem = NAV_ITEMS.find((item) => item.id === activeTab) || NAV_ITEMS[0];
   const isOverview = activeNavItem.id === "overview";
+
+  useEffect(() => {
+    let active = true;
+    let tenantUid = "";
+    const check = () => {
+      if (!active || !tenantUid || document.visibilityState !== "visible") return;
+      checkLeaseEndsOnTenantAppOpen(tenantUid).catch((error) =>
+        console.error("Unable to check tenant lease-end notification:", error)
+      );
+    };
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      tenantUid = user?.uid || "";
+      check();
+    });
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      active = false;
+      unsubscribe();
+      document.removeEventListener("visibilitychange", check);
+    };
+  }, []);
 
   const setActiveTab = (id) => {
     if (id === activeTab) return;

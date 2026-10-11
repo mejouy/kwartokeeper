@@ -44,6 +44,7 @@ import {
 } from "firebase/firestore";
 
 import { db } from "../../config/firebase";
+import { normalizePayment } from "../../utils/normalizePayment";
 import { useAuth } from "../../context/AuthContext";
 
 export default function TenantDetails() {
@@ -208,7 +209,7 @@ export default function TenantDetails() {
         );
 
         const tenantPayments = paymentsSnap.docs
-          .map((doc) => ({
+          .map((doc) => normalizePayment({
             id: doc.id,
             ...doc.data(),
           }))

@@ -31,6 +31,7 @@ import {
 import { doc, setDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { auth, db, firebaseConfig } from "../../../config/firebase";
 import { uploadToCloudinary } from "../../../utils/cloudinary"; 
+import { addMonthsClamped } from "../../../utils/addMonthsClamped";
 import {
   getPropertyRoomOccupancy,
   reconcilePropertyOccupancy,
@@ -323,7 +324,9 @@ export default function RegisterTenant() {
           where("ownerUid", "==", auth.currentUser.uid)
         );
         const snapshot = await getDocs(q);
-        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const loaded = snapshot.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((property) => !["inactive", "archived", "deactivated"].includes(String(property.status || "Active").trim().toLowerCase()));
         setProperties(loaded);
         // Only one property? No need to make the owner pick it.
         if (loaded.length === 1) {
@@ -517,7 +520,6 @@ export default function RegisterTenant() {
       }
 
       const leaseStart = new Date(`${form.leaseStartDate}T00:00:00`);
-      const leaseEnd = new Date(leaseStart);
       const leaseMonths =
         form.leaseDuration === "1_month"
           ? 1
@@ -528,10 +530,6 @@ export default function RegisterTenant() {
               : form.leaseDuration === "12_months"
                 ? 12
                 : null;
-
-      if (leaseMonths !== null) {
-        leaseEnd.setMonth(leaseEnd.getMonth() + leaseMonths);
-      }
 
       // 1. Create the Auth account LAST among the things that can fail, so a
       //    full room or a failed photo upload never leaves behind an orphan
@@ -545,7 +543,7 @@ export default function RegisterTenant() {
       // 4. Construct Tenant Document Payload
       const ownerUid = auth.currentUser?.uid || null;
       const monthlyRent = Number(selectedRoom?.monthlyRatePerBed || 0);
-      const leaseEndDate = leaseMonths !== null ? leaseEnd.toISOString() : null;
+      const leaseEndDate = leaseMonths !== null ? addMonthsClamped(leaseStart, leaseMonths).toISOString() : null;
       const tenantProfile = {
         uid: newUid,
         ownerUid,

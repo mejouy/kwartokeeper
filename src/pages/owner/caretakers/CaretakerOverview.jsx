@@ -32,6 +32,8 @@ import WifiIcon from "@mui/icons-material/Wifi";
 import { useNavigate } from "react-router-dom";
 import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { auth, db } from "../../../config/firebase";
+import { normalizePayment } from "../../../utils/normalizePayment";
+import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
 
 const SECTION_TITLES = {
   overview: "Assigned Property Overview",
@@ -130,7 +132,7 @@ export default function CaretakerOverview({ section = "overview" }) {
               name: combined.name || combined.fullName || "Tenant",
               roomNumber: roomValue,
               contact: combined.phone || combined.contact || combined.email || "—",
-              monthlyRent: Number(combined.monthlyRent || combined.rent || room?.monthlyRatePerBed || 0),
+              monthlyRent: Number(combined.monthlyRent ?? combined.rentAmount ?? combined.roomMonthlyRate ?? combined.monthlyRate ?? combined.rent ?? room?.monthlyRatePerBed ?? 0) || 0,
             });
           });
           if (active) setTenants([...merged.values()]);
@@ -180,7 +182,7 @@ export default function CaretakerOverview({ section = "overview" }) {
           unsubscribePayments = onSnapshot(
             query(collection(db, "payments"), where("propertyId", "==", propertyId)),
             (snapshot) => {
-              if (active) setPayments(snapshot.docs.map((payment) => ({ id: payment.id, ...payment.data() })));
+              if (active) setPayments(snapshot.docs.map((payment) => normalizePayment({ id: payment.id, ...payment.data() })));
             },
             (snapshotError) => {
               console.error("Failed to load rent payments:", snapshotError);
@@ -212,11 +214,7 @@ export default function CaretakerOverview({ section = "overview" }) {
 
   const rooms = Array.isArray(property?.rooms) ? property.rooms : [];
   const propertyName = property?.propertyName || property?.name || "No assigned property";
-  const address = typeof property?.address === "string"
-    ? property.address
-    : [property?.address?.street, property?.address?.barangay, property?.address?.cityMunicipality, property?.address?.province]
-        .filter(Boolean)
-        .join(", ");
+  const address = formatPropertyAddress(property);
   const activeTenants = tenants.filter((tenant) => String(tenant.status || "Active").toLowerCase() !== "inactive");
   const expectedMonthlyRent = activeTenants.reduce((sum, tenant) => sum + (Number(tenant.monthlyRent) || 0), 0);
   const openTickets = tickets.filter((ticket) => String(ticket.status || "Pending").toLowerCase() !== "resolved");

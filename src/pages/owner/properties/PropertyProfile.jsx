@@ -25,17 +25,7 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutlined";
 import { collection, doc, getDoc, onSnapshot, query, where, updateDoc } from "firebase/firestore";
 import { db } from "../../../config/firebase";
 import { getPropertyCoverPhotoUrl } from "../../../utils/getPropertyCoverPhotoUrl";
-
-// Helper function to safely render the address
-const formatAddress = (address) => {
-  if (!address) return "No address specified";
-  if (typeof address === "string") return address;
-
-  const { street, barangay, cityMunicipality, province } = address;
-  const addressParts = [street, barangay, cityMunicipality, province].filter(Boolean);
-
-  return addressParts.length > 0 ? addressParts.join(", ") : "Invalid address format";
-};
+import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
 
 // Date formatting helper
 const formatDate = (value) => {
@@ -78,6 +68,7 @@ const DETAILS_CARD_H = "min(460px, calc(100vh - 128px))";
 const getRoomTenants = (room, tenants) => {
   const roomName = String(room.roomName || room.roomNumber || room.id || "");
   return tenants.filter((tenant) => {
+    if (["inactive", "archived", "deactivated"].includes(String(tenant.status || "Active").trim().toLowerCase())) return false;
     const assignedRoom = tenant.roomId || tenant.roomNumber || tenant.room || "";
     return String(assignedRoom) === roomName;
   });
@@ -364,7 +355,9 @@ export default function PropertyProfile() {  const { id } = useParams();
       if (r.status === "maintenance" || r.underMaintenance) maintenanceRooms++;
     });
 
-    const occupiedBeds = tenants.length;
+    const occupiedBeds = tenants.filter(
+      (tenant) => !["inactive", "archived", "deactivated"].includes(String(tenant.status || "Active").trim().toLowerCase())
+    ).length;
     const vacantBeds = Math.max(0, totalCapacity - occupiedBeds);
 
     return {
@@ -633,7 +626,7 @@ export default function PropertyProfile() {  const { id } = useParams();
             <Box sx={{ ...row, gap: 0.5, color: "text.secondary", minWidth: 0 }}>
               <PlaceOutlinedIcon sx={{ fontSize: 16, flexShrink: 0 }} />
               <Typography variant="body2" sx={{ overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-                {formatAddress(property.address)}
+                {formatPropertyAddress(property)}
               </Typography>
             </Box>
           </Box>

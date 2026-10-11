@@ -154,8 +154,8 @@ export default function OwnerRegister() {
         createdAt: serverTimestamp(),
       });
 
-      // Direct navigation to onboarding setup wizard (or /owner)
-      navigate("/setup");
+      // Show a short welcome page first, then the setup wizard
+      navigate("/welcome");
     } catch (err) {
       setError(mapFirebaseError(err.code));
     } finally {

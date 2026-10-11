@@ -4,6 +4,8 @@ const { getFirestore } = require("firebase-admin/firestore");
 const {
   getLeaseEndDate,
   getReminderThreshold,
+  hasReminderSentToday,
+  getLeaseReminderRecipients,
   buildLeaseReminderNotification,
 } = require("./leaseReminder.js");
 
@@ -17,43 +19,49 @@ async function getPropertyCaretakers(propertyId, ownerId) {
     .where("assignedPropertyId", "==", propertyId)
     .get();
 
-  return snapshot.docs.map((document) => ({
-    id: document.id,
-    ...document.data(),
-  }));
+  return snapshot.docs
+    .map((document) => ({
+      id: document.id,
+      ...document.data(),
+    }))
+    .filter((caretaker) => !["inactive", "archived", "deactivated"].includes(String(caretaker.status || "Active").trim().toLowerCase()));
 }
 
 async function processLeaseReminders() {
   const now = new Date();
-  const tenantsSnapshot = await db.collection("tenants").get();
+  const [tenantsSnapshot, usersSnapshot] = await Promise.all([
+    db.collection("tenants").get(),
+    db.collection("users").where("role", "==", "tenant").get(),
+  ]);
+  const tenantsById = new Map();
+  usersSnapshot.docs.forEach((document) => {
+    tenantsById.set(document.id, { id: document.id, ...document.data() });
+  });
+  tenantsSnapshot.docs.forEach((document) => {
+    tenantsById.set(document.id, {
+      ...(tenantsById.get(document.id) || {}),
+      id: document.id,
+      ...document.data(),
+    });
+  });
 
-  for (const tenantDocument of tenantsSnapshot.docs) {
-    const tenant = { id: tenantDocument.id, ...tenantDocument.data() };
+  for (const tenant of tenantsById.values()) {
+    if (["inactive", "archived", "deactivated"].includes(String(tenant.status || "Active").trim().toLowerCase())) continue;
     const endDate = getLeaseEndDate(tenant);
     const reminder = getReminderThreshold(endDate, now);
     if (!endDate || !reminder) continue;
 
-    const ownerId = tenant.ownerUid || tenant.userId || tenant.uid;
-    const tenantId = tenant.id || tenantDocument.id;
+    const ownerId = tenant.ownerUid || tenant.ownerId || tenant.landlordUid || tenant.userId;
+    const tenantId = tenant.uid || tenant.id;
     const tenantName = tenant.fullName || tenant.name || "Tenant";
     const propertyId = tenant.propertyId || tenant.assignedPropertyId;
-    const recipients = [{ id: tenantId, name: tenantName }];
-
-    if (ownerId) {
-      recipients.push({ id: ownerId, name: "Property owner" });
-    }
+    let caretakers = [];
 
     if (propertyId && ownerId) {
-      const caretakers = await getPropertyCaretakers(propertyId, ownerId);
-      recipients.push(
-        ...caretakers
-          .filter((caretaker) => caretaker.id !== ownerId)
-          .map((caretaker) => ({
-            id: caretaker.id,
-            name: caretaker.name || caretaker.fullName || "Caretaker",
-          }))
-      );
+      caretakers = await getPropertyCaretakers(propertyId, ownerId);
     }
+
+    const recipients = getLeaseReminderRecipients({ tenantId, tenantName, ownerId, caretakers });
 
     for (const recipient of recipients) {
       if (!recipient.id) continue;
@@ -73,11 +81,10 @@ async function processLeaseReminders() {
         .collection("notifications")
         .where("tenantId", "==", tenantId)
         .where("userId", "==", recipient.id)
-        .where("reminderDays", "==", reminder.days)
         .where("leaseEndDate", "==", notification.leaseEndDate)
         .get();
 
-      if (existing.empty) {
+      if (!hasReminderSentToday(existing.docs.map((document) => document.data()), reminder, now)) {
         await db.collection("notifications").add(notification);
       }
     }

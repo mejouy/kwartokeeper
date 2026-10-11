@@ -48,7 +48,7 @@ import { generateTempPassword } from "../../../utils/generateTempPassword";
 const STEPS = [
   { title: "Caretaker details", heading: "Who are you inviting?", sub: "Their name and contact details. They will sign in with this email.", Icon: PersonOutlinedIcon },
   { title: "Property & access", heading: "What can they do?", sub: "Choose the property they will look after and what they are allowed to manage.", Icon: SecurityOutlinedIcon },
-  { title: "Send invite", heading: "How should they get their login?", sub: "Pick how to send the sign-in details, then review before inviting.", Icon: SendOutlinedIcon },
+  { title: "Send login", heading: "How should they get their login?", sub: "Pick how to send the sign-in details, then review before creating the account.", Icon: SendOutlinedIcon },
 ];
 
 const PERMISSION_OPTIONS = [
@@ -354,7 +354,7 @@ export default function InviteCaretaker() {
   const [permissionMode, setPermissionMode] = useState("full"); // "full" | "custom"
   const [customPermissions, setCustomPermissions] = useState(NO_PERMISSIONS);
 
-  const [dispatchMethod, setDispatchMethod] = useState("email"); // "sms" | "email"
+  const [dispatchMethod, setDispatchMethod] = useState("manual"); // "sms" | "manual"
 
   const [submitting, setSubmitting] = useState(false);
   const [sendingSms, setSendingSms] = useState(false);
@@ -379,7 +379,9 @@ export default function InviteCaretaker() {
           where("ownerUid", "==", currentUser.uid),
         );
         const snap = await getDocs(q);
-        const list = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const list = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((property) => !["inactive", "archived", "deactivated"].includes(String(property.status || "Active").trim().toLowerCase()));
         setProperties(list);
         if (list.length === 1) setForm((prev) => ({ ...prev, assignedPropertyId: list[0].id }));
       } catch (err) {
@@ -519,6 +521,8 @@ export default function InviteCaretaker() {
         state: {
           email: payload.email,
           tempPassword,
+          fullName: payload.fullName,
+          phone: formatLocalPhone(payload.mobilePhone),
           dispatchMethod,
           smsStatus,
           smsError,
@@ -560,7 +564,7 @@ export default function InviteCaretaker() {
     ["Mobile phone", formatLocalPhone(toLocalPhMobile(form.mobilePhone)) || "—"],
     ["Property", selectedProperty ? propertyLabel(selectedProperty) : "—"],
     ["Permissions", `${grantedCount} of ${PERMISSION_OPTIONS.length}`],
-    ["Send via", dispatchMethod === "email" ? "Email" : "SMS"],
+    ["Login details", dispatchMethod === "sms" ? "Sent by SMS" : "You share them"],
   ];
 
   return (
@@ -684,7 +688,7 @@ export default function InviteCaretaker() {
                         onChange={(e) => updateField("fullName", e.target.value)}
                         onBlur={validateOnBlur("fullName")}
                         autoComplete="off"
-                        inputProps={{ maxLength: 80 }}
+                        slotProps={{ htmlInput: { maxLength: 80 } }}
                         {...flag("fullName")}
                       />
                     </FormRow>
@@ -698,7 +702,7 @@ export default function InviteCaretaker() {
                         onChange={(e) => updateField("email", e.target.value.replace(/\s/g, ""))}
                         onBlur={validateOnBlur("email")}
                         autoComplete="off"
-                        inputProps={{ maxLength: 254, autoCapitalize: "none", spellCheck: false }}
+                        slotProps={{ htmlInput: { maxLength: 254, autoCapitalize: "none", spellCheck: false } }}
                         helperText={fieldErrors.email || "They will sign in with this email."}
                         error={Boolean(fieldErrors.email)}
                       />
@@ -712,10 +716,11 @@ export default function InviteCaretaker() {
                         value={form.mobilePhone}
                         onChange={(e) => updateField("mobilePhone", e.target.value.replace(/[^0-9+\s()-]/g, ""))}
                         onBlur={validateOnBlur("mobilePhone")}
-                        inputProps={{ maxLength: 18, inputMode: "tel" }}
+
                         helperText={fieldErrors.mobilePhone || "Philippine mobile number, e.g. 09171234567"}
                         error={Boolean(fieldErrors.mobilePhone)}
                         slotProps={{
+                          htmlInput: { maxLength: 18, inputMode: "tel" },
                           input: {
                             startAdornment: (
                               <InputAdornment position="start">
@@ -817,7 +822,7 @@ export default function InviteCaretaker() {
                                 checked={on}
                                 tabIndex={-1}
                                 disableRipple
-                                inputProps={{ "aria-label": p.label }}
+                                slotProps={{ input: { "aria-label": p.label } }}
                                 sx={{ ...permSwitchSx, pointerEvents: "none" }}
                               />
                             </Box>
@@ -836,10 +841,10 @@ export default function InviteCaretaker() {
                 {/* ---------------- STEP 3: SEND ---------------- */}
                 {step === 2 && (
                   <>
-                    <FormRow label="Send invitation via" required>
+                    <FormRow label="How to send the login" required>
                       <TextField select fullWidth value={dispatchMethod} onChange={(e) => setDispatchMethod(e.target.value)}>
-                        <MenuItem value="email">Email invitation link</MenuItem>
-                        <MenuItem value="sms">SMS with temporary password</MenuItem>
+                        <MenuItem value="manual">I'll share it myself (message, email or copy)</MenuItem>
+                        <MenuItem value="sms">Text it to them (SMS)</MenuItem>
                       </TextField>
                     </FormRow>
 
@@ -857,7 +862,7 @@ export default function InviteCaretaker() {
                       <Box sx={{ display: "flex", gap: 1.25, alignItems: "flex-start", color: "text.secondary", mt: 1.5 }}>
                         <InfoOutlinedIcon sx={{ fontSize: 18, mt: "2px", color: "primary.main" }} />
                         <Typography variant="caption" sx={{ fontSize: "0.8rem" }}>
-                          A temporary password is generated when you send the invite. You will always see it on the next screen too, in case a message doesn't arrive.
+                          A temporary password is created with the account. The next screen shows it once, with buttons to copy or share it, even if you choose SMS.
                         </Typography>
                       </Box>
                     </FormRow>
@@ -897,7 +902,7 @@ export default function InviteCaretaker() {
                   <CircularProgress size={20} color="inherit" />
                   {sendingSms ? "Sending SMS…" : "Creating…"}
                 </Box>
-              ) : isLast ? "Send invite" : "Next step"}
+              ) : isLast ? (dispatchMethod === "sms" ? "Create & send SMS" : "Create account") : "Next step"}
             </Button>
           </Box>
         </Box>
