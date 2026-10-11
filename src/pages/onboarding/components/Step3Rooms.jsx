@@ -146,9 +146,9 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
   const [configMode, setConfigMode] = useState(wizardData?.configMode || (totalFloors > 1 ? "perFloor" : "uniform"));
 
   const [uniform, setUniform] = useState({
-    roomsPerFloor: 5,
-    capacityPerRoom: 4,
-    monthlyRate: 2500,
+    roomsPerFloor: Number(wizardData?.uniform?.roomsPerFloor) || 1,
+    capacityPerRoom: Number(wizardData?.uniform?.capacityPerRoom) || 4,
+    monthlyRate: Number(wizardData?.uniform?.monthlyRate) || 2500,
   });
 
   const [floorConfigs, setFloorConfigs] = useState(() =>
@@ -261,6 +261,11 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
       const updatedGroups = [...next[floorIndex].roomGroups];
       let updatedGroup = { ...updatedGroups[groupIndex], [field]: value };
 
+      // Solo / Single rooms are inherently one-bed spaces.
+      if (field === "roomType" && value === "Solo / Single") {
+        updatedGroup.capacityPerRoom = 1;
+      }
+
       // Reset customRoomType if switching room type away from "Custom"
       if (field === "roomType" && value !== "Custom") {
         updatedGroup.customRoomType = "";
@@ -359,6 +364,11 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
         description: cleanWizardData.description || "",
         namingPattern,
         configMode,
+        uniform: {
+          roomsPerFloor: Math.max(1, Number(uniform.roomsPerFloor) || 1),
+          capacityPerRoom: Math.max(0, Number(uniform.capacityPerRoom) || 4),
+          monthlyRate: Math.max(0, Number(uniform.monthlyRate) || 2500),
+        },
       };
 
       updateWizardData?.(finalWizardData);
@@ -378,7 +388,7 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
         return cleanRoom;
       });
 
-      const propertyId = await saveProperty(
+      const savedProperty = await saveProperty(
         finalWizardData,
         safeRooms,
         ownerUid,
@@ -386,7 +396,11 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
       );
 
       navigate("/wizard-success", {
-        state: { summary, propertyId },
+        state: {
+          summary,
+          propertyId: savedProperty.id,
+          coverPhotoUrl: savedProperty.coverPhotoUrl,
+        },
       });
     } catch (err) {
       console.error("Save Property Error:", err);

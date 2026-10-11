@@ -29,10 +29,10 @@ import PropertyList from './pages/owner/properties/PropertyList';
 import PropertyProfile from './pages/owner/properties/PropertyProfile';
 import PropertyDetails from './pages/owner/properties/PropertyDetails'; 
 
-// Tenants (Using the real TenantDetail component instead of the placeholder)
+// Tenants
 import TenantList from './pages/owner/tenants/TenantList';
 import RegisterTenant from './pages/owner/tenants/RegisterTenant';
-import TenantDetail from './pages/owner/tenants/TenantDetail'; // 👈 Pointing to your tenant detail component
+import TenantDetail from './pages/owner/tenants/TenantDetail';
 
 // Caretakers
 import CaretakerList from './pages/owner/caretakers/CaretakerList';
@@ -91,7 +91,8 @@ function App() {
           } 
         />
 
-        {/* --- Tenant & Caretaker Dashboards --- */}
+        {/* --- Tenant Routes --- */}
+        <Route path="/tenant" element={<Navigate to="/tenant/dashboard" replace />} />
         <Route 
           path="/tenant/dashboard" 
           element={
@@ -102,6 +103,9 @@ function App() {
             </ProtectedRoute>
           } 
         />
+
+        {/* --- Caretaker Routes --- */}
+        <Route path="/caretaker" element={<Navigate to="/caretaker/dashboard" replace />} />
         <Route 
           path="/caretaker/dashboard" 
           element={

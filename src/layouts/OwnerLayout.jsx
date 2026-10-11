@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
 import {
   Box,
@@ -8,13 +8,14 @@ import {
   List,
   Typography,
   Divider,
-  IconButton,
   ListItem,
   ListItemButton,
   ListItemIcon,
   ListItemText,
+  Paper,
+  BottomNavigation,
+  BottomNavigationAction,
 } from "@mui/material";
-import MenuIcon from "@mui/icons-material/Menu";
 import DashboardIcon from "@mui/icons-material/Dashboard";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
 import PeopleIcon from "@mui/icons-material/People";
@@ -23,6 +24,8 @@ import PaymentsIcon from "@mui/icons-material/Payments";
 import BuildIcon from "@mui/icons-material/Build";
 import CampaignIcon from "@mui/icons-material/Campaign";
 import LogoutIcon from "@mui/icons-material/Logout";
+import MenuIcon from "@mui/icons-material/Menu";
+import { alpha } from "@mui/material/styles";
 import NotificationFeed from "../components/NotificationFeed";
 
 // Firebase Auth imports
@@ -31,10 +34,53 @@ import { auth } from "../config/firebase";
 
 const drawerWidth = 260;
 
+const formatToday = () =>
+  new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+
+// Today's date, kept correct for apps that stay open for days (common on
+// phones): refreshes just after midnight and whenever the tab/app returns to
+// the foreground, since timers are paused while a phone is asleep.
+function useTodayLabel() {
+  const [label, setLabel] = useState(formatToday);
+
+  useEffect(() => {
+    let timer;
+    const refresh = () => setLabel(formatToday());
+
+    const scheduleMidnightRefresh = () => {
+      const now = new Date();
+      const nextMidnight = new Date(now);
+      nextMidnight.setHours(24, 0, 5, 0); // a few seconds past midnight
+      timer = setTimeout(() => {
+        refresh();
+        scheduleMidnightRefresh();
+      }, nextMidnight - now);
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+
+    scheduleMidnightRefresh();
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, []);
+
+  return label;
+}
+
+// The four destinations owners reach for most get a spot in the phone's
+// bottom bar; everything else lives behind "Menu" (the drawer).
+const BOTTOM_NAV_PATHS = ["/owner", "/owner/properties", "/owner/tenants", "/owner/payments"];
+
 export default function OwnerLayout() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
+  const todayLabel = useTodayLabel();
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -50,7 +96,7 @@ export default function OwnerLayout() {
   };
 
   const menuItems = [
-    { text: "Overview", path: "/owner", icon: <DashboardIcon /> },
+    { text: "Overview", path: "/owner", aliases: ["/owner/dashboard"], icon: <DashboardIcon /> },
     { text: "Properties", path: "/owner/properties", icon: <HomeWorkIcon /> },
     { text: "Tenants", path: "/owner/tenants", icon: <PeopleIcon /> },
     { text: "Caretakers", path: "/owner/caretakers", icon: <AssignmentIndIcon /> },
@@ -59,36 +105,60 @@ export default function OwnerLayout() {
     { text: "Announcements", path: "/owner/announcements", icon: <CampaignIcon /> },
   ];
 
+  const isActive = (item) =>
+    location.pathname === item.path ||
+    (item.aliases || []).includes(location.pathname) ||
+    (item.path !== "/owner" && location.pathname.startsWith(item.path + "/"));
+
+  const activeItem = menuItems.find(isActive);
+  // Overview opens with its own "Welcome" heading and is highlighted in the
+  // nav, so the bar leaves the title empty there and shows today's date next
+  // to the notification bell instead.
+  const isOverview = activeItem?.path === "/owner";
+  const currentTitle = isOverview ? "" : activeItem?.text || "Dashboard";
+
+  const bottomItems = menuItems.filter((item) => BOTTOM_NAV_PATHS.includes(item.path));
+  const activeBottomIndex = bottomItems.findIndex(isActive);
+  // Anything not in the bottom bar (Caretakers, Maintenance, ...) highlights "Menu".
+  const bottomValue = activeBottomIndex === -1 ? bottomItems.length : activeBottomIndex;
+
   const drawer = (
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Top Header */}
-      <Toolbar>
-        <Typography variant="h6" fontWeight="bold" color="primary">
-          Dorm Owner
-        </Typography>
+      {/* Brand header — same height as the app bar so the divider lines up */}
+      <Toolbar sx={{ px: 2.5, height: { xs: 56, md: 64 }, minHeight: { xs: 56, md: 64 } }}>
+        <Box
+          component="img"
+          src="/KwartoKeeper-Secondary-Logo.png"
+          alt="KwartoKeeper"
+          sx={{ display: "block", height: { xs: 34, md: 56 }, maxWidth: "100%", width: "auto", objectFit: "contain" }}
+        />
       </Toolbar>
       <Divider />
 
       {/* Main Navigation Links */}
       <Box sx={{ flexGrow: 1, overflowY: "auto" }}>
-        <List>
+        <List sx={{ py: 1.5 }}>
           {menuItems.map((item) => (
             <ListItem key={item.text} disablePadding>
               <ListItemButton
-                selected={
-                  location.pathname === item.path ||
-                  (item.path !== "/owner" && location.pathname.startsWith(item.path + "/"))
-                }
+                selected={isActive(item)}
                 onClick={() => {
                   navigate(item.path);
                   setMobileOpen(false);
                 }}
                 sx={{
-                  "&.Mui-selected": { bgcolor: "primary.light", color: "primary.main" },
+                  mx: 1.5,
+                  my: 0.25,
+                  borderRadius: 2,
+                  "&.Mui-selected": {
+                    bgcolor: "rgba(255, 69, 0, 0.10)",
+                    color: "primary.main",
+                    "&:hover": { bgcolor: "rgba(255, 69, 0, 0.14)" },
+                  },
                   "&.Mui-selected .MuiListItemIcon-root": { color: "primary.main" },
                 }}
               >
-                <ListItemIcon>{item.icon}</ListItemIcon>
+                <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
                 <ListItemText
                   primary={item.text}
                   slotProps={{ primary: { sx: { fontWeight: 600 } } }}
@@ -101,19 +171,16 @@ export default function OwnerLayout() {
 
       {/* Bottom Pinned Section with Logout */}
       <Divider />
-      <Box sx={{ p: 2 }}>
+      <Box sx={{ p: 1.5, pb: "calc(12px + env(safe-area-inset-bottom, 0px))" }}>
         <ListItemButton
           onClick={handleLogout}
           sx={{
-            borderRadius: 1,
+            borderRadius: 2,
             color: "error.main",
-            "&:hover": {
-              bgcolor: "error.lighter",
-              color: "error.dark",
-            },
+            "&:hover": { bgcolor: "rgba(211, 47, 47, 0.08)" },
           }}
         >
-          <ListItemIcon sx={{ color: "error.main" }}>
+          <ListItemIcon sx={{ color: "error.main", minWidth: 40 }}>
             <LogoutIcon />
           </ListItemIcon>
           <ListItemText
@@ -126,56 +193,127 @@ export default function OwnerLayout() {
   );
 
   return (
-    <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: "background.default" }}>
+    <Box sx={{ display: "flex", minHeight: "100vh", bgcolor: (theme) => alpha(theme.palette.background.paper, 0.35) }}>
       <AppBar
         position="fixed"
+        elevation={0}
         sx={{
-          width: { sm: `calc(100% - ${drawerWidth}px)` },
-          ml: { sm: `${drawerWidth}px` },
-          bgcolor: "background.paper",
+          width: { md: `calc(100% - ${drawerWidth}px)` },
+          ml: { md: `${drawerWidth}px` },
+          bgcolor: "background.default",
           color: "text.primary",
-          boxShadow: 1,
+          borderBottom: "1px solid",
+          borderColor: "divider",
         }}
       >
         <Toolbar>
-          <IconButton color="inherit" edge="start" onClick={handleDrawerToggle} sx={{ mr: 2, display: { sm: "none" } }}>
-            <MenuIcon />
-          </IconButton>
-          
-          <Typography variant="h6" noWrap component="div" fontWeight="600">
-            {menuItems.find((item) =>
-              location.pathname === item.path ||
-              (item.path !== "/owner" && location.pathname.startsWith(item.path + "/"))
-            )?.text || "Dashboard"}
-          </Typography>
-          <Box sx={{ ml: "auto" }}>
+          {/* Phones: brand mark replaces the (now unneeded) hamburger. The
+              drawer opens from "Menu" in the bottom bar. */}
+          <Box
+            component="img"
+            src="/KwartoKeeper-Icon.png"
+            alt="KwartoKeeper"
+            sx={{ display: { xs: "block", md: "none" }, height: 28, width: "auto", mr: 1.5 }}
+          />
+          {currentTitle && (
+            <Typography
+              variant="h6"
+              noWrap
+              component="div"
+              sx={{ minWidth: 0, fontFamily: '"Inter", sans-serif', fontWeight: 700 }}
+            >
+              {currentTitle}
+            </Typography>
+          )}
+          <Box sx={{ ml: "auto", display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
+            {isOverview && (
+              <Typography variant="body2" noWrap sx={{ color: "text.secondary", fontWeight: 600 }}>
+                {todayLabel}
+              </Typography>
+            )}
             <NotificationFeed />
           </Box>
         </Toolbar>
       </AppBar>
 
-      <Box component="nav" sx={{ width: { sm: drawerWidth }, flexShrink: { sm: 0 } }}>
+      <Box component="nav" sx={{ width: { md: drawerWidth }, flexShrink: { md: 0 } }}>
         <Drawer
           variant="temporary"
           open={mobileOpen}
           onClose={handleDrawerToggle}
           ModalProps={{ keepMounted: true }}
-          sx={{ display: { xs: "block", sm: "none" }, "& .MuiDrawer-paper": { boxSizing: "border-box", width: drawerWidth } }}
+          sx={{ display: { xs: "block", md: "none" }, "& .MuiDrawer-paper": { boxSizing: "border-box", width: drawerWidth } }}
         >
           {drawer}
         </Drawer>
         <Drawer
           variant="permanent"
-          sx={{ display: { xs: "none", sm: "block" }, "& .MuiDrawer-paper": { boxSizing: "border-box", width: drawerWidth } }}
+          sx={{ display: { xs: "none", md: "block" }, "& .MuiDrawer-paper": { boxSizing: "border-box", width: drawerWidth } }}
           open
         >
           {drawer}
         </Drawer>
       </Box>
 
-      <Box component="main" sx={{ flexGrow: 1, p: 3, width: { sm: `calc(100% - ${drawerWidth}px)` }, mt: 8 }}>
+      <Box
+        component="main"
+        sx={{
+          flexGrow: 1,
+          minWidth: 0, // lets wide children shrink instead of pushing the page sideways on phones
+          width: { md: `calc(100% - ${drawerWidth}px)` },
+          p: { xs: 2, sm: 3 },
+          // leave room for the fixed bottom bar (and the iPhone home indicator)
+          pb: { xs: "calc(88px + env(safe-area-inset-bottom, 0px))", md: 3 },
+        }}
+      >
+        <Toolbar />
         <Outlet />
       </Box>
+
+      {/* Phone-only bottom navigation */}
+      <Paper
+        elevation={0}
+        sx={{
+          display: { xs: "block", md: "none" },
+          position: "fixed",
+          bottom: 0,
+          left: 0,
+          right: 0,
+          zIndex: (theme) => theme.zIndex.appBar,
+          borderTop: "1px solid",
+          borderColor: "divider",
+          borderRadius: 0,
+          bgcolor: "background.default",
+          pb: "env(safe-area-inset-bottom, 0px)",
+        }}
+      >
+        <BottomNavigation
+          showLabels
+          value={bottomValue}
+          onChange={(event, newValue) => {
+            if (newValue === bottomItems.length) {
+              setMobileOpen(true);
+            } else {
+              navigate(bottomItems[newValue].path);
+            }
+          }}
+          sx={{ bgcolor: "transparent", height: 64 }}
+        >
+          {bottomItems.map((item) => (
+            <BottomNavigationAction
+              key={item.text}
+              label={item.text}
+              icon={item.icon}
+              sx={{ minWidth: 0, "& .MuiBottomNavigationAction-label": { fontWeight: 600 } }}
+            />
+          ))}
+          <BottomNavigationAction
+            label="Menu"
+            icon={<MenuIcon />}
+            sx={{ minWidth: 0, "& .MuiBottomNavigationAction-label": { fontWeight: 600 } }}
+          />
+        </BottomNavigation>
+      </Paper>
     </Box>
   );
 }

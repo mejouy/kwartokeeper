@@ -1,235 +1,516 @@
-import React, { useState, useEffect } from "react";
+// src/pages/admin/ManageOwners.jsx
+
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Paper,
-  Typography,
-  TableContainer,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  Chip,
-  Box,
-  TextField,
-  CircularProgress,
-  Avatar,
-  InputAdornment,
-  Button,
-  Tabs,
-  Tab
-} from "@mui/material";
+import { Alert, Avatar, Box, Button, Chip, IconButton, InputBase, LinearProgress, Paper, Skeleton, Typography } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import SearchIcon from "@mui/icons-material/Search";
+import CloseIcon from "@mui/icons-material/Close";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import SupervisorAccountOutlinedIcon from "@mui/icons-material/SupervisorAccountOutlined";
+import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
-import { db } from "../../config/firebase"; // Adjust path if necessary
+import { db } from "../../config/firebase";
+
+const row = { display: "flex", alignItems: "center" };
+const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
+const COLS = "minmax(0, 1.8fr) 84px minmax(0, 1.1fr) 84px 112px 24px";
+
+const toMillis = (ts) => (ts?.toMillis ? ts.toMillis() : 0);
+const fmtDate = (ts) => {
+  const ms = toMillis(ts);
+  return ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Recently";
+};
+const keyOf = (v) => String(v || "").trim().toLowerCase();
+
+const ownerNameOf = (o) =>
+  o.fullName || o.name || (o.firstName && o.lastName ? `${o.firstName} ${o.lastName}` : "New owner");
+
+// The admin pages store "status"; the owner dashboard reads "approvalStatus".
+// Honour either so an owner shows up correctly whichever one was written.
+// "approved" is shown as Active; no status at all counts as Active too.
+const statusOf = (o) => {
+  if (o.approvalStatus === "rejected") return "rejected";
+  const raw = o.status || o.approvalStatus || "active";
+  return raw === "approved" ? "active" : raw;
+};
+
+const STATUS_META = {
+  pending: { label: "Pending", tone: "warning" },
+  suspended: { label: "Suspended", tone: "error" },
+  rejected: { label: "Rejected", tone: "error" },
+  active: { label: "Active", tone: "success" },
+};
+const metaOf = (s) => STATUS_META[s] || STATUS_META.active;
+
+const initials = (name) =>
+  name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0].toUpperCase())
+    .join("") || "?";
+
+function StatusPill({ status }) {
+  const { label, tone } = metaOf(status);
+  return (
+    <Chip
+      label={label}
+      size="small"
+      sx={{
+        fontWeight: 700,
+        bgcolor: (t) => alpha(t.palette[tone].main, 0.13),
+        color: (t) => t.palette[tone].dark,
+      }}
+    />
+  );
+}
+
+function SummaryStrip({ items }) {
+  return (
+    <Paper
+      elevation={0}
+      sx={{
+        ...cardSx,
+        overflow: "hidden",
+        display: "grid",
+        gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" },
+        mb: { xs: 2, sm: 2.5 },
+      }}
+    >
+      {items.map((item, i) => (
+        <Box
+          key={item.label}
+          sx={{
+            px: { xs: 1.75, sm: 2.5 },
+            py: { xs: 1.25, sm: 1.75 },
+            minWidth: 0,
+            borderTop: { xs: i > 1 ? "1px solid" : "none", md: "none" },
+            borderLeft: { xs: i % 2 === 1 ? "1px solid" : "none", md: i === 0 ? "none" : "1px solid" },
+            borderColor: "divider",
+          }}
+        >
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }} noWrap component="div">
+            {item.label}
+          </Typography>
+          <Typography
+            noWrap
+            sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: { xs: "1.2rem", sm: "1.45rem" }, lineHeight: 1.25, color: item.color }}
+          >
+            {item.value}
+          </Typography>
+        </Box>
+      ))}
+    </Paper>
+  );
+}
 
 export default function ManageOwners() {
   const navigate = useNavigate();
   const [owners, setOwners] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [filterTab, setFilterTab] = useState("all");
+  const [properties, setProperties] = useState([]);
+  const [tenantCounts, setTenantCounts] = useState({});
 
   useEffect(() => {
     const q = query(collection(db, "users"), where("role", "==", "owner"));
-    
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const ownerData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-      
-      // Sort by creation date (newest first) to keep pending registrations near the top
-      ownerData.sort((a, b) => {
-        const timeA = a.createdAt?.toMillis ? a.createdAt.toMillis() : 0;
-        const timeB = b.createdAt?.toMillis ? b.createdAt.toMillis() : 0;
-        return timeB - timeA;
-      });
 
-      setOwners(ownerData);
-      setLoading(false);
-    });
+    return onSnapshot(
+      q,
+      (snapshot) => {
+        const ownerData = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
 
-    return () => unsubscribe();
+        // Pending registrations first, then newest first
+        ownerData.sort((a, b) => {
+          const pa = statusOf(a) === "pending" ? 0 : 1;
+          const pb = statusOf(b) === "pending" ? 0 : 1;
+          if (pa !== pb) return pa - pb;
+          return toMillis(b.createdAt) - toMillis(a.createdAt);
+        });
+
+        setOwners(ownerData);
+        setError("");
+        setLoading(false);
+      },
+      (err) => {
+        console.error("Error loading owners:", err);
+        setError("Could not load owners.");
+        setLoading(false);
+      }
+    );
   }, []);
 
-  const filteredOwners = owners.filter(o => {
-    // 1. Filter by Tab Status
-    const status = o.status || "active"; // fallback if no status field exists yet
-    if (filterTab !== "all" && status !== filterTab) {
-      // If tab is "active", it should match "active" or "approved"
-      if (filterTab === "active" && status === "approved") {
-        // allow
-      } else {
-        return false;
-      }
-    }
+  // Portfolio numbers per owner (best effort: the list still works without them)
+  useEffect(() => {
+    const unsubProps = onSnapshot(
+      collection(db, "properties"),
+      (snap) => setProperties(snap.docs.map((d) => d.data())),
+      (e) => console.warn("Could not load properties:", e)
+    );
+    const unsubTenants = onSnapshot(
+      collection(db, "tenants"),
+      (snap) => {
+        const map = {};
+        snap.docs.forEach((d) => {
+          const k = keyOf(d.data().ownerUid);
+          if (k) map[k] = (map[k] || 0) + 1;
+        });
+        setTenantCounts(map);
+      },
+      (e) => console.warn("Could not load tenants:", e)
+    );
+    return () => {
+      unsubProps();
+      unsubTenants();
+    };
+  }, []);
 
-    // 2. Filter by Search Query
-    const term = search.toLowerCase();
-    const name = (o.fullName || o.name || `${o.firstName || ""} ${o.lastName || ""}`).toLowerCase();
-    const email = (o.email || "").toLowerCase();
-    const phone = (o.phoneNumber || o.phone || "").toLowerCase();
-    
-    return name.includes(term) || email.includes(term) || phone.includes(term);
-  });
+  const portfolioByOwner = useMemo(() => {
+    const map = {};
+    properties.forEach((p) => {
+      const k = keyOf(p.ownerUid ?? p.ownerId ?? p.createdBy);
+      if (!k) return;
+      const m = (map[k] = map[k] || { properties: 0, beds: 0, occupied: 0 });
+      m.properties += 1;
+      m.beds += Number(p.totalBeds) || 0;
+      m.occupied += Number(p.occupiedBeds) || 0;
+    });
+    return map;
+  }, [properties]);
 
-  // Helper to determine chip styling based on status
-  const getStatusProps = (status) => {
-    switch (status) {
-      case "pending":
-        return { label: "Pending", color: "warning", variant: "filled" };
-      case "suspended":
-        return { label: "Suspended", color: "error", variant: "filled" };
-      case "active":
-      case "approved":
-      default:
-        return { label: "Active", color: "success", variant: "outlined" };
-    }
-  };
+  const counts = useMemo(() => {
+    const c = { all: owners.length, pending: 0, active: 0, suspended: 0, rejected: 0 };
+    owners.forEach((o) => {
+      const s = statusOf(o);
+      if (c[s] !== undefined) c[s] += 1;
+      else c.active += 1;
+    });
+    return c;
+  }, [owners]);
+
+  const tabs = useMemo(() => {
+    const base = [
+      { value: "all", label: "All" },
+      { value: "pending", label: "Pending" },
+      { value: "active", label: "Active" },
+      { value: "suspended", label: "Suspended" },
+    ];
+    // Only show Rejected if there are any
+    if (counts.rejected > 0) base.push({ value: "rejected", label: "Rejected" });
+    return base;
+  }, [counts.rejected]);
+
+  const filteredOwners = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return owners.filter((o) => {
+      const s = statusOf(o);
+      if (filterTab !== "all" && s !== filterTab) return false;
+      if (!term) return true;
+      const name = ownerNameOf(o).toLowerCase();
+      const email = (o.email || "").toLowerCase();
+      const phone = (o.phoneNumber || o.phone || "").toLowerCase();
+      return name.includes(term) || email.includes(term) || phone.includes(term);
+    });
+  }, [owners, filterTab, search]);
+
+  const pendingOwners = useMemo(() => owners.filter((o) => statusOf(o) === "pending"), [owners]);
+  // Pending applications get their own cards on the default view; the table below then lists everyone else.
+  const showPendingCards = filterTab === "all" && !search.trim() && pendingOwners.length > 0;
+  const listOwners = showPendingCards ? filteredOwners.filter((o) => statusOf(o) !== "pending") : filteredOwners;
+
+  const open = (id) => navigate(`/admin/owners/${id}`);
 
   return (
-    <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
-      <Box 
-        sx={{ 
-          display: "flex", 
-          justifyContent: "space-between", 
-          alignItems: { xs: "flex-start", sm: "center" }, 
-          flexDirection: { xs: "column", sm: "row" },
-          gap: 2,
-          mb: 3 
-        }}
-      >
-        <Box>
-          <Typography variant="h6" fontWeight="700">Property Owners Directory</Typography>
-          <Typography variant="body2" color="text.secondary">
-            Manage registered platform owners and review pending applications.
-          </Typography>
-        </Box>
+    <Box>
+      <Typography variant="body2" color="text.secondary" sx={{ mb: { xs: 2, sm: 2.5 } }}>
+        Manage registered platform owners and review pending applications.
+      </Typography>
 
-        <TextField
-          size="small"
-          placeholder="Search name, email, or phone..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          sx={{ minWidth: { xs: "100%", sm: 280 } }}
-          InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" color="action" />
-              </InputAdornment>
-            ),
-          }}
-        />
-      </Box>
+      {error && <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{error}</Alert>}
 
-      {/* Status Filters */}
-      <Box sx={{ borderBottom: 1, borderColor: 'divider', mb: 2 }}>
-        <Tabs 
-          value={filterTab} 
-          onChange={(e, newValue) => setFilterTab(newValue)} 
-          textColor="primary"
-          indicatorColor="primary"
-        >
-          <Tab label="All Owners" value="all" sx={{ fontWeight: 600, textTransform: "none" }} />
-          <Tab label="Pending" value="pending" sx={{ fontWeight: 600, textTransform: "none" }} />
-          <Tab label="Active" value="active" sx={{ fontWeight: 600, textTransform: "none" }} />
-          <Tab label="Suspended" value="suspended" sx={{ fontWeight: 600, textTransform: "none" }} />
-        </Tabs>
-      </Box>
+      {loading ? (
+        <>
+          <Skeleton variant="rounded" height={72} sx={{ borderRadius: 3, mb: 2 }} />
+          <Skeleton variant="rounded" height={46} sx={{ borderRadius: 3, mb: 2 }} />
+          <Skeleton variant="rounded" height={260} sx={{ borderRadius: 3 }} />
+        </>
+      ) : (
+        <>
+          {owners.length > 0 && (
+            <SummaryStrip
+              items={[
+                { label: "Owners", value: counts.all },
+                { label: "Active", value: counts.active, color: counts.active > 0 ? "success.main" : undefined },
+                { label: "Pending review", value: counts.pending, color: counts.pending > 0 ? "warning.main" : undefined },
+                { label: "Suspended", value: counts.suspended, color: counts.suspended > 0 ? "error.main" : undefined },
+              ]}
+            />
+          )}
 
-      <TableContainer>
-        <Table>
-          <TableHead sx={{ bgcolor: "background.default" }}>
-            <TableRow>
-              <TableCell><strong>Owner Name</strong></TableCell>
-              <TableCell><strong>Email</strong></TableCell>
-              <TableCell><strong>Phone</strong></TableCell>
-              <TableCell><strong>Status</strong></TableCell>
-              <TableCell align="right"><strong>Action</strong></TableCell>
-            </TableRow>
-          </TableHead>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                  <CircularProgress size={30} />
-                </TableCell>
-              </TableRow>
-            ) : filteredOwners.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} align="center" sx={{ py: 4 }}>
-                  <Typography color="text.secondary">
-                    {search ? "No owners match your search." : `No ${filterTab !== "all" ? filterTab : "registered"} owners found.`}
-                  </Typography>
-                </TableCell>
-              </TableRow>
-            ) : (
-              filteredOwners.map((owner) => {
-                // Handle different name field variations (fullName, name, or firstName + lastName)
-                const ownerName = owner.fullName || owner.name || 
-                  (owner.firstName && owner.lastName ? `${owner.firstName} ${owner.lastName}` : "New Owner");
-                
-                const statusProps = getStatusProps(owner.status);
+          {owners.length > 0 && (
+            <Box sx={{ mb: { xs: 2, sm: 2.5 } }}>
+              <Paper elevation={0} sx={{ ...row, gap: 1, px: 1.5, ...cardSx, height: 46, mb: 1.5 }}>
+                <SearchIcon sx={{ color: "text.secondary" }} />
+                <InputBase
+                  fullWidth
+                  placeholder="Search name, email or phone"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  inputProps={{ "aria-label": "Search owners" }}
+                />
+                {search && (
+                  <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
+                    <CloseIcon fontSize="small" />
+                  </IconButton>
+                )}
+              </Paper>
 
-                return (
-                  <TableRow 
-                    key={owner.id} 
-                    hover 
-                    onClick={() => navigate(`/admin/owners/${owner.id}`)}
-                    sx={{ cursor: "pointer" }}
-                  >
-                    <TableCell>
-                      <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-                        <Avatar sx={{ width: 36, height: 36, fontSize: "0.9rem", bgcolor: "primary.main", fontWeight: 700 }}>
-                          {ownerName.charAt(0).toUpperCase()}
+              <Box
+                sx={{
+                  display: "flex",
+                  gap: 1,
+                  overflowX: "auto",
+                  mx: { xs: -2, sm: 0 },
+                  px: { xs: 2, sm: 0 },
+                  scrollbarWidth: "none",
+                  "&::-webkit-scrollbar": { display: "none" },
+                }}
+              >
+                {tabs.map((t) => (
+                  <Chip
+                    key={t.value}
+                    label={`${t.label} · ${counts[t.value]}`}
+                    clickable
+                    onClick={() => setFilterTab(t.value)}
+                    color={filterTab === t.value ? "primary" : "default"}
+                    variant={filterTab === t.value ? "filled" : "outlined"}
+                    sx={{ fontWeight: 700, flexShrink: 0, height: 34, borderRadius: 17 }}
+                  />
+                ))}
+              </Box>
+            </Box>
+          )}
+
+          {/* Needs review: pending applications as prominent cards */}
+          {showPendingCards && (
+            <Box sx={{ mb: { xs: 2.5, sm: 3 } }}>
+              <Box sx={{ ...row, gap: 1, mb: 1.25 }}>
+                <FactCheckOutlinedIcon sx={{ color: "warning.main" }} />
+                <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800 }}>
+                  Needs your review
+                </Typography>
+                <Chip size="small" label={pendingOwners.length} sx={{ fontWeight: 800, bgcolor: (t) => alpha(t.palette.warning.main, 0.16), color: "warning.dark" }} />
+              </Box>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))", xl: "repeat(3, minmax(0, 1fr))" }, gap: { xs: 1.5, sm: 2 } }}>
+                {pendingOwners.map((o) => {
+                  const name = ownerNameOf(o);
+                  const hasDocs = !!o.verificationDocs;
+                  return (
+                    <Paper
+                      key={o.id}
+                      elevation={0}
+                      sx={{
+                        ...cardSx,
+                        p: 2,
+                        borderColor: (t) => alpha(t.palette.warning.main, 0.5),
+                        bgcolor: (t) => alpha(t.palette.warning.main, 0.06),
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 1.5,
+                        minWidth: 0,
+                      }}
+                    >
+                      <Box sx={{ ...row, gap: 1.5, minWidth: 0 }}>
+                        <Avatar sx={{ width: 44, height: 44, bgcolor: (t) => alpha(t.palette.warning.main, 0.2), color: "warning.dark", fontWeight: 800 }}>
+                          {initials(name)}
                         </Avatar>
-                        <Box>
-                          <Typography variant="subtitle2" fontWeight="700">
-                            {ownerName}
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" display={{ xs: "block", sm: "none" }}>
-                            {owner.email || "No Email"}
+                        <Box sx={{ minWidth: 0 }}>
+                          <Typography noWrap sx={{ fontWeight: 800 }}>{name}</Typography>
+                          <Typography variant="caption" color="text.secondary" noWrap component="div">
+                            {o.email || "No email"}
                           </Typography>
                         </Box>
                       </Box>
-                    </TableCell>
-
-                    <TableCell>{owner.email || "—"}</TableCell>
-                    
-                    <TableCell>{owner.phoneNumber || owner.phone || "—"}</TableCell>
-                    
-                    <TableCell>
-                      <Chip 
-                        label={statusProps.label} 
-                        color={statusProps.color} 
-                        size="small" 
-                        variant={statusProps.variant}
-                        sx={{ fontWeight: 600 }}
-                      />
-                    </TableCell>
-
-                    <TableCell align="right">
-                      <Button
-                        size="small"
-                        endIcon={<ChevronRightIcon />}
-                        onClick={(e) => {
-                          e.stopPropagation(); // Prevents double triggers
-                          navigate(`/admin/owners/${owner.id}`);
-                        }}
-                        sx={{ fontWeight: 600 }}
-                      >
-                        {owner.status === "pending" ? "Review" : "View Account"}
+                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
+                        <Chip size="small" label={`Applied ${fmtDate(o.createdAt)}`} sx={{ fontWeight: 700 }} />
+                        <Chip
+                          size="small"
+                          label={hasDocs ? "Documents uploaded" : "No documents yet"}
+                          sx={{
+                            fontWeight: 700,
+                            bgcolor: (t) => alpha(t.palette[hasDocs ? "success" : "error"].main, 0.13),
+                            color: (t) => t.palette[hasDocs ? "success" : "error"].dark,
+                          }}
+                        />
+                      </Box>
+                      <Button variant="contained" onClick={() => open(o.id)} sx={{ fontWeight: 700, borderRadius: 2.5 }}>
+                        Review application
                       </Button>
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </TableContainer>
-    </Paper>
+                    </Paper>
+                  );
+                })}
+              </Box>
+            </Box>
+          )}
+
+          {listOwners.length === 0 && !showPendingCards ? (
+            <Paper
+              elevation={0}
+              sx={{ ...cardSx, borderStyle: owners.length === 0 ? "dashed" : "solid", py: { xs: 5, sm: 7 }, px: 3, textAlign: "center" }}
+            >
+              <Box sx={{ width: 64, height: 64, borderRadius: "50%", mx: "auto", mb: 2, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
+                <SupervisorAccountOutlinedIcon sx={{ fontSize: 30, color: "primary.main" }} />
+              </Box>
+              <Typography sx={{ fontWeight: 700 }}>
+                {owners.length === 0 ? "No owners yet" : "No owners found"}
+              </Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                {owners.length === 0
+                  ? "Owners appear here after they register."
+                  : search
+                    ? "Try a different search."
+                    : `No ${filterTab} owners.`}
+              </Typography>
+            </Paper>
+          ) : listOwners.length > 0 ? (
+            <>
+              {showPendingCards && (
+                <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, mb: 1.25 }}>
+                  All owners
+                </Typography>
+              )}
+              <Paper elevation={0} sx={{ ...cardSx, overflow: "hidden" }}>
+                {/* Column headings (desktop) */}
+                <Box
+                  sx={{
+                    display: { xs: "none", md: "grid" },
+                    gridTemplateColumns: COLS,
+                    columnGap: 2,
+                    px: 2.5,
+                    py: 1.25,
+                    bgcolor: (t) => alpha(t.palette.text.primary, 0.035),
+                    borderBottom: "1px solid",
+                    borderColor: "divider",
+                  }}
+                >
+                  {["Owner", "Properties", "Beds occupied", "Tenants", "Status", ""].map((h, i) => (
+                    <Typography key={i} variant="caption" color="text.secondary" sx={{ fontWeight: 800, letterSpacing: 0.4 }}>
+                      {h.toUpperCase()}
+                    </Typography>
+                  ))}
+                </Box>
+
+                {listOwners.map((owner) => {
+                  const name = ownerNameOf(owner);
+                  const status = statusOf(owner);
+                  const tone = metaOf(status).tone;
+                  const phone = owner.phoneNumber || owner.phone || "";
+                  const k = keyOf(owner.id);
+                  const pf = portfolioByOwner[k] || { properties: 0, beds: 0, occupied: 0 };
+                  const tenantsN = tenantCounts[k] || 0;
+                  const pct = pf.beds > 0 ? Math.min(100, Math.round((pf.occupied / pf.beds) * 100)) : 0;
+
+                  return (
+                    <Box
+                      key={owner.id}
+                      component="button"
+                      type="button"
+                      onClick={() => open(owner.id)}
+                      sx={{
+                        display: "grid",
+                        gridTemplateColumns: { xs: "minmax(0, 1fr) auto", md: COLS },
+                        columnGap: 2,
+                        rowGap: 1,
+                        alignItems: "center",
+                        width: "100%",
+                        textAlign: "left",
+                        font: "inherit",
+                        color: "inherit",
+                        cursor: "pointer",
+                        bgcolor: "transparent",
+                        border: 0,
+                        borderTop: "1px solid",
+                        borderColor: "divider",
+                        px: { xs: 2, sm: 2.5 },
+                        py: 1.5,
+                        transition: "background-color .15s",
+                        "&:first-of-type": { borderTop: "none" },
+                        "&:hover": { bgcolor: (t) => alpha(t.palette.text.primary, 0.035) },
+                        "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 },
+                      }}
+                    >
+                      <Box sx={{ ...row, gap: 1.5, minWidth: 0 }}>
+                        <Avatar
+                          sx={{
+                            width: 42,
+                            height: 42,
+                            fontWeight: 800,
+                            fontSize: 15,
+                            bgcolor: (t) => (tone === "success" ? "rgba(255, 69, 0, 0.12)" : alpha(t.palette[tone].main, 0.16)),
+                            color: (t) => (tone === "success" ? t.palette.primary.main : t.palette[tone].dark),
+                          }}
+                        >
+                          {initials(name)}
+                        </Avatar>
+                        <Box sx={{ minWidth: 0 }}>
+                          <Typography noWrap sx={{ fontWeight: 700 }}>{name}</Typography>
+                          <Typography variant="caption" color="text.secondary" noWrap component="div">
+                            {owner.email || "No email"}
+                            {phone ? ` · ${phone}` : ""}
+                          </Typography>
+                        </Box>
+                      </Box>
+
+                      {/* desktop columns */}
+                      <Typography variant="body2" sx={{ display: { xs: "none", md: "block" }, fontWeight: 700 }}>
+                        {pf.properties}
+                      </Typography>
+
+                      <Box sx={{ display: { xs: "none", md: "block" }, minWidth: 0 }}>
+                        {pf.beds > 0 ? (
+                          <>
+                            <Typography variant="caption" sx={{ fontWeight: 700 }}>
+                              {pf.occupied}/{pf.beds} · {pct}%
+                            </Typography>
+                            <LinearProgress
+                              variant="determinate"
+                              value={pct}
+                              color={pct >= 70 ? "success" : "primary"}
+                              sx={{ height: 5, borderRadius: 3, mt: 0.5, bgcolor: (t) => alpha(t.palette.text.primary, 0.08) }}
+                            />
+                          </>
+                        ) : (
+                          <Typography variant="caption" color="text.secondary">—</Typography>
+                        )}
+                      </Box>
+
+                      <Typography variant="body2" sx={{ display: { xs: "none", md: "block" }, fontWeight: 700 }}>
+                        {tenantsN}
+                      </Typography>
+
+                      <Box sx={{ justifySelf: { xs: "end", md: "start" } }}>
+                        <StatusPill status={status} />
+                      </Box>
+
+                      <ChevronRightIcon sx={{ color: "text.secondary", display: { xs: "none", md: "block" } }} />
+
+                      {/* phone: portfolio line */}
+                      <Box sx={{ display: { xs: "flex", md: "none" }, gridColumn: "1 / -1", gap: 0.75, flexWrap: "wrap" }}>
+                        <Chip size="small" label={`${pf.properties} ${pf.properties === 1 ? "property" : "properties"}`} sx={{ fontWeight: 700 }} />
+                        <Chip size="small" label={`${tenantsN} ${tenantsN === 1 ? "tenant" : "tenants"}`} sx={{ fontWeight: 700 }} />
+                        {pf.beds > 0 && <Chip size="small" label={`${pct}% occupied`} sx={{ fontWeight: 700 }} />}
+                      </Box>
+                    </Box>
+                  );
+                })}
+              </Paper>
+            </>
+          ) : null}
+        </>
+      )}
+    </Box>
   );
 }

@@ -1,18 +1,27 @@
-import { useState, useEffect } from "react";
+// src/pages/owner/tenants/RegisterTenant.jsx
+
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
-  Paper,
   Typography,
   TextField,
   Button,
   MenuItem,
-  Divider,
   Alert,
   CircularProgress,
   IconButton,
+  InputAdornment,
 } from "@mui/material";
-import ArrowBackIcon from "@mui/icons-material/ArrowBack";
+import CloseIcon from "@mui/icons-material/Close";
+import CheckIcon from "@mui/icons-material/Check";
+import CloudUploadOutlinedIcon from "@mui/icons-material/CloudUploadOutlined";
+import PersonOutlinedIcon from "@mui/icons-material/PersonOutlined";
+import BedOutlinedIcon from "@mui/icons-material/BedOutlined";
+import EventNoteOutlinedIcon from "@mui/icons-material/EventNoteOutlined";
+import BadgeOutlinedIcon from "@mui/icons-material/BadgeOutlined";
+import PhoneOutlinedIcon from "@mui/icons-material/PhoneOutlined";
+import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import { initializeApp, deleteApp, getApps } from "firebase/app";
 import {
   getAuth,
@@ -21,20 +30,203 @@ import {
 } from "firebase/auth";
 import { doc, setDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { auth, db, firebaseConfig } from "../../../config/firebase";
-import { uploadToCloudinary } from "../../../utils/cloudinary"; // Cloudinary helper
+import { uploadToCloudinary } from "../../../utils/cloudinary"; 
+import {
+  getPropertyRoomOccupancy,
+  reconcilePropertyOccupancy,
+} from "../../../utils/reconcilePropertyOccupancy";
+
+// ---------------------------------------------------------------------------
+// Same layout as the property setup (PropertyWizard): dark sidebar with the
+// step list and dorm facade on the left, white content column on the right.
+// ---------------------------------------------------------------------------
+const STEPS = [
+  { title: "Tenant details", heading: "Who is moving in?", sub: "Contact details and a valid ID, so you can verify the tenant.", Icon: PersonOutlinedIcon },
+  { title: "Room & bed", heading: "Where will they stay?", sub: "Pick the property, room and bed to assign.", Icon: BedOutlinedIcon },
+  { title: "Lease terms", heading: "How long, and from when?", sub: "Set the lease, then review everything before registering.", Icon: EventNoteOutlinedIcon },
+];
+
+const MAX_ID_PHOTO_MB = 8;
+
+const FACADE_ROWS = 5;
+const FACADE_COLS = 5;
+const LIT_PATTERN = [
+  1, 0, 0, 1, 0,
+  0, 0, 1, 0, 0,
+  1, 0, 0, 0, 1,
+  0, 1, 0, 0, 0,
+  0, 0, 1, 0, 1,
+];
+
+function DormFacade() {
+  const windows = useMemo(() => {
+    const w = [];
+    const gap = 16;
+    const size = 30;
+    for (let row = 0; row < FACADE_ROWS; row++) {
+      for (let col = 0; col < FACADE_COLS; col++) {
+        const idx = row * FACADE_COLS + col;
+        w.push({ x: col * (size + gap), y: row * (size + gap), lit: LIT_PATTERN[idx] === 1, size });
+      }
+    }
+    return w;
+  }, []);
+
+  const width = FACADE_COLS * (30 + 16) - 16;
+  const height = FACADE_ROWS * (30 + 16) - 16;
+
+  return (
+    <svg
+      viewBox={`0 0 ${width} ${height}`}
+      width="100%"
+      style={{ maxWidth: 220, display: "block" }}
+      role="img"
+      aria-label="Illustration of a dormitory building at night, with illuminated windows"
+    >
+      {windows.map((win, i) => (
+        <rect
+          key={i}
+          x={win.x}
+          y={win.y}
+          width={win.size}
+          height={win.size}
+          rx={4}
+          fill={win.lit ? "#ff4500" : "rgba(202, 220, 246, 0.16)"}
+          opacity={win.lit ? 0.92 : 1}
+        />
+      ))}
+    </svg>
+  );
+}
+
+function StepList({ activeStep }) {
+  return (
+    <Box sx={{ display: "flex", flexDirection: "column" }}>
+      {STEPS.map(({ title, Icon }, i) => {
+        const isActive = i === activeStep;
+        const isDone = i < activeStep;
+        const isFilled = isActive || isDone;
+        return (
+          <Box key={title} sx={{ display: "flex", alignItems: "flex-start", gap: 1.5 }}>
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+              <Box
+                sx={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: "50%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                  bgcolor: isFilled ? "primary.main" : "rgba(202, 220, 246, 0.16)",
+                  color: isFilled ? "#ffffff" : "#cadcf6",
+                  transition: "background-color 0.2s ease, color 0.2s ease",
+                }}
+              >
+                {isDone ? <CheckIcon sx={{ fontSize: 18 }} /> : <Icon sx={{ fontSize: 18 }} />}
+              </Box>
+              {i < STEPS.length - 1 && (
+                <Box
+                  sx={{
+                    width: "2px",
+                    flex: 1,
+                    minHeight: 28,
+                    bgcolor: isDone ? "primary.main" : "rgba(202, 220, 246, 0.16)",
+                    my: 0.5,
+                    transition: "background-color 0.2s ease",
+                  }}
+                />
+              )}
+            </Box>
+            <Typography
+              variant="body2"
+              sx={{
+                pt: 0.9,
+                pb: i < STEPS.length - 1 ? 3.5 : 0,
+                fontWeight: isActive ? 700 : 400,
+                color: isActive ? "#ffffff" : "#cadcf6",
+              }}
+            >
+              {title}
+            </Typography>
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
+// Label-left rows, exactly like the property setup form
+const rowSx = {
+  display: "flex",
+  flexDirection: { xs: "column", sm: "row" },
+  alignItems: { xs: "stretch", sm: "center" },
+  gap: { xs: 0.8, sm: 3 },
+};
+const labelColSx = { width: { xs: "100%", sm: "34%" }, flexShrink: 0, textAlign: { sm: "right" } };
+const fieldColSx = { width: { xs: "100%", sm: "66%" }, minWidth: 0 };
+const labelStyle = {
+  fontSize: "0.875rem",
+  color: "text.secondary",
+  fontWeight: 600,
+  textAlign: { xs: "left", sm: "right" },
+};
+
+const RequiredMark = () => (
+  <Box component="span" sx={{ color: "primary.main", ml: 0.4 }}>*</Box>
+);
+
+function FormRow({ label, required, top, children }) {
+  return (
+    <Box sx={{ ...rowSx, ...(top ? { alignItems: { xs: "stretch", sm: "flex-start" } } : {}) }}>
+      <Box sx={{ ...labelColSx, ...(top ? { pt: { sm: 1.75 } } : {}) }}>
+        <Typography sx={labelStyle}>
+          {label}
+          {required && <RequiredMark />}
+        </Typography>
+      </Box>
+      <Box sx={fieldColSx}>{children}</Box>
+    </Box>
+  );
+}
+
+// The blue-tinted, orange-edged group used for the address on the setup page
+function Group({ icon, title, children }) {
+  return (
+    <Box
+      sx={{
+        borderLeft: "3px solid",
+        borderColor: "primary.main",
+        bgcolor: "rgba(202, 220, 246, 0.18)",
+        borderRadius: "0 4px 4px 0",
+        p: { xs: 1.5, sm: 2 },
+      }}
+    >
+      <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 1.5 }}>
+        {icon}
+        <Typography variant="body2" color="text.secondary" fontWeight={600}>
+          {title}
+        </Typography>
+      </Box>
+      <Box sx={{ display: "flex", flexDirection: "column", gap: 1.75 }}>{children}</Box>
+    </Box>
+  );
+}
 
 const ID_TYPES = [
   { value: "student_id", label: "Student ID" },
   { value: "national_id", label: "National ID" },
   { value: "drivers_license", label: "Driver's License" },
   { value: "passport", label: "Passport" },
+  { value: "other", label: "Other Valid ID" },
 ];
 
 const LEASE_DURATIONS = [
+  { value: "1_month", label: "1 Month" },
   { value: "3_months", label: "3 Months" },
   { value: "6_months", label: "6 Months" },
   { value: "12_months", label: "12 Months" },
-  { value: "custom", label: "Custom" },
+  { value: "custom", label: "Custom..." },
 ];
 
 function generateTempPassword() {
@@ -73,6 +265,16 @@ async function createSubUserWithoutSignOut(email, password) {
 
 export default function RegisterTenant() {
   const navigate = useNavigate();
+  const scrollRef = useRef(null); // whole screen (phones)
+  const mainRef = useRef(null); // content column (laptops)
+  const scrollToTop = () => {
+    scrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    mainRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const [step, setStep] = useState(0);
+  // { field, message } for the first problem found, so the field can be flagged too
+  const [problem, setProblem] = useState(null);
 
   const [form, setForm] = useState({
     fullName: "",
@@ -85,9 +287,11 @@ export default function RegisterTenant() {
     bedId: "",
     leaseStartDate: "",
     leaseDuration: "",
+    customLeaseDuration: "", // Added for custom duration tracking
   });
 
   const [idPhotoFile, setIdPhotoFile] = useState(null);
+  const [idPhotoPreview, setIdPhotoPreview] = useState("");
   const [properties, setProperties] = useState([]);
   const [rooms, setRooms] = useState([]);
   const [bedOptions, setBedOptions] = useState([]);
@@ -95,6 +299,17 @@ export default function RegisterTenant() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingProperties, setLoadingProperties] = useState(true);
+
+  // Preview of the chosen ID photo (and clean up the object URL)
+  useEffect(() => {
+    if (!idPhotoFile) {
+      setIdPhotoPreview("");
+      return undefined;
+    }
+    const url = URL.createObjectURL(idPhotoFile);
+    setIdPhotoPreview(url);
+    return () => URL.revokeObjectURL(url);
+  }, [idPhotoFile]);
 
   useEffect(() => {
     async function loadProperties() {
@@ -108,7 +323,12 @@ export default function RegisterTenant() {
           where("ownerUid", "==", auth.currentUser.uid)
         );
         const snapshot = await getDocs(q);
-        setProperties(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
+        const loaded = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        setProperties(loaded);
+        // Only one property? No need to make the owner pick it.
+        if (loaded.length === 1) {
+          setForm((prev) => (prev.propertyId ? prev : { ...prev, propertyId: loaded[0].id }));
+        }
       } catch (err) {
         console.error("Failed to load properties:", err);
         setProperties([]);
@@ -120,16 +340,31 @@ export default function RegisterTenant() {
   }, []);
 
   useEffect(() => {
-    const selectedProperty = properties.find((p) => p.id === form.propertyId);
-    setRooms(selectedProperty?.rooms || []);
-  }, [form.propertyId, properties]);
+    let cancelled = false;
+
+    const loadRooms = async () => {
+      if (!form.propertyId) {
+        setRooms([]);
+        return;
+      }
+
+      const propertyRooms = await getPropertyRoomOccupancy(form.propertyId);
+      if (!cancelled) setRooms(propertyRooms);
+    };
+
+    loadRooms();
+    return () => {
+      cancelled = true;
+    };
+  }, [form.propertyId]);
 
   useEffect(() => {
     const selectedRoom = rooms.find((r) => r.roomName === form.roomId);
     if (selectedRoom?.capacity) {
-      const availableStart = (selectedRoom.occupiedBeds || 0) + 1;
-      const availableCount = Math.max(0, selectedRoom.capacity - (selectedRoom.occupiedBeds || 0));
-      
+      const occupiedBeds = Number(selectedRoom.occupiedBeds || 0);
+      const availableCount = Math.max(0, Number(selectedRoom.capacity) - occupiedBeds);
+      const availableStart = occupiedBeds + 1;
+
       setBedOptions(
         Array.from(
           { length: availableCount },
@@ -142,51 +377,175 @@ export default function RegisterTenant() {
   }, [form.roomId, rooms]);
 
   const handleChange = (field) => (e) => {
+    if (problem?.field === field) setProblem(null);
     setForm((prev) => {
-      const newValue = e.target.value;
+      let newValue = e.target.value;
+
+      // Clean ID input: Auto-uppercase, allow only letters, numbers, and hyphens
+      if (field === "idNumber") {
+        newValue = newValue.toUpperCase().replace(/[^A-Z0-9-]/g, "");
+      }
+      // Phone: digits only (same rule as the property setup's contact phone)
+      if (field === "phone") {
+        newValue = newValue.replace(/[^0-9]/g, "");
+      }
+
       if (field === "propertyId") {
         return { ...prev, propertyId: newValue, roomId: "", bedId: "" };
       }
       if (field === "roomId") {
         return { ...prev, roomId: newValue, bedId: "" };
       }
+      if (field === "leaseDuration" && newValue !== "custom") {
+        return { ...prev, leaseDuration: newValue, customLeaseDuration: "" };
+      }
       return { ...prev, [field]: newValue };
     });
   };
 
-  const validate = () => {
-    if (!form.fullName.trim()) return "Full name is required.";
-    if (!form.email.trim()) return "Email is required.";
-    return "";
+  const handleIdPhoto = (e) => {
+    const file = e.target.files?.[0] || null;
+    e.target.value = ""; // allows re-picking the same file
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      setProblem({ field: "idPhoto", message: "Please choose an image file (JPG or PNG)." });
+      return;
+    }
+    if (file.size > MAX_ID_PHOTO_MB * 1024 * 1024) {
+      setProblem({ field: "idPhoto", message: `That photo is over ${MAX_ID_PHOTO_MB} MB. Choose a smaller one.` });
+      return;
+    }
+    setProblem(null);
+    setIdPhotoFile(file);
+  };
+
+  // Same rules as before, now checked one step at a time.
+  const validateStep = (s) => {
+    if (s === 0) {
+      if (!form.fullName.trim()) return { field: "fullName", message: "Full name is required." };
+      if (!form.email.trim()) return { field: "email", message: "Email is required." };
+      if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) return { field: "email", message: "Please enter a valid email address." };
+      if (!form.phone.trim()) return { field: "phone", message: "Mobile phone is required." };
+      if (!form.idType) return { field: "idType", message: "Please select an ID Type." };
+      if (!form.idNumber.trim()) return { field: "idNumber", message: "ID Number is required." };
+      if (!idPhotoFile) return { field: "idPhoto", message: "Please upload a photo of the ID." };
+    }
+    if (s === 1) {
+      if (!form.propertyId) return { field: "propertyId", message: "Please select a property." };
+      if (!form.roomId) return { field: "roomId", message: "Please select a room." };
+      if (bedOptions.length > 0 && !form.bedId) return { field: "bedId", message: "Please assign a bed." };
+    }
+    if (s === 2) {
+      if (!form.leaseStartDate) return { field: "leaseStartDate", message: "Lease start date is required." };
+      if (!form.leaseDuration) return { field: "leaseDuration", message: "Lease duration is required." };
+      if (form.leaseDuration === "custom" && !form.customLeaseDuration.trim()) {
+        return { field: "customLeaseDuration", message: "Please specify the custom lease duration." };
+      }
+    }
+    return null;
+  };
+
+  const goToStep = (next) => {
+    setStep(next);
+    scrollToTop();
+  };
+
+  const handleNext = () => {
+    const found = validateStep(step);
+    if (found) {
+      setProblem(found);
+      scrollToTop();
+      return;
+    }
+    setProblem(null);
+    goToStep(step + 1);
+  };
+
+  const handleBack = () => {
+    if (loading) return;
+    setProblem(null);
+    setError("");
+    if (step === 0) navigate(-1);
+    else goToStep(step - 1);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
 
-    const validationError = validate();
-    if (validationError) {
-      setError(validationError);
+    // Enter on an earlier step just moves forward
+    if (step < STEPS.length - 1) {
+      handleNext();
       return;
     }
 
+    // Final check of every step; jump back to the first one with a problem
+    for (let s = 0; s < STEPS.length; s += 1) {
+      const found = validateStep(s);
+      if (found) {
+        setProblem(found);
+        goToStep(s);
+        return;
+      }
+    }
+    setProblem(null);
+
     setLoading(true);
     try {
-      // 1. Create Auth Account for Tenant
+      // 2. Upload ID Photo to Cloudinary
+      let idPhotoUrl = null;
+      if (idPhotoFile) {
+        try {
+          idPhotoUrl = await uploadToCloudinary(idPhotoFile);
+        } catch (uploadError) {
+          throw new Error("Failed to upload ID photo. Please check your connection and try again.");
+        }
+      }
+
+      // 3. Resolve Lease Duration (Standard vs Custom)
+      const finalLeaseDuration =
+        form.leaseDuration === "custom"
+          ? form.customLeaseDuration.trim()
+          : form.leaseDuration;
+      const freshRooms = await getPropertyRoomOccupancy(form.propertyId);
+      const selectedRoom = freshRooms.find((room) => room.roomName === form.roomId);
+      const roomOccupiedBeds = Number(selectedRoom?.occupiedBeds || 0);
+      const roomCapacity = Number(selectedRoom?.capacity || 0);
+
+      if (!selectedRoom || roomOccupiedBeds >= roomCapacity) {
+        throw new Error("The selected room is already full. Choose another room or bed.");
+      }
+
+      const leaseStart = new Date(`${form.leaseStartDate}T00:00:00`);
+      const leaseEnd = new Date(leaseStart);
+      const leaseMonths =
+        form.leaseDuration === "1_month"
+          ? 1
+          : form.leaseDuration === "3_months"
+            ? 3
+            : form.leaseDuration === "6_months"
+              ? 6
+              : form.leaseDuration === "12_months"
+                ? 12
+                : null;
+
+      if (leaseMonths !== null) {
+        leaseEnd.setMonth(leaseEnd.getMonth() + leaseMonths);
+      }
+
+      // 1. Create the Auth account LAST among the things that can fail, so a
+      //    full room or a failed photo upload never leaves behind an orphan
+      //    account (which would make a retry fail with "email already in use").
       const tempPassword = generateTempPassword();
       const newUid = await createSubUserWithoutSignOut(
         form.email.trim(),
         tempPassword
       );
 
-      // 2. Upload ID Photo to Cloudinary
-      let idPhotoUrl = null;
-      if (idPhotoFile) {
-        idPhotoUrl = await uploadToCloudinary(idPhotoFile);
-      }
-
-      // 3. Construct Tenant Document Payload
+      // 4. Construct Tenant Document Payload
       const ownerUid = auth.currentUser?.uid || null;
+      const monthlyRent = Number(selectedRoom?.monthlyRatePerBed || 0);
+      const leaseEndDate = leaseMonths !== null ? leaseEnd.toISOString() : null;
       const tenantProfile = {
         uid: newUid,
         ownerUid,
@@ -197,120 +556,448 @@ export default function RegisterTenant() {
         status: "Active",
         idType: form.idType,
         idNumber: form.idNumber.trim(),
-        idPhotoUrl, // Stores hosted HTTP URL
-        propertyId: form.propertyId || null,
-        roomId: form.roomId || null,
+        idPhotoUrl,
+        propertyId: form.propertyId,
+        roomId: form.roomId,
         bedId: form.bedId || null,
-        leaseStartDate: form.leaseStartDate || null,
-        leaseDuration: form.leaseDuration || null,
+        monthlyRent,
+        rentAmount: monthlyRent,
+        roomMonthlyRate: monthlyRent,
+        leaseStartDate: form.leaseStartDate,
+        leaseEndDate,
+        leaseEnd: leaseEndDate,
+        leaseDuration: finalLeaseDuration,
         createdAt: new Date().toISOString(),
       };
 
-      // 4. Save to Firestore
+      // 5. Save to Firestore
       await setDoc(doc(db, "users", newUid), tenantProfile);
       await setDoc(doc(db, "tenants", newUid), {
         ...tenantProfile,
         fullName: tenantProfile.name,
       });
+      await reconcilePropertyOccupancy(form.propertyId);
 
       navigate(-1);
     } catch (err) {
       console.error("Submit Error:", err); 
-      setError(err.message || mapFirebaseError(err.code)); 
+      // Friendly text for known sign-up errors, the raw message for our own errors
+      const friendly = String(err?.code || "").startsWith("auth/") ? mapFirebaseError(err.code) : "";
+      setError(friendly || err.message || mapFirebaseError(err.code)); 
+      scrollToTop();
     } finally {
       setLoading(false);
     }
   };
 
+  // ------------------------------------------------------------------ UI
+  const selectedProperty = properties.find((p) => p.id === form.propertyId);
+  const selectedRoom = rooms.find((r) => r.roomName === form.roomId);
+  const monthlyRate = Number(selectedRoom?.monthlyRatePerBed || 0);
+  const leaseLabel =
+    form.leaseDuration === "custom"
+      ? form.customLeaseDuration.trim()
+      : LEASE_DURATIONS.find((d) => d.value === form.leaseDuration)?.label || "";
+  const idTypeLabel = ID_TYPES.find((t) => t.value === form.idType)?.label || "";
+
+  const flag = (field) => ({ error: problem?.field === field });
+  const alertMessage = error || problem?.message || "";
+  const isLast = step === STEPS.length - 1;
+
+  const reviewRows = [
+    ["Tenant", form.fullName.trim()],
+    ["Email", form.email.trim()],
+    ["ID", [idTypeLabel, form.idNumber].filter(Boolean).join(" · ")],
+    ["Room", [selectedProperty?.propertyName, form.roomId, form.bedId].filter(Boolean).join(" · ")],
+    ["Monthly rent", monthlyRate ? `₱${monthlyRate.toLocaleString()}` : ""],
+    ["Lease", [leaseLabel, form.leaseStartDate && `from ${form.leaseStartDate}`].filter(Boolean).join(" · ")],
+  ].filter(([, v]) => v);
+
   return (
-    <Box sx={{ maxWidth: 700, mx: "auto", p: 3 }}>
-      <Box sx={{ display: "flex", alignItems: "center", justifyContent: "space-between", mb: 3 }}>
-        <IconButton onClick={() => navigate(-1)} aria-label="Back">
-          <ArrowBackIcon />
-        </IconButton>
-        <Typography variant="h1" sx={{ fontSize: "1.75rem" }}>
-          Register New Tenant
-        </Typography>
-        <Button onClick={() => navigate(-1)} disabled={loading}>
-          Cancel
-        </Button>
+    <Box
+      ref={scrollRef}
+      sx={{
+        // A focused flow like the property setup: covers the dashboard chrome.
+        position: "fixed",
+        inset: 0,
+        zIndex: (t) => t.zIndex.modal - 1,
+        bgcolor: "background.default",
+        overflowY: { xs: "auto", md: "hidden" },
+        overscrollBehavior: "contain",
+        display: "flex",
+        flexDirection: { xs: "column", md: "row" },
+      }}
+    >
+      {/* Sidebar */}
+      <Box
+        sx={{
+          flex: { xs: "0 0 auto", md: "0 0 300px" },
+          bgcolor: "#202020",
+          color: "#ffffff",
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          px: { xs: 3, md: 4 },
+          py: { xs: 3, md: 5 },
+          overflowY: { md: "auto" },
+        }}
+      >
+        <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt="KwartoKeeper" sx={{ height: 28 }} />
+          <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 700, fontSize: "1rem", flex: 1 }}>
+            Register tenant
+          </Typography>
+          <IconButton
+            aria-label="Cancel registration"
+            onClick={() => navigate(-1)}
+            disabled={loading}
+            size="small"
+            sx={{ color: "#cadcf6", display: { md: "none" } }}
+          >
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Box>
+
+        {/* Mobile step indicator */}
+        <Box sx={{ display: { xs: "block", md: "none" } }}>
+          <Typography variant="body2" sx={{ color: "#cadcf6", mb: 1 }}>
+            Step {step + 1} of {STEPS.length} — {STEPS[step].title}
+          </Typography>
+          <Box sx={{ display: "flex", gap: 0.75 }}>
+            {STEPS.map(({ title }, i) => (
+              <Box
+                key={title}
+                sx={{
+                  flex: 1,
+                  height: 4,
+                  borderRadius: 2,
+                  bgcolor: i <= step ? "primary.main" : "rgba(202, 220, 246, 0.2)",
+                  transition: "background-color 0.2s ease",
+                }}
+              />
+            ))}
+          </Box>
+        </Box>
+
+        {/* Desktop step indicator */}
+        <Box sx={{ display: { xs: "none", md: "block" } }}>
+          <StepList activeStep={step} />
+        </Box>
+
+        <Box sx={{ display: { xs: "none", md: "block" }, mt: "auto" }}>
+          <DormFacade />
+        </Box>
       </Box>
 
-      {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
-          {error}
-        </Alert>
-      )}
+      {/* Main content */}
+      <Box
+        ref={mainRef}
+        component="form"
+        onSubmit={handleSubmit}
+        noValidate
+        sx={{
+          flex: 1,
+          minWidth: 0,
+          display: "flex",
+          flexDirection: "column",
+          overflowY: { md: "auto" },
+          bgcolor: "background.default",
+        }}
+      >
+        <Box sx={{ flex: 1, display: "flex", justifyContent: "center", px: { xs: 3, md: 6 }, pt: { xs: 4, md: 6 } }}>
+          <Box sx={{ width: "100%", maxWidth: 760 }}>
+            {alertMessage && (
+              <Alert severity="error" sx={{ mb: 3 }}>
+                {alertMessage}
+              </Alert>
+            )}
 
-      <Paper elevation={0} sx={{ p: 3, bgcolor: "background.default" }}>
-        <Box component="form" onSubmit={handleSubmit} noValidate>
-          <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
-            Personal &amp; Contact Information
-          </Typography>
-          <TextField label="Full Name" fullWidth required margin="normal" value={form.fullName} onChange={handleChange("fullName")} />
-          <TextField label="Email" type="email" fullWidth required margin="normal" value={form.email} onChange={handleChange("email")} />
-          <TextField label="Mobile Phone" type="tel" fullWidth margin="normal" value={form.phone} onChange={handleChange("phone")} />
+            <Box sx={{ width: "100%", maxWidth: 700, mx: "auto", px: { xs: 0, sm: 2 }, pb: 4 }}>
+              <Box sx={{ mb: 4 }}>
+                <Typography variant="h5" sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 600 }} color="text.primary">
+                  {STEPS[step].heading}
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  {STEPS[step].sub}
+                </Typography>
+              </Box>
 
-          <Typography variant="subtitle1" sx={{ mt: 3, mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
-            Student / Government ID Details
-          </Typography>
-          <Box sx={{ display: "flex", gap: 2 }}>
-            <TextField select label="ID Type" fullWidth margin="normal" value={form.idType} onChange={handleChange("idType")}>
-              {ID_TYPES.map((opt) => (
-                <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
-              ))}
-            </TextField>
-            <TextField label="ID Number" fullWidth margin="normal" value={form.idNumber} onChange={handleChange("idNumber")} />
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                {/* ---------------- STEP 1: TENANT ---------------- */}
+                {step === 0 && (
+                  <>
+                    <FormRow label="Full name" required>
+                      <TextField fullWidth placeholder="e.g. Juan Dela Cruz" value={form.fullName} onChange={handleChange("fullName")} autoComplete="off" {...flag("fullName")} />
+                    </FormRow>
+
+                    <FormRow label="Email" required>
+                      <TextField fullWidth type="email" placeholder="name@example.com" value={form.email} onChange={handleChange("email")} autoComplete="off" {...flag("email")} />
+                    </FormRow>
+
+                    <FormRow label="Mobile phone" required>
+                      <TextField
+                        fullWidth
+                        type="tel"
+                        placeholder="e.g. 09171234567"
+                        value={form.phone}
+                        onChange={handleChange("phone")}
+                        inputProps={{ maxLength: 15, inputMode: "numeric" }}
+                        slotProps={{
+                          input: {
+                            startAdornment: (
+                              <InputAdornment position="start">
+                                <PhoneOutlinedIcon sx={{ fontSize: 18, color: "text.secondary" }} />
+                              </InputAdornment>
+                            ),
+                          },
+                        }}
+                        {...flag("phone")}
+                      />
+                    </FormRow>
+
+                    <FormRow label="ID details" required top>
+                      <Group icon={<BadgeOutlinedIcon sx={{ fontSize: 18, color: "primary.main" }} />} title="A valid student or government ID">
+                        <TextField select fullWidth label="ID type" value={form.idType} onChange={handleChange("idType")} {...flag("idType")}>
+                          {ID_TYPES.map((opt) => (
+                            <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                          ))}
+                        </TextField>
+                        <TextField
+                          fullWidth
+                          label="ID number"
+                          value={form.idNumber}
+                          onChange={handleChange("idNumber")}
+                          helperText="Letters, numbers and hyphens only"
+                          {...flag("idNumber")}
+                        />
+
+                        {idPhotoFile ? (
+                          <Box
+                            sx={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 1.5,
+                              bgcolor: "background.paper",
+                              borderRadius: "4px",
+                              border: "1px solid",
+                              borderColor: "divider",
+                              p: 1,
+                            }}
+                          >
+                            <Box
+                              component="img"
+                              src={idPhotoPreview}
+                              alt="ID preview"
+                              sx={{ width: 56, height: 56, borderRadius: "4px", objectFit: "cover", flexShrink: 0 }}
+                            />
+                            <Box sx={{ flex: 1, minWidth: 0 }}>
+                              <Typography variant="body2" noWrap sx={{ fontWeight: 600 }}>
+                                {idPhotoFile.name}
+                              </Typography>
+                              <Typography variant="caption" color="success.main" sx={{ display: "flex", alignItems: "center", gap: 0.5, fontWeight: 700 }}>
+                                <CheckIcon sx={{ fontSize: 14 }} /> ID photo added
+                              </Typography>
+                            </Box>
+                            <IconButton
+                              size="small"
+                              aria-label="Remove ID photo"
+                              onClick={() => setIdPhotoFile(null)}
+                              sx={{ flexShrink: 0, "&:hover": { bgcolor: "rgba(255, 69, 0, 0.08)", color: "primary.main" } }}
+                            >
+                              <CloseIcon fontSize="small" />
+                            </IconButton>
+                          </Box>
+                        ) : (
+                          <Box>
+                            <Button
+                              component="label"
+                              variant="outlined"
+                              startIcon={<CloudUploadOutlinedIcon />}
+                              sx={{
+                                color: "text.primary",
+                                borderColor: problem?.field === "idPhoto" ? "error.main" : "divider",
+                                borderStyle: "dashed",
+                                borderWidth: "1.5px",
+                                bgcolor: "background.paper",
+                                py: 1.5,
+                                width: "100%",
+                                justifyContent: "flex-start",
+                                "&:hover": { borderColor: "primary.main", bgcolor: "background.paper" },
+                              }}
+                            >
+                              Upload ID photo
+                              <Box component="span" sx={{ color: "primary.main", ml: 0.5 }}>*</Box>
+                              <input type="file" accept="image/*" hidden onChange={handleIdPhoto} />
+                            </Button>
+                            <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                              Required. A clear photo of the front, JPG or PNG up to {MAX_ID_PHOTO_MB} MB.
+                            </Typography>
+                          </Box>
+                        )}
+                      </Group>
+                    </FormRow>
+                  </>
+                )}
+
+                {/* ---------------- STEP 2: ROOM & BED ---------------- */}
+                {step === 1 && (
+                  <>
+                    <FormRow label="Property" required>
+                      <TextField
+                        select
+                        fullWidth
+                        value={form.propertyId}
+                        onChange={handleChange("propertyId")}
+                        helperText={loadingProperties ? "Loading properties..." : properties.length === 0 ? "No properties found yet." : ""}
+                        {...flag("propertyId")}
+                      >
+                        {properties.map((p) => (
+                          <MenuItem key={p.id} value={p.id}>{p.propertyName || p.id}</MenuItem>
+                        ))}
+                      </TextField>
+                    </FormRow>
+
+                    <FormRow label="Room" required>
+                      <TextField
+                        select
+                        fullWidth
+                        value={form.roomId}
+                        onChange={handleChange("roomId")}
+                        disabled={!form.propertyId}
+                        helperText={form.propertyId && rooms.length === 0 ? "No rooms found for this property." : ""}
+                        {...flag("roomId")}
+                      >
+                        {rooms.map((r) => {
+                          const availableBeds = Math.max(0, Number(r.capacity) - Number(r.occupiedBeds || 0));
+                          const isFull = availableBeds === 0;
+                          return (
+                            <MenuItem key={r.roomName} value={r.roomName} disabled={isFull}>
+                              <Box sx={{ minWidth: 0 }}>
+                                <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                                  {r.roomName}
+                                  <Typography component="span" variant="body2" color="text.secondary">
+                                    {" "}· Floor {r.floor}
+                                  </Typography>
+                                </Typography>
+                                <Typography variant="caption" color={isFull ? "error" : "text.secondary"}>
+                                  {isFull ? "Fully occupied" : `${availableBeds} of ${r.capacity} beds available`}
+                                  {r.monthlyRatePerBed !== undefined && ` · ₱${r.monthlyRatePerBed}/bed`}
+                                </Typography>
+                              </Box>
+                            </MenuItem>
+                          );
+                        })}
+                      </TextField>
+                    </FormRow>
+
+                    {bedOptions.length > 0 && (
+                      <FormRow label="Bed / space" required>
+                        <TextField select fullWidth value={form.bedId} onChange={handleChange("bedId")} disabled={!form.roomId} {...flag("bedId")}>
+                          {bedOptions.map((bed) => (
+                            <MenuItem key={bed} value={bed}>{bed}</MenuItem>
+                          ))}
+                        </TextField>
+                      </FormRow>
+                    )}
+
+                    {selectedRoom && monthlyRate > 0 && (
+                      <FormRow label="Monthly rent">
+                        <Box sx={{ bgcolor: "background.paper", borderRadius: "4px", border: "1px solid", borderColor: "divider", px: 2, py: 1.25 }}>
+                          <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800 }}>
+                            ₱{monthlyRate.toLocaleString()}
+                            <Typography component="span" variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
+                              {" "}per bed
+                            </Typography>
+                          </Typography>
+                        </Box>
+                      </FormRow>
+                    )}
+                  </>
+                )}
+
+                {/* ---------------- STEP 3: LEASE ---------------- */}
+                {step === 2 && (
+                  <>
+                    <FormRow label="Lease start date" required>
+                      <TextField fullWidth type="date" value={form.leaseStartDate} onChange={handleChange("leaseStartDate")} {...flag("leaseStartDate")} />
+                    </FormRow>
+
+                    <FormRow label="Lease duration" required>
+                      <TextField select fullWidth value={form.leaseDuration} onChange={handleChange("leaseDuration")} {...flag("leaseDuration")}>
+                        {LEASE_DURATIONS.map((opt) => (
+                          <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
+                        ))}
+                      </TextField>
+                    </FormRow>
+
+                    {/* Custom Lease Input (Only visible if "Custom..." is selected) */}
+                    {form.leaseDuration === "custom" && (
+                      <FormRow label="Custom term" required>
+                        <TextField
+                          fullWidth
+                          placeholder="e.g., 2 Years, Month-to-month, 5 Months"
+                          value={form.customLeaseDuration}
+                          onChange={handleChange("customLeaseDuration")}
+                          autoFocus
+                          {...flag("customLeaseDuration")}
+                        />
+                      </FormRow>
+                    )}
+
+                    <FormRow label="Review" top>
+                      <Box sx={{ bgcolor: "background.paper", borderRadius: "4px", border: "1px solid", borderColor: "divider", p: 2 }}>
+                        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+                          {reviewRows.map(([label, value]) => (
+                            <Box key={label} sx={{ display: "flex", gap: 2, justifyContent: "space-between" }}>
+                              <Typography variant="body2" color="text.secondary" sx={{ flexShrink: 0 }}>{label}</Typography>
+                              <Typography variant="body2" sx={{ fontWeight: 700, textAlign: "right", minWidth: 0, wordBreak: "break-word" }}>{value}</Typography>
+                            </Box>
+                          ))}
+                        </Box>
+                      </Box>
+                      <Box sx={{ display: "flex", gap: 1.25, alignItems: "flex-start", color: "text.secondary", mt: 1.5 }}>
+                        <InfoOutlinedIcon sx={{ fontSize: 18, mt: "2px", color: "primary.main" }} />
+                        <Typography variant="caption" sx={{ fontSize: "0.8rem" }}>
+                          The tenant gets an email with a secure link to set their own password before logging in.
+                        </Typography>
+                      </Box>
+                    </FormRow>
+                  </>
+                )}
+              </Box>
+            </Box>
           </Box>
-          <Button variant="outlined" component="label" sx={{ mt: 1 }}>
-            {idPhotoFile ? idPhotoFile.name : "Upload ID Photo"}
-            <input type="file" accept="image/*" hidden onChange={(e) => setIdPhotoFile(e.target.files?.[0] || null)} />
-          </Button>
-
-          <Divider sx={{ my: 3 }} />
-          <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
-            Room &amp; Bed Assignment
-          </Typography>
-          <TextField select label="Select Property" fullWidth margin="normal" value={form.propertyId} onChange={handleChange("propertyId")} helperText={loadingProperties ? "Loading properties..." : properties.length === 0 ? "No properties found yet." : ""}>
-            {properties.map((p) => (
-              <MenuItem key={p.id} value={p.id}>{p.propertyName || p.id}</MenuItem>
-            ))}
-          </TextField>
-          <TextField select label="Select Room" fullWidth margin="normal" value={form.roomId} onChange={handleChange("roomId")} disabled={!form.propertyId}>
-            {rooms.map((r) => (
-              <MenuItem key={r.roomName} value={r.roomName}>
-                {r.roomName} — Floor {r.floor} ({r.capacity - (r.occupiedBeds || 0)} bed{r.capacity - (r.occupiedBeds || 0) === 1 ? "" : "s"} available)
-              </MenuItem>
-            ))}
-          </TextField>
-          <TextField select label="Bed / Space ID" fullWidth margin="normal" value={form.bedId} onChange={handleChange("bedId")} disabled={!form.roomId}>
-            {bedOptions.map((bed) => (
-              <MenuItem key={bed} value={bed}>{bed}</MenuItem>
-            ))}
-          </TextField>
-
-          <Divider sx={{ my: 3 }} />
-          <Typography variant="subtitle1" sx={{ mb: 2, fontWeight: 700, fontSize: "1rem", textTransform: "uppercase", letterSpacing: 0.5, color: "text.secondary" }}>
-            Lease Terms &amp; Rent
-          </Typography>
-          <Box sx={{ display: "flex", gap: 2 }}>
-            <TextField label="Lease Start Date" type="date" fullWidth margin="normal" slotProps={{ inputLabel: { shrink: true } }} value={form.leaseStartDate} onChange={handleChange("leaseStartDate")} />
-            <TextField select label="Lease Duration" fullWidth margin="normal" value={form.leaseDuration} onChange={handleChange("leaseDuration")}>
-              {LEASE_DURATIONS.map((opt) => (
-                <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
-              ))}
-            </TextField>
-          </Box>
-
-          <Alert severity="info" sx={{ mt: 3 }}>
-            The tenant will receive an email at this address with a link to set their own password before logging in.
-          </Alert>
-
-          <Button type="submit" variant="contained" fullWidth size="large" disabled={loading} sx={{ mt: 3 }}>
-            {loading ? <CircularProgress size={24} color="inherit" /> : "Register Tenant"}
-          </Button>
         </Box>
-      </Paper>
+
+        {/* Back / Next — pinned to the bottom of the column so it stays reachable on phones */}
+        <Box
+          sx={{
+            position: "sticky",
+            bottom: 0,
+            bgcolor: "background.default",
+            display: "flex",
+            justifyContent: "center",
+            px: { xs: 3, md: 6 },
+            pb: "calc(16px + env(safe-area-inset-bottom, 0px))",
+            pt: 2,
+          }}
+        >
+          <Box sx={{ width: "100%", maxWidth: 760, display: "flex", justifyContent: "space-between", gap: 2, pt: 2, borderTop: "1px solid", borderColor: "divider" }}>
+            <Button variant="outlined" onClick={handleBack} disabled={loading} sx={{ py: 1.5, px: 3, fontWeight: 600 }}>
+              {step === 0 ? "Cancel" : "Back"}
+            </Button>
+            <Button
+              type={isLast ? "submit" : "button"}
+              onClick={isLast ? undefined : handleNext}
+              variant="contained"
+              disabled={loading}
+              sx={{ py: 1.5, px: 3, fontWeight: 600, minWidth: { xs: 140, sm: 160 }, bgcolor: "primary.main", "&:hover": { bgcolor: "primary.dark" } }}
+            >
+              {loading ? <CircularProgress size={24} color="inherit" /> : isLast ? "Register tenant" : "Next step"}
+            </Button>
+          </Box>
+        </Box>
+      </Box>
     </Box>
   );
 }
@@ -324,6 +1011,6 @@ function mapFirebaseError(code) {
     case "auth/weak-password":
       return "Password is too weak. Use at least 6 characters.";
     default:
-      return "Something went wrong. Please try again.";
+      return "Something went wrong. Please check your connection and try again.";
   }
 }

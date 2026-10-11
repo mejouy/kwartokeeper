@@ -1,5 +1,5 @@
 // src/pages/services/propertyService.js
-import { auth, db, storage } from "../../config/firebase";
+import { auth, db } from "../../config/firebase";
 import {
   collection,
   addDoc,
@@ -7,44 +7,69 @@ import {
   doc,
   getDoc,
 } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+
+// Cloudinary Configuration
+const CLOUD_NAME = "pdgumr5m"; 
+const UPLOAD_PRESET = "kwartokeeper-preset"; 
 
 const normalizeText = (value) =>
   typeof value === "string" ? value.trim() : "";
 
-const sanitizeFileName = (fileName) =>
-  String(fileName || "cover-photo")
-    .replace(/[^a-zA-Z0-9._-]/g, "_")
-    .replace(/_+/g, "_");
-
-export const uploadPropertyPhoto = async (file, ownerUid) => {
+/**
+ * Core utility to upload an image file directly to Cloudinary.
+ */
+export const uploadToCloudinary = async (file) => {
   if (!(file instanceof File)) {
-    throw new Error("The selected cover photo is not a valid file.");
+    throw new Error("The selected file is not a valid file instance.");
   }
 
   if (!file.type.startsWith("image/")) {
-    throw new Error("The selected cover photo must be an image file.");
+    throw new Error("The selected file must be an image.");
   }
 
-  if (file.size > 10 * 1024 * 1024) {
-    throw new Error("The cover photo must be smaller than 10 MB.");
+  const MAX_SIZE_MB = 5;
+  if (file.size > MAX_SIZE_MB * 1024 * 1024) {
+    throw new Error(`File "${file.name}" exceeds the ${MAX_SIZE_MB}MB size limit.`);
   }
 
-  const uploadPath = `properties/${ownerUid}/${Date.now()}_${sanitizeFileName(file.name)}`;
-  const photoRef = ref(storage, uploadPath);
-  const metadata = {
-    contentType: file.type,
-    cacheControl: "public,max-age=31536000,immutable",
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("upload_preset", UPLOAD_PRESET);
+
+  try {
+    const response = await fetch(
+      `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`,
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      console.error("Cloudinary API Error Response:", data);
+      throw new Error(data.error?.message || "Failed to upload image to Cloudinary.");
+    }
+
+    return data.secure_url;
+  } catch (error) {
+    console.error("Cloudinary upload failure details:", error);
+    throw error; // Preserves exact Cloudinary error message
+  }
+};
+
+/**
+ * Backward-compatible wrapper for components like PropertyWizard.jsx
+ * returning the Cloudinary URL in both object and string forms.
+ */
+export const uploadPropertyPhoto = async (file, ownerUid) => {
+  const downloadUrl = await uploadToCloudinary(file);
+  return {
+    downloadUrl,
+    url: downloadUrl,
+    storagePath: null, // Legacy Firebase storage path replaced by Cloudinary
   };
-
-  const snapshot = await uploadBytes(photoRef, file, metadata);
-  const downloadUrl = await getDownloadURL(snapshot.ref);
-
-  if (!downloadUrl.startsWith("https://")) {
-    throw new Error("Firebase Storage did not return a valid download URL.");
-  }
-
-  return { downloadUrl, storagePath: uploadPath };
 };
 
 /**
@@ -106,8 +131,8 @@ export const saveProperty = async (
     normalizeText(wizardData.coverPhoto);
 
   if (coverPhotoFile instanceof File) {
-    const uploadedPhoto = await uploadPropertyPhoto(coverPhotoFile, resolvedOwnerUid);
-    uploadedCoverPhotoUrl = uploadedPhoto.downloadUrl;
+    const photoResult = await uploadPropertyPhoto(coverPhotoFile, resolvedOwnerUid);
+    uploadedCoverPhotoUrl = photoResult.downloadUrl;
   }
 
   const normalizedCoverPhotoUrl = uploadedCoverPhotoUrl || null;
@@ -120,13 +145,12 @@ export const saveProperty = async (
       "Untitled Property",
     propertyType: wizardData.propertyType || "Dormitory",
     emergencyPhone: normalizeText(wizardData.emergencyPhone) || null,
+    
+    // Cloudinary Image URLs
     coverPhotoUrl: normalizedCoverPhotoUrl,
     coverPhoto: normalizedCoverPhotoUrl,
     imageUrl: normalizedCoverPhotoUrl,
     photoUrl: normalizedCoverPhotoUrl,
-    coverPhotoStoragePath: coverPhotoFile instanceof File
-      ? `properties/${resolvedOwnerUid}/${Date.now()}_${sanitizeFileName(coverPhotoFile.name)}`
-      : null,
 
     // Hierarchical Address Details
     address: addressPayload,
@@ -166,7 +190,10 @@ export const saveProperty = async (
 
   try {
     const docRef = await addDoc(collection(db, "properties"), propertyPayload);
-    return docRef.id;
+    return {
+      id: docRef.id,
+      coverPhotoUrl: normalizedCoverPhotoUrl,
+    };
   } catch (error) {
     console.error("Error saving property to Firestore:", error);
     throw new Error(error.message || "Failed to save property. Please try again.");
