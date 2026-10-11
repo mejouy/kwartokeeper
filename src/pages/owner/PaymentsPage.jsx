@@ -13,9 +13,11 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
+  FormControl,
+  Grid,
+  InputLabel,
   IconButton,
-  InputAdornment,
-  LinearProgress,
+  Tooltip,
   MenuItem,
   Paper,
   Skeleton,
@@ -30,11 +32,15 @@ import {
 import { alpha, useTheme } from "@mui/material/styles";
 
 import AddIcon from "@mui/icons-material/Add";
+import PaymentsIcon from "@mui/icons-material/Payments";
+import AccountBalanceWalletIcon from "@mui/icons-material/AccountBalanceWallet";
+import PendingActionsIcon from "@mui/icons-material/PendingActions";
+import WarningAmberIcon from "@mui/icons-material/WarningAmber";
+import MeetingRoomIcon from "@mui/icons-material/MeetingRoom";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import HistoryIcon from "@mui/icons-material/History";
+import PrintIcon from "@mui/icons-material/Print";
 import CloseIcon from "@mui/icons-material/Close";
-import CheckIcon from "@mui/icons-material/Check";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import ApartmentOutlinedIcon from "@mui/icons-material/ApartmentOutlined";
-import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
 
 import {
   addDoc,
@@ -198,8 +204,10 @@ export default function PaymentsPage() {
   const [saving, setSaving] = useState(false);
   const [formErrors, setFormErrors] = useState({});
   const [processingPaymentId, setProcessingPaymentId] = useState("");
-  const [rejectTarget, setRejectTarget] = useState(null);
-  const [toast, setToast] = useState({ open: false, severity: "success", message: "" });
+  const [selectedPayment, setSelectedPayment] = useState(null);
+  const [historyTenant, setHistoryTenant] = useState(null);
+  const [openPaymentDetails, setOpenPaymentDetails] = useState(false);
+  const [openPaymentHistory, setOpenPaymentHistory] = useState(false);
 
   const [paymentForm, setPaymentForm] = useState({
     tenantId: "",
@@ -324,17 +332,80 @@ export default function PaymentsPage() {
     const date = getPaymentDate(payment);
     if (!date) return payment.periodMonth === currentPeriodValue;
     const now = new Date();
-    return date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+
+    return (
+      date.getMonth() === now.getMonth() &&
+      date.getFullYear() === now.getFullYear()
+    );
   };
 
-  const getPaymentStatus = (payment) => String(payment.status || "").toLowerCase();
-
-  // Inactive tenants and tenants who haven't finished onboarding aren't expected to pay yet.
-  // (Statuses are "Active", "Pending Onboarding", "Inactive".)
-  const countsTowardRent = (tenant) => {
-    const s = String(tenant.status).toLowerCase();
-    return s !== "inactive" && !s.startsWith("pending");
+  const getPaymentStatus = (payment) => {
+    return String(payment.status || "").toLowerCase();
   };
+
+  const printReceipt = (payment, tenantFallback = {}) => {
+    if (!payment || getPaymentStatus(payment) !== "paid") {
+      alert("A receipt can only be printed for a confirmed paid transaction.");
+      return;
+    }
+
+    const tenant = normalizedTenants.find((item) => item.id === payment.tenantId) || tenantFallback;
+    const dateText = formatDate(payment);
+    const amountText = formatCurrency(payment.amount);
+    const escapeHtml = (value) =>
+      String(value ?? "—").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[char]));
+
+    const receiptWindow = window.open("", "_blank", "width=700,height=800");
+    if (!receiptWindow) {
+      alert("Please allow pop-ups in your browser to print the receipt.");
+      return;
+    }
+
+    receiptWindow.document.write(`<!doctype html><html><head><title>Payment Receipt</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:32px;color:#222}
+        .receipt{max-width:560px;margin:auto;border:1px solid #ddd;padding:28px}
+        h1{text-align:center;font-size:22px;margin-bottom:4px}
+        .sub{text-align:center;color:#666;margin-bottom:28px}
+        .row{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid #eee}
+        .label{color:#666}.amount{font-size:24px;font-weight:bold;text-align:center;margin:24px 0}
+        .footer{text-align:center;color:#666;font-size:12px;margin-top:28px}
+        @media print{body{padding:0}.receipt{border:0}}
+      </style></head><body><div class="receipt">
+      <h1>KWARTOKEEPER</h1><div class="sub">Payment Receipt</div>
+      <div class="row"><span class="label">Receipt / Payment ID</span><span>${escapeHtml(payment.id)}</span></div>
+      <div class="row"><span class="label">Tenant</span><span>${escapeHtml(payment.tenantName || tenant.fullName || tenant.name)}</span></div>
+      <div class="row"><span class="label">Property</span><span>${escapeHtml(payment.propertyName || tenant.propertyName)}</span></div>
+      <div class="row"><span class="label">Room</span><span>${escapeHtml(payment.roomNumber || tenant.roomNumber || tenant.roomId)}</span></div>
+      <div class="row"><span class="label">Billing Period</span><span>${escapeHtml(payment.periodMonth)}</span></div>
+      <div class="row"><span class="label">Payment Date</span><span>${escapeHtml(dateText)}</span></div>
+      <div class="row"><span class="label">Payment Method</span><span>${escapeHtml(payment.paymentMethod)}</span></div>
+      <div class="amount">${escapeHtml(amountText)}</div>
+      <div class="row"><span class="label">Status</span><strong>PAID</strong></div>
+      <div class="row"><span class="label">Remarks</span><span>${escapeHtml(payment.remarks)}</span></div>
+      <div class="footer">Thank you. Keep this receipt for your records.</div>
+      </div><script>window.onload=()=>{window.print();};</script></body></html>`);
+    receiptWindow.document.close();
+  };
+
+  const openDetails = (payment) => {
+    setSelectedPayment(payment || null);
+    setOpenPaymentDetails(Boolean(payment));
+  };
+
+  const openHistory = (tenant) => {
+    setHistoryTenant(tenant);
+    setOpenPaymentHistory(true);
+  };
+
+  const paymentHistoryForTenant = useMemo(() => {
+    if (!historyTenant) return [];
+    return payments
+      .filter((payment) => payment.tenantId === historyTenant.id)
+      .sort((a, b) => (getPaymentDate(b)?.getTime() || 0) - (getPaymentDate(a)?.getTime() || 0));
+  }, [payments, historyTenant]);
 
   // ------------------------------------------------------------
   // SUMMARY
@@ -985,97 +1056,294 @@ export default function PaymentsPage() {
                   </Box>
                 </AccordionSummary>
 
-                <AccordionDetails sx={{ p: 0, borderTop: "1px solid", borderColor: "divider" }}>
-                  {columnHeader}
-                  {prop.rooms.map((room, roomIndex) => (
-                    <Box key={room.roomNumber}>
-                      {/* Room sub-header */}
-                      <Box
-                        sx={{
-                          ...row,
-                          justifyContent: "space-between",
-                          gap: 2,
-                          px: { xs: 2, sm: 3 },
-                          py: 0.9,
-                          bgcolor: (t) => alpha(t.palette.background.paper, 0.55),
-                          borderTop: roomIndex === 0 ? "none" : "1px solid",
-                          borderBottom: "1px solid",
-                          borderColor: "divider",
-                        }}
-                      >
-                        <Typography variant="body2" sx={{ fontWeight: 800 }}>
-                          {room.roomNumber === "Unassigned" ? "No room yet" : `Room ${room.roomNumber}`}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-                          {formatCompact(room.collected)} / {formatCompact(room.expected)}
-                        </Typography>
+              {/* ROOM TENANTS */}
+              <Box sx={{ p: 2.5 }}>
+                <Stack spacing={2}>
+                  {room.tenants.map((tenant) => {
+                    const info =
+                      getTenantPaymentInfo(tenant);
+
+                    return (
+                      <Box key={tenant.id}>
+                        <Box
+                          sx={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: {
+                              xs: "flex-start",
+                              md: "center",
+                            },
+                            flexDirection: {
+                              xs: "column",
+                              md: "row",
+                            },
+                            gap: 2,
+                          }}
+                        >
+                          <Box sx={{ minWidth: 180 }}>
+                            <Typography
+                              fontWeight={600}
+                            >
+                              {tenant.fullName}
+                            </Typography>
+
+                            <Typography
+                              variant="body2"
+                              color="text.secondary"
+                            >
+                              {tenant.propertyName}
+                            </Typography>
+                          </Box>
+
+                          <Box>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              Monthly Rent
+                            </Typography>
+
+                            <Typography
+                              fontWeight={600}
+                            >
+                              {formatCurrency(info.rent)}
+                            </Typography>
+                          </Box>
+
+                          <Box>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              Amount Collected
+                            </Typography>
+
+                            <Typography
+                              fontWeight={600}
+                            >
+                              {formatCurrency(
+                                info.paidAmount
+                              )}
+                            </Typography>
+                          </Box>
+
+                          <Box>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                            >
+                              Balance
+                            </Typography>
+
+                            <Typography
+                              fontWeight={600}
+                            >
+                              {formatCurrency(
+                                info.balance
+                              )}
+                            </Typography>
+                          </Box>
+
+                          <Box>
+                            <Typography
+                              variant="caption"
+                              color="text.secondary"
+                              sx={{
+                                display: "block",
+                                mb: 0.5,
+                              }}
+                            >
+                              Status
+                            </Typography>
+
+                            {renderStatusChip(info.status)}
+                          </Box>
+
+                          <Stack direction="row" spacing={0.5} alignItems="center">
+                            <Tooltip title={info.latestPayment ? "View payment" : "No payment recorded"}>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  aria-label="View payment"
+                                  disabled={!info.latestPayment}
+                                  onClick={() => openDetails(info.latestPayment)}
+                                >
+                                  <VisibilityIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                            <Tooltip title="View payment history">
+                              <IconButton
+                                size="small"
+                                aria-label="View payment history"
+                                onClick={() => openHistory(tenant)}
+                              >
+                                <HistoryIcon fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                            <Tooltip title={info.latestPayment && getPaymentStatus(info.latestPayment) === "paid" ? "Print receipt" : "Receipt available for paid transactions"}>
+                              <span>
+                                <IconButton
+                                  size="small"
+                                  aria-label="Print receipt"
+                                  disabled={!info.latestPayment || getPaymentStatus(info.latestPayment) !== "paid"}
+                                  onClick={() => printReceipt(info.latestPayment, tenant)}
+                                >
+                                  <PrintIcon fontSize="small" />
+                                </IconButton>
+                              </span>
+                            </Tooltip>
+                          </Stack>
+                        </Box>
                       </Box>
-                      {room.tenants.map((entry, i) => (
-                        <React.Fragment key={entry.tenant.id}>
-                          {i > 0 && <Divider />}
-                          {renderTenantRow(entry)}
-                        </React.Fragment>
-                      ))}
-                    </Box>
-                  ))}
-                </AccordionDetails>
-              </Accordion>
-            );
-          })}
-        </Box>
+                    );
+                  })}
+                </Stack>
+
+                <Divider sx={{ my: 2 }} />
+
+                {/* ROOM TOTAL */}
+                <Box
+                  sx={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                  }}
+                >
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                  >
+                    Room Total
+                  </Typography>
+
+                  <Typography
+                    fontWeight={700}
+                  >
+                    {formatCurrency(room.collected)}{" "}
+                    <Typography
+                      component="span"
+                      variant="body2"
+                      color="text.secondary"
+                    >
+                      / {formatCurrency(room.expected)}
+                    </Typography>
+                  </Typography>
+                </Box>
+              </Box>
+            </Card>
+          ))}
+        </Stack>
       )}
 
-      {/* Phone: floating record button */}
-      <Button
-        variant="contained"
-        onClick={handleOpenRecordPayment}
-        startIcon={<AddIcon />}
-        sx={{
-          display: { xs: "inline-flex", sm: "none" },
-          position: "fixed",
-          right: 16,
-          bottom: `calc(${BOTTOM_NAV_H}px + 16px + env(safe-area-inset-bottom, 0px))`,
-          zIndex: (t) => t.zIndex.appBar - 1,
-          borderRadius: 6,
-          px: 2.5,
-          py: 1.2,
-          fontWeight: 700,
-          boxShadow: 6,
-        }}
+      {/* PAYMENT DETAILS DIALOG */}
+      <Dialog
+        open={openPaymentDetails}
+        onClose={() => setOpenPaymentDetails(false)}
+        fullWidth
+        maxWidth="sm"
       >
-        Record
-      </Button>
-
-      {/* ======================================================
-          REJECT CONFIRMATION
-      ====================================================== */}
-
-      <Dialog open={Boolean(rejectTarget)} onClose={() => setRejectTarget(null)} maxWidth="xs" fullWidth>
-        <DialogTitle sx={{ fontWeight: 800 }}>Reject this payment?</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" color="text.secondary">
-            {rejectTarget
-              ? `${rejectTarget.tenantName || "This tenant"}'s ${formatCurrency(rejectTarget.amount)} payment will be marked as rejected and won't count toward rent collected.`
-              : ""}
-          </Typography>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Payment Details
+          <IconButton onClick={() => setOpenPaymentDetails(false)} aria-label="Close payment details">
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {selectedPayment && (
+            <Stack spacing={1.5}>
+              {[
+                ["Tenant", selectedPayment.tenantName || "—"],
+                ["Property", selectedPayment.propertyName || "—"],
+                ["Room", selectedPayment.roomNumber || "—"],
+                ["Billing Period", selectedPayment.periodMonth || "—"],
+                ["Payment Date", formatDate(selectedPayment)],
+                ["Amount", formatCurrency(selectedPayment.amount)],
+                ["Payment Method", selectedPayment.paymentMethod || "—"],
+                ["Status", selectedPayment.status || "—"],
+                ["Reference Number", selectedPayment.referenceNumber || "—"],
+                ["Remarks", selectedPayment.remarks || "—"],
+              ].map(([label, value]) => (
+                <Box key={label} sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
+                  <Typography color="text.secondary">{label}</Typography>
+                  <Typography fontWeight={600} sx={{ textAlign: "right", overflowWrap: "anywhere" }}>{value}</Typography>
+                </Box>
+              ))}
+            </Stack>
+          )}
         </DialogContent>
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button color="inherit" onClick={() => setRejectTarget(null)} sx={{ fontWeight: 600 }}>
-            Keep pending
-          </Button>
+        <DialogActions>
+          <Button onClick={() => setOpenPaymentDetails(false)}>Close</Button>
           <Button
-            color="error"
+            startIcon={<PrintIcon />}
             variant="contained"
-            disableElevation
-            onClick={() => {
-              const id = rejectTarget?.id;
-              setRejectTarget(null);
-              handleVerifyPayment(id, false);
-            }}
-            sx={{ fontWeight: 700 }}
+            disabled={!selectedPayment || getPaymentStatus(selectedPayment) !== "paid"}
+            onClick={() => printReceipt(selectedPayment)}
           >
-            Reject payment
+            Print Receipt
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* TENANT PAYMENT HISTORY DIALOG */}
+      <Dialog
+        open={openPaymentHistory}
+        onClose={() => setOpenPaymentHistory(false)}
+        fullWidth
+        maxWidth="md"
+      >
+        <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          Payment History{historyTenant ? ` — ${historyTenant.fullName}` : ""}
+          <IconButton onClick={() => setOpenPaymentHistory(false)} aria-label="Close payment history">
+            <CloseIcon />
+          </IconButton>
+        </DialogTitle>
+        <DialogContent dividers>
+          {paymentHistoryForTenant.length === 0 ? (
+            <Typography color="text.secondary" sx={{ py: 3, textAlign: "center" }}>
+              No payment records found for this tenant.
+            </Typography>
+          ) : (
+            <Box sx={{ overflowX: "auto" }}>
+              <Box sx={{ minWidth: 650 }}>
+                <Stack direction="row" sx={{ px: 1, py: 1, bgcolor: "action.hover" }}>
+                  <Typography sx={{ flex: 1 }} fontWeight={700}>Date / Period</Typography>
+                  <Typography sx={{ flex: 1 }} fontWeight={700}>Amount</Typography>
+                  <Typography sx={{ flex: 1 }} fontWeight={700}>Method</Typography>
+                  <Typography sx={{ flex: 1 }} fontWeight={700}>Status</Typography>
+                  <Typography sx={{ width: 90 }} fontWeight={700}>Actions</Typography>
+                </Stack>
+                {paymentHistoryForTenant.map((payment) => (
+                  <Stack key={payment.id} direction="row" alignItems="center" sx={{ px: 1, py: 1, borderBottom: "1px solid", borderColor: "divider" }}>
+                    <Box sx={{ flex: 1 }}>
+                      <Typography variant="body2">{formatDate(payment)}</Typography>
+                      <Typography variant="caption" color="text.secondary">{payment.periodMonth || "—"}</Typography>
+                    </Box>
+                    <Typography sx={{ flex: 1 }}>{formatCurrency(payment.amount)}</Typography>
+                    <Typography sx={{ flex: 1 }}>{payment.paymentMethod || "—"}</Typography>
+                    <Box sx={{ flex: 1 }}>{renderStatusChip(payment.status || "Paid")}</Box>
+                    <Stack direction="row" sx={{ width: 90 }}>
+                      <Tooltip title="View payment">
+                        <IconButton size="small" onClick={() => { setOpenPaymentHistory(false); openDetails(payment); }}>
+                          <VisibilityIcon fontSize="small" />
+                        </IconButton>
+                      </Tooltip>
+                      <Tooltip title={getPaymentStatus(payment) === "paid" ? "Print receipt" : "Only paid transactions can be printed"}>
+                        <span>
+                          <IconButton size="small" disabled={getPaymentStatus(payment) !== "paid"} onClick={() => printReceipt(payment, historyTenant)}>
+                            <PrintIcon fontSize="small" />
+                          </IconButton>
+                        </span>
+                      </Tooltip>
+                    </Stack>
+                  </Stack>
+                ))}
+              </Box>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setOpenPaymentHistory(false)}>Close</Button>
         </DialogActions>
       </Dialog>
 

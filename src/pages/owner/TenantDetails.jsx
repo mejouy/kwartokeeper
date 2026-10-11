@@ -8,6 +8,12 @@ import {
   Typography,
   Button,
   Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  Tooltip,
   Divider,
   CircularProgress,
   Table,
@@ -26,6 +32,9 @@ import PaymentIcon from "@mui/icons-material/Payment";
 import PhoneIcon from "@mui/icons-material/Phone";
 import EmailIcon from "@mui/icons-material/Email";
 import BadgeIcon from "@mui/icons-material/Badge";
+import VisibilityIcon from "@mui/icons-material/Visibility";
+import PrintIcon from "@mui/icons-material/Print";
+import CloseIcon from "@mui/icons-material/Close";
 
 import {
   collection,
@@ -45,6 +54,8 @@ export default function TenantDetails() {
   const [tenant, setTenant] = useState(null);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [selectedPayment, setSelectedPayment] = useState(null);
+  const [openPaymentDetails, setOpenPaymentDetails] = useState(false);
 
   // =========================================================
   // DATE HELPER
@@ -236,6 +247,57 @@ export default function TenantDetails() {
 
     loadTenantDetails();
   }, [tenantId, currentUser]);
+
+  const formatCurrency = (amount) =>
+    new Intl.NumberFormat("en-PH", {
+      style: "currency",
+      currency: "PHP",
+      minimumFractionDigits: 2,
+    }).format(Number(amount) || 0);
+
+  const printReceipt = (payment) => {
+    if (!payment || String(payment.status || "Paid").toLowerCase() !== "paid") {
+      alert("A receipt can only be printed for a confirmed paid transaction.");
+      return;
+    }
+
+    const escapeHtml = (value) =>
+      String(value ?? "—").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
+      }[char]));
+    const receiptWindow = window.open("", "_blank", "width=700,height=800");
+
+    if (!receiptWindow) {
+      alert("Please allow pop-ups in your browser to print the receipt.");
+      return;
+    }
+
+    receiptWindow.document.write(`<!doctype html><html><head><title>Payment Receipt</title>
+      <style>
+        body{font-family:Arial,sans-serif;padding:32px;color:#222}
+        .receipt{max-width:560px;margin:auto;border:1px solid #ddd;padding:28px}
+        h1{text-align:center;font-size:22px;margin-bottom:4px}
+        .sub{text-align:center;color:#666;margin-bottom:28px}
+        .row{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid #eee}
+        .label{color:#666}.amount{font-size:24px;font-weight:bold;text-align:center;margin:24px 0}
+        .footer{text-align:center;color:#666;font-size:12px;margin-top:28px}
+        @media print{body{padding:0}.receipt{border:0}}
+      </style></head><body><div class="receipt">
+      <h1>KWARTOKEEPER</h1><div class="sub">Payment Receipt</div>
+      <div class="row"><span class="label">Receipt / Payment ID</span><span>${escapeHtml(payment.id)}</span></div>
+      <div class="row"><span class="label">Tenant</span><span>${escapeHtml(payment.tenantName || tenant.fullName)}</span></div>
+      <div class="row"><span class="label">Property</span><span>${escapeHtml(payment.propertyName || tenant.propertyName)}</span></div>
+      <div class="row"><span class="label">Room</span><span>${escapeHtml(payment.roomNumber || tenant.roomNumber)}</span></div>
+      <div class="row"><span class="label">Billing Period</span><span>${escapeHtml(payment.periodMonth)}</span></div>
+      <div class="row"><span class="label">Payment Date</span><span>${escapeHtml(formatPaymentDate(payment))}</span></div>
+      <div class="row"><span class="label">Payment Method</span><span>${escapeHtml(payment.paymentMethod)}</span></div>
+      <div class="amount">${escapeHtml(formatCurrency(payment.amount))}</div>
+      <div class="row"><span class="label">Status</span><strong>PAID</strong></div>
+      <div class="row"><span class="label">Remarks</span><span>${escapeHtml(payment.remarks)}</span></div>
+      <div class="footer">Thank you. Keep this receipt for your records.</div>
+      </div><script>window.onload=()=>{window.print();};</script></body></html>`);
+    receiptWindow.document.close();
+  };
 
   // =========================================================
   // LOADING
@@ -769,6 +831,10 @@ export default function TenantDetails() {
                   <TableCell>
                     <strong>Remarks</strong>
                   </TableCell>
+
+                  <TableCell align="right">
+                    <strong>Actions</strong>
+                  </TableCell>
                 </TableRow>
               </TableHead>
 
@@ -776,7 +842,7 @@ export default function TenantDetails() {
                 {payments.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={6}
+                      colSpan={7}
                       align="center"
                       sx={{ py: 5 }}
                     >
@@ -855,6 +921,36 @@ export default function TenantDetails() {
                       <TableCell>
                         {payment.remarks || "-"}
                       </TableCell>
+
+                      {/* ACTIONS */}
+                      <TableCell align="right">
+                        <Stack direction="row" spacing={0.5} justifyContent="flex-end">
+                          <Tooltip title="View payment details">
+                            <IconButton
+                              size="small"
+                              aria-label="View payment details"
+                              onClick={() => {
+                                setSelectedPayment(payment);
+                                setOpenPaymentDetails(true);
+                              }}
+                            >
+                              <VisibilityIcon fontSize="small" />
+                            </IconButton>
+                          </Tooltip>
+                          <Tooltip title={String(payment.status || "Paid").toLowerCase() === "paid" ? "Print receipt" : "Receipt available for paid transactions"}>
+                            <span>
+                              <IconButton
+                                size="small"
+                                aria-label="Print receipt"
+                                disabled={String(payment.status || "Paid").toLowerCase() !== "paid"}
+                                onClick={() => printReceipt(payment)}
+                              >
+                                <PrintIcon fontSize="small" />
+                              </IconButton>
+                            </span>
+                          </Tooltip>
+                        </Stack>
+                      </TableCell>
                     </TableRow>
                   ))
                 )}
@@ -862,6 +958,54 @@ export default function TenantDetails() {
             </Table>
           </TableContainer>
         </Paper>
+
+        <Dialog
+          open={openPaymentDetails}
+          onClose={() => setOpenPaymentDetails(false)}
+          fullWidth
+          maxWidth="sm"
+        >
+          <DialogTitle sx={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            Payment Details
+            <IconButton onClick={() => setOpenPaymentDetails(false)} aria-label="Close payment details">
+              <CloseIcon />
+            </IconButton>
+          </DialogTitle>
+          <DialogContent dividers>
+            {selectedPayment && (
+              <Stack spacing={1.5}>
+                {[
+                  ["Tenant", selectedPayment.tenantName || tenant.fullName],
+                  ["Property", selectedPayment.propertyName || tenant.propertyName],
+                  ["Room", selectedPayment.roomNumber || tenant.roomNumber || "—"],
+                  ["Billing Period", selectedPayment.periodMonth || "—"],
+                  ["Payment Date", formatPaymentDate(selectedPayment)],
+                  ["Amount", formatCurrency(selectedPayment.amount)],
+                  ["Payment Method", selectedPayment.paymentMethod || "—"],
+                  ["Status", selectedPayment.status || "Paid"],
+                  ["Reference Number", selectedPayment.referenceNumber || "—"],
+                  ["Remarks", selectedPayment.remarks || "—"],
+                ].map(([label, value]) => (
+                  <Box key={label} sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
+                    <Typography color="text.secondary">{label}</Typography>
+                    <Typography fontWeight={600} sx={{ textAlign: "right", overflowWrap: "anywhere" }}>{value}</Typography>
+                  </Box>
+                ))}
+              </Stack>
+            )}
+          </DialogContent>
+          <DialogActions>
+            <Button onClick={() => setOpenPaymentDetails(false)}>Close</Button>
+            <Button
+              variant="contained"
+              startIcon={<PrintIcon />}
+              disabled={!selectedPayment || String(selectedPayment.status || "Paid").toLowerCase() !== "paid"}
+              onClick={() => printReceipt(selectedPayment)}
+            >
+              Print Receipt
+            </Button>
+          </DialogActions>
+        </Dialog>
 
       </Container>
     </Box>
