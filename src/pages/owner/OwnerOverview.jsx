@@ -13,7 +13,6 @@ import {
   CardActionArea,
   LinearProgress,
   CircularProgress,
-  TextField,
   Alert,
   Tooltip,
   ButtonBase,
@@ -396,8 +395,7 @@ export default function OwnerOverview() {
   const [properties, setProperties] = useState([]);
   const [propsLoaded, setPropsLoaded] = useState(false);
   
-  // Setup Form States
-  const [propertyName, setPropertyName] = useState("");
+  // Verification form
   const [idFile, setIdFile] = useState(null);
   const [clearanceFile, setClearanceFile] = useState(null);
   const [uploading, setUploading] = useState(false);
@@ -679,34 +677,25 @@ export default function OwnerOverview() {
     return { idUrl, clearanceUrl, submittedAt: new Date().toISOString() };
   };
 
-  const handleForcedSetup = async (e) => {
+  // First-time verification: mandatory for every new owner, whether or not a property exists yet.
+  const handleVerify = async (e) => {
     e.preventDefault();
     if (uploading) return;
     setSetupError("");
 
-    const name = propertyName.trim();
-    if (name.length < 2) return setSetupError("Enter your property's name.");
     const problem = checkDoc(idFile, "government ID") || checkDoc(clearanceFile, "proof of ownership");
     if (problem) return setSetupError(problem);
 
     setUploading(true);
     try {
-      const ownerId = auth.currentUser.uid;
       const verificationDocs = await uploadVerificationDocs();
-
-      await setDoc(doc(db, "users", ownerId), { approvalStatus: "pending", verificationDocs }, { merge: true });
-
-      const newPropRef = doc(collection(db, "properties"));
-      await setDoc(newPropRef, {
-        ownerUid: ownerId,
-        status: "Active",
-        propertyName: name,
-        totalRooms: 0,
-        totalBeds: 0,
-        createdAt: new Date().toISOString(),
-      });
+      await setDoc(doc(db, "users", auth.currentUser.uid), { approvalStatus: "pending", verificationDocs }, { merge: true });
+      setIdFile(null);
+      setClearanceFile(null);
+      // No property yet: continue straight into the setup wizard
+      if (stats.totalProperties === 0) navigate("/setup", { replace: true });
     } catch (error) {
-      console.error("Setup failed", error);
+      console.error("Verification upload failed", error);
       setSetupError(error?.message && /size limit|Cloudinary|upload/i.test(error.message) ? error.message : "Couldn't submit your documents. Check your connection and try again.");
     } finally {
       setUploading(false);
@@ -748,56 +737,49 @@ export default function OwnerOverview() {
     );
   }
 
-  // --- FORCE SETUP SCREEN ---
-  if (owner?.approvalStatus === "pending" && stats.totalProperties === 0) {
+  // --- VERIFICATION GATE ---
+  // A pending owner can't reach the dashboard until both documents are on file,
+  // whether or not they have set up a property yet.
+  const docsOnFile = Boolean(owner?.verificationDocs?.idUrl && owner?.verificationDocs?.clearanceUrl);
+  if (owner?.approvalStatus === "pending" && !docsOnFile) {
     return (
       <Container maxWidth="sm" disableGutters sx={{ py: { xs: 1, md: 6 } }}>
         <Paper elevation={0} sx={{ bgcolor: "background.default", p: { xs: 2.5, md: 5 }, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
-          <Typography variant="h5" fontWeight="800" sx={{ mb: 1, fontFamily: '"Inter", sans-serif' }}>
-            Complete Your Property Setup
+          <Typography variant="h5" component="h1" fontWeight="800" sx={{ mb: 1, fontFamily: '"Inter", sans-serif' }}>
+            Verify your account
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-            Before accessing the dashboard, you must establish your first property and upload your verification documents. 
-            Once completed, your profile will be sent to our admin team for approval.
+            Upload your ID and proof of ownership so our admin team can approve your account.
+            {stats.totalProperties === 0 ? " You'll set up your first property right after." : ""}
           </Typography>
 
           {setupError && (
             <Alert severity="error" sx={{ mb: 3 }}>{setupError}</Alert>
           )}
 
-          <Box component="form" onSubmit={handleForcedSetup} noValidate>
-            <TextField 
-              fullWidth 
-              label="Property Name" 
-              placeholder="e.g., St. Jude Dormitory"
-              required 
-              sx={{ mb: 3 }}
-              value={propertyName} 
-              onChange={(e) => setPropertyName(e.target.value)}
-            />
-            
+          <Box component="form" onSubmit={handleVerify} noValidate>
             <FilePickRow
               label="Government ID"
-              hint="Upload a clear photo of your valid ID (PhilID, Driver's License, etc.)"
+              hint="A clear photo or PDF of a valid ID (PhilID, driver's license, etc.)."
               file={idFile}
               onChange={setIdFile}
             />
             <FilePickRow
-              label="Proof of Ownership"
-              hint="Land title, tax declaration, or a lease / authorization letter if you manage the property for the owner. A business permit also works."
+              label="Proof of ownership"
+              hint="Land title, tax declaration, or a lease or authorization letter if you manage the property for the owner. A business permit also works."
               file={clearanceFile}
               onChange={setClearanceFile}
             />
 
-            <Button 
-              type="submit" 
-              variant="contained" 
-              fullWidth 
+            <Button
+              type="submit"
+              variant="contained"
+              fullWidth
               size="large"
               disabled={uploading}
               sx={{ py: 1.5, fontWeight: "bold" }}
             >
-              {uploading ? <CircularProgress size={24} color="inherit" /> : "Submit for Approval"}
+              {uploading ? <CircularProgress size={24} color="inherit" /> : "Submit for approval"}
             </Button>
           </Box>
         </Paper>
@@ -808,6 +790,8 @@ export default function OwnerOverview() {
   // --- ACTUAL DASHBOARD ---
   const isPending = owner?.approvalStatus === "pending";
   const isRejected = owner?.approvalStatus === "rejected";
+  // The first property is part of setup, so it stays open; further ones wait for approval.
+  const addLocked = isPending && stats.totalProperties > 0;
 
   const ownerName =
     owner?.fullName || owner?.name || owner?.ownerName || owner?.firstName || auth.currentUser?.displayName || "Owner";
@@ -893,11 +877,11 @@ export default function OwnerOverview() {
   ].filter((item) => item.show);
 
   const handleAddPropertyClick = () => {
-    if (isPending) return;
+    if (addLocked) return;
     navigate("/setup");
   };
 
-  const addPropertyTooltip = isPending ? "Account pending approval. Adding properties is disabled." : "Add a new property";
+  const addPropertyTooltip = addLocked ? "Account pending approval. Adding properties is disabled." : "Add a new property";
 
   return (
     <Container maxWidth="xl" disableGutters>
@@ -960,9 +944,9 @@ export default function OwnerOverview() {
             <span style={{ display: "block" }}>
               <Button
                 variant="contained"
-                startIcon={isPending ? <LockIcon /> : <AddHomeWorkIcon />}
+                startIcon={addLocked ? <LockIcon /> : <AddHomeWorkIcon />}
                 onClick={handleAddPropertyClick}
-                disabled={isPending}
+                disabled={addLocked}
                 sx={{
                   mt: 2.5,
                   width: { xs: "100%", sm: "auto" },
@@ -984,7 +968,7 @@ export default function OwnerOverview() {
       {/* Pending Account Alert */}
       {isPending && (
         <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>
-          <strong>Account Pending Approval:</strong> Your verification documents and property are currently under review by our admin team. You can explore the dashboard, but property management actions (adding tenants, inviting caretakers, adding properties) are locked until approval.
+          <strong>Account Pending Approval:</strong> Your verification documents are under review by our admin team. You can explore the dashboard, but property management actions (adding tenants, inviting caretakers, adding more properties) are locked until approval.
         </Alert>
       )}
 
@@ -1123,11 +1107,11 @@ export default function OwnerOverview() {
               <span>
                 <Button
                   variant="contained"
-                  startIcon={isPending ? <LockIcon /> : <AddHomeWorkIcon />}
+                  startIcon={addLocked ? <LockIcon /> : <AddHomeWorkIcon />}
                   onClick={handleAddPropertyClick}
-                  disabled={isPending}
+                  disabled={addLocked}
                 >
-                  Add Your First Property
+                  Add your first property
                 </Button>
               </span>
             </Tooltip>

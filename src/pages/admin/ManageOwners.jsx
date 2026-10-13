@@ -11,6 +11,7 @@ import SupervisorAccountOutlinedIcon from "@mui/icons-material/SupervisorAccount
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "../../config/firebase";
+import { ownerRefCode, normalizeRef } from "../../utils/ownerRef";
 
 const row = { display: "flex", alignItems: "center" };
 const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
@@ -216,9 +217,10 @@ export default function ManageOwners() {
       { value: "suspended", label: "Suspended" },
     ];
     // Only show Rejected if there are any
-    if (counts.rejected > 0) base.push({ value: "rejected", label: "Rejected" });
+    // (kept while selected, so the filter can't be left on a tab that disappeared)
+    if (counts.rejected > 0 || filterTab === "rejected") base.push({ value: "rejected", label: "Rejected" });
     return base;
-  }, [counts.rejected]);
+  }, [counts.rejected, filterTab]);
 
   const filteredOwners = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -229,7 +231,10 @@ export default function ManageOwners() {
       const name = ownerNameOf(o).toLowerCase();
       const email = (o.email || "").toLowerCase();
       const phone = (o.phoneNumber || o.phone || "").toLowerCase();
-      return name.includes(term) || email.includes(term) || phone.includes(term);
+      // Reference number (OWN-XXXXX-XXXXX), typed in any form
+      const refTerm = normalizeRef(term);
+      const refMatch = refTerm.length >= 3 && normalizeRef(ownerRefCode(o.id)).includes(refTerm);
+      return name.includes(term) || email.includes(term) || phone.includes(term) || refMatch;
     });
     const byNew = (a, b) => toMillis(b.createdAt) - toMillis(a.createdAt);
     const sorters = {
@@ -282,7 +287,7 @@ export default function ManageOwners() {
                   <SearchIcon sx={{ color: "text.secondary" }} />
                   <InputBase
                     fullWidth
-                    placeholder="Search name, email or phone"
+                    placeholder="Search name, email, phone or reference no."
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                     slotProps={{ input: { "aria-label": "Search owners" } }}

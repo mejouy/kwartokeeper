@@ -21,6 +21,7 @@ import {
   Paper,
   Skeleton,
   Snackbar,
+  Tooltip,
   TextField,
   Typography,
 } from "@mui/material";
@@ -32,6 +33,7 @@ import BlockOutlinedIcon from "@mui/icons-material/BlockOutlined";
 import LockOpenOutlinedIcon from "@mui/icons-material/LockOpenOutlined";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import ContentCopyOutlinedIcon from "@mui/icons-material/ContentCopyOutlined";
 import HomeWorkOutlinedIcon from "@mui/icons-material/HomeWorkOutlined";
 import BadgeOutlinedIcon from "@mui/icons-material/BadgeOutlined";
 import MeetingRoomOutlinedIcon from "@mui/icons-material/MeetingRoomOutlined";
@@ -58,6 +60,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import FilePreviewDialog from "../../components/FilePreviewDialog";
+import { ownerRefCode } from "../../utils/ownerRef";
 
 const row = { display: "flex", alignItems: "center" };
 const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
@@ -125,7 +128,8 @@ const isDateLike = (v) => v && typeof v === "object" && typeof v.toDate === "fun
 function extraDetails(owner) {
   const out = [];
   Object.entries(owner).forEach(([key, value]) => {
-    if (HIDDEN_KEYS.has(key) || /password|token|secret/i.test(key)) return;
+    // internal ids (uid, userId, ownerUid...) are never shown
+    if (HIDDEN_KEYS.has(key) || /password|token|secret|^id$|uid$|userid$|ownerid$/i.test(key)) return;
     if (value === null || value === undefined || value === "") return;
 
     if (isDateLike(value)) {
@@ -196,6 +200,32 @@ function Panel({ title, icon, action, children, sx }) {
   );
 }
 
+// A value with a small copy button (used for the reference number)
+function CopyValue({ value }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* clipboard blocked: the number is still selectable */
+    }
+  };
+  return (
+    <Box sx={{ ...row, gap: 0.5, minWidth: 0 }}>
+      <Typography variant="body2" sx={{ fontWeight: 600, fontVariantNumeric: "tabular-nums", letterSpacing: "0.02em", overflowWrap: "anywhere" }}>
+        {value}
+      </Typography>
+      <Tooltip title={copied ? "Copied" : "Copy"}>
+        <IconButton size="small" onClick={copy} aria-label="Copy reference number">
+          <ContentCopyOutlinedIcon sx={{ fontSize: 16 }} />
+        </IconButton>
+      </Tooltip>
+    </Box>
+  );
+}
+
 // label / value rows
 function Facts({ items }) {
   return (
@@ -215,7 +245,9 @@ function Facts({ items }) {
           <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
             {it.label}
           </Typography>
-          {it.link ? (
+          {it.copy ? (
+            <CopyValue value={it.value} />
+          ) : it.link ? (
             <MuiLink href={it.value} target="_blank" rel="noopener noreferrer" variant="body2" sx={{ overflowWrap: "anywhere", fontWeight: 600 }}>
               Open link
             </MuiLink>
@@ -953,7 +985,7 @@ export default function OwnerDetails() {
                 { label: "Account status", value: view.label },
                 { label: "Registered", value: formatDate(owner.createdAt, true) },
                 { label: "Last updated", value: formatDate(owner.updatedAt, true) },
-                { label: "User ID", value: owner.id },
+                { label: "Reference no.", value: ownerRefCode(owner.id), copy: true },
               ]}
             />
           </Panel>
