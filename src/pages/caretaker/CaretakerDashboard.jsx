@@ -71,6 +71,7 @@ import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
 import { onAuthStateChanged } from "firebase/auth";
 import { addDoc, collection, deleteDoc, deleteField, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
+import { notifyMaintenanceStatusChanged } from "../../services/notificationService";
 import { uploadToCloudinary } from "../../utils/cloudinary";
 import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
 import { getPropertyCoverPhotoUrl } from "../../utils/getPropertyCoverPhotoUrl";
@@ -1261,6 +1262,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         updatedBy: uid,
         ...(next === "Resolved" ? { resolvedAt: serverTimestamp() } : {}),
       });
+      notifyMaintenanceStatusChanged(t, next, "caretaker");
       const tenantId = t.tenantUid || t.tenantId;
       if (tenantId && property?.id) {
         const title = t.title || "your request";

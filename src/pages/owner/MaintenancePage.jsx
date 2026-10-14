@@ -42,6 +42,10 @@ import {
 } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../context/AuthContext";
+import {
+  notifyMaintenanceStatusChanged,
+  notifyMaintenanceCancelled,
+} from "../../services/notificationService";
 import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
 
 const row = { display: "flex", alignItems: "center" };
@@ -472,6 +476,7 @@ export default function MaintenancePage() {
         resolvedAt: newStatus === "Resolved" ? serverTimestamp() : deleteField(),
         ...(statusOf(ticket) === "Cancelled" ? { cancelledAt: deleteField(), cancelReason: deleteField() } : {}),
       });
+      notifyMaintenanceStatusChanged(ticket, newStatus, "owner");
       notifyTenant(
         ticket,
         newStatus === "Resolved" ? "success" : "info",
@@ -509,6 +514,7 @@ export default function MaintenancePage() {
         cancelReason: reason,
         updatedAt: serverTimestamp(),
       });
+      notifyMaintenanceCancelled(ticket, "owner");
       notifyTenant(
         ticket,
         "warning",
