@@ -24,3 +24,5 @@ dist-ssr
 *.sw?
 
 android/app/google-services.json
+
+functions/serviceAccountKey.json
