@@ -24,7 +24,14 @@ async function getPropertyCaretakers(propertyId, ownerId) {
       id: document.id,
       ...document.data(),
     }))
-    .filter((caretaker) => !["inactive", "archived", "deactivated"].includes(String(caretaker.status || "Active").trim().toLowerCase()));
+    .filter(
+      (caretaker) =>
+        !["inactive", "archived", "deactivated"].includes(
+          String(caretaker.status || "Active")
+            .trim()
+            .toLowerCase(),
+        ),
+    );
 }
 
 async function processLeaseReminders() {
@@ -46,12 +53,20 @@ async function processLeaseReminders() {
   });
 
   for (const tenant of tenantsById.values()) {
-    if (["inactive", "archived", "deactivated"].includes(String(tenant.status || "Active").trim().toLowerCase())) continue;
+    if (
+      ["inactive", "archived", "deactivated"].includes(
+        String(tenant.status || "Active")
+          .trim()
+          .toLowerCase(),
+      )
+    )
+      continue;
     const endDate = getLeaseEndDate(tenant);
     const reminder = getReminderThreshold(endDate, now);
     if (!endDate || !reminder) continue;
 
-    const ownerId = tenant.ownerUid || tenant.ownerId || tenant.landlordUid || tenant.userId;
+    const ownerId =
+      tenant.ownerUid || tenant.ownerId || tenant.landlordUid || tenant.userId;
     const tenantId = tenant.uid || tenant.id;
     const tenantName = tenant.fullName || tenant.name || "Tenant";
     const propertyId = tenant.propertyId || tenant.assignedPropertyId;
@@ -61,7 +76,12 @@ async function processLeaseReminders() {
       caretakers = await getPropertyCaretakers(propertyId, ownerId);
     }
 
-    const recipients = getLeaseReminderRecipients({ tenantId, tenantName, ownerId, caretakers });
+    const recipients = getLeaseReminderRecipients({
+      tenantId,
+      tenantName,
+      ownerId,
+      caretakers,
+    });
 
     for (const recipient of recipients) {
       if (!recipient.id) continue;
@@ -84,17 +104,29 @@ async function processLeaseReminders() {
         .where("leaseEndDate", "==", notification.leaseEndDate)
         .get();
 
-      if (!hasReminderSentToday(existing.docs.map((document) => document.data()), reminder, now)) {
+      if (
+        !hasReminderSentToday(
+          existing.docs.map((document) => document.data()),
+          reminder,
+          now,
+        )
+      ) {
         await db.collection("notifications").add(notification);
       }
     }
   }
 }
 
-exports.processLeaseReminders = onSchedule({
-  schedule: "every 30 minutes",
-  timeZone: "Asia/Manila",
-  retryConfig: { maxAttempts: 3, minBackoffSeconds: 5 },
-}, async () => {
-  await processLeaseReminders();
-});
+exports.processLeaseReminders = onSchedule(
+  {
+    schedule: "every 30 minutes",
+    timeZone: "Asia/Manila",
+    retryConfig: { maxAttempts: 3, minBackoffSeconds: 5 },
+  },
+  async () => {
+    await processLeaseReminders();
+  },
+);
+
+exports.sendPushOnNotification =
+  require("./pushNotifications").sendPushOnNotification;
