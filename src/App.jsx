@@ -1,149 +1,189 @@
 // src/App.jsx
 
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+} from "react-router-dom";
 
 // --- Guards & Security ---
-import ProtectedRoute from './components/ProtectedRoute';
-import AccountSuspended from './pages/AccountSuspended';
-import NotFound from './pages/NotFound';
+import ProtectedRoute from "./components/ProtectedRoute";
+import RedirectIfAuthenticated from "./components/RedirectIfAuthenticated";
+import AccountSuspended from "./pages/AccountSuspended";
+import NotFound from "./pages/NotFound";
 
 // --- Auth & Onboarding ---
-import LandingWelcome from './pages/LandingWelcome';
-import Login from './pages/auth/Login';
-import OwnerRegister from './pages/auth/OwnerRegister';
-import OwnerWelcome from './pages/onboarding/OwnerWelcome';
-import PropertyWizard from './pages/onboarding/PropertyWizard';
-import WizardSuccess from './pages/onboarding/components/WizardSuccess';
+import LandingWelcome from "./pages/LandingWelcome";
+import Login from "./pages/auth/Login";
+import OwnerRegister from "./pages/auth/OwnerRegister";
+import OwnerWelcome from "./pages/onboarding/OwnerWelcome";
+import PropertyWizard from "./pages/onboarding/PropertyWizard";
+import WizardSuccess from "./pages/onboarding/components/WizardSuccess";
 
 // --- Layouts ---
-import OwnerLayout from './layouts/OwnerLayout';
-import AdminLayout from './layouts/AdminLayout';
-import CaretakerLayout from './layouts/CaretakerLayout';
-import TenantLayout from './layouts/TenantLayout';
+import OwnerLayout from "./layouts/OwnerLayout";
+import AdminLayout from "./layouts/AdminLayout";
+import CaretakerLayout from "./layouts/CaretakerLayout";
+import TenantLayout from "./layouts/TenantLayout";
 
 // --- Owner Pages ---
-import OwnerOverview from './pages/owner/OwnerOverview';
-import OwnerAnnouncements from './pages/owner/OwnerAnnouncements';
-import OwnerAccount from './pages/owner/OwnerAccount';
-import OwnerReports from './pages/owner/OwnerReports';
+import OwnerOverview from "./pages/owner/OwnerOverview";
+import OwnerAnnouncements from "./pages/owner/OwnerAnnouncements";
+import OwnerAccount from "./pages/owner/OwnerAccount";
+import OwnerReports from "./pages/owner/OwnerReports";
 
 // Properties
-import PropertyList from './pages/owner/properties/PropertyList';
-import PropertyProfile from './pages/owner/properties/PropertyProfile';
-import PropertyDetails from './pages/owner/properties/PropertyDetails'; 
+import PropertyList from "./pages/owner/properties/PropertyList";
+import PropertyProfile from "./pages/owner/properties/PropertyProfile";
+import PropertyDetails from "./pages/owner/properties/PropertyDetails";
 
 // Tenants
-import TenantList from './pages/owner/tenants/TenantList';
-import RegisterTenant from './pages/owner/tenants/RegisterTenant';
-import TenantDetail from './pages/owner/tenants/TenantDetail';
+import TenantList from "./pages/owner/tenants/TenantList";
+import RegisterTenant from "./pages/owner/tenants/RegisterTenant";
+import TenantDetail from "./pages/owner/tenants/TenantDetail";
 
 // Caretakers
-import CaretakerList from './pages/owner/caretakers/CaretakerList';
-import InviteCaretaker from './pages/owner/caretakers/InviteCaretaker';
-import CaretakerInvited from './pages/owner/caretakers/CaretakerInvited';
-import CaretakerDetail from './pages/owner/caretakers/CaretakerDetail';
+import CaretakerList from "./pages/owner/caretakers/CaretakerList";
+import InviteCaretaker from "./pages/owner/caretakers/InviteCaretaker";
+import CaretakerInvited from "./pages/owner/caretakers/CaretakerInvited";
+import CaretakerDetail from "./pages/owner/caretakers/CaretakerDetail";
 
 // Payments & Maintenance
-import PaymentsPage from './pages/owner/PaymentsPage';
-import MaintenancePage from './pages/owner/MaintenancePage';
+import PaymentsPage from "./pages/owner/PaymentsPage";
+import MaintenancePage from "./pages/owner/MaintenancePage";
 
 // --- Admin Pages ---
-import AdminOverview from './pages/admin/AdminOverview';
-import ManageOwners from './pages/admin/ManageOwners';
-import OwnerDetails from './pages/admin/OwnerDetails';
-import AdminAnnouncements from './pages/admin/AdminAnnouncements';
-import AdminSettings from './pages/admin/AdminSettings';
+import AdminOverview from "./pages/admin/AdminOverview";
+import ManageOwners from "./pages/admin/ManageOwners";
+import OwnerDetails from "./pages/admin/OwnerDetails";
+import AdminAnnouncements from "./pages/admin/AdminAnnouncements";
+import AdminSettings from "./pages/admin/AdminSettings";
 
 // --- Tenant & Caretaker Pages ---
-import TenantDashboard from './pages/tenant/TenantDashboard';
-import CaretakerDashboard from './pages/caretaker/CaretakerDashboard';
+import TenantDashboard from "./pages/tenant/TenantDashboard";
+import CaretakerDashboard from "./pages/caretaker/CaretakerDashboard";
 
 // --- Placeholders for other secondary routes ---
-const AdminPropertiesPlaceholder = () => <div className="p-6">Global Properties List</div>;
-const AdminTenantsPlaceholder = () => <div className="p-6">Global Tenants List</div>;
-const AdminCaretakersPlaceholder = () => <div className="p-6">Global Caretakers List</div>;
+const AdminPropertiesPlaceholder = () => (
+  <div className="p-6">Global Properties List</div>
+);
+const AdminTenantsPlaceholder = () => (
+  <div className="p-6">Global Tenants List</div>
+);
+const AdminCaretakersPlaceholder = () => (
+  <div className="p-6">Global Caretakers List</div>
+);
 
 function App() {
   return (
     <Router>
       <Routes>
         {/* --- Public Routes --- */}
-        <Route path="/" element={<LandingWelcome />} />
-        <Route path="/login" element={<Login />} />
+        {/* "/" and "/login" skip straight to the user's role home if a session
+            was already restored on app launch (see RedirectIfAuthenticated). */}
+        <Route
+          path="/"
+          element={
+            <RedirectIfAuthenticated>
+              <LandingWelcome />
+            </RedirectIfAuthenticated>
+          }
+        />
+        <Route
+          path="/login"
+          element={
+            <RedirectIfAuthenticated>
+              <Login />
+            </RedirectIfAuthenticated>
+          }
+        />
         <Route path="/signup" element={<OwnerRegister />} />
         <Route path="/suspended" element={<AccountSuspended />} />
-        
+
         {/* --- External Registration Alias --- */}
         <Route path="/register-sub-user" element={<RegisterTenant />} />
 
         {/* --- Onboarding Wizard (Owner Protected) --- */}
-        <Route 
-          path="/welcome" 
+        <Route
+          path="/welcome"
           element={
-            <ProtectedRoute allowedRoles={['owner']}>
+            <ProtectedRoute allowedRoles={["owner"]}>
               <OwnerWelcome />
             </ProtectedRoute>
-          } 
+          }
         />
-        <Route 
-          path="/setup" 
+        <Route
+          path="/setup"
           element={
-            <ProtectedRoute allowedRoles={['owner']}>
+            <ProtectedRoute allowedRoles={["owner"]}>
               <PropertyWizard />
             </ProtectedRoute>
-          } 
+          }
         />
-        <Route 
-          path="/wizard-success" 
+        <Route
+          path="/wizard-success"
           element={
-            <ProtectedRoute allowedRoles={['owner']}>
+            <ProtectedRoute allowedRoles={["owner"]}>
               <WizardSuccess />
             </ProtectedRoute>
-          } 
+          }
         />
 
         {/* --- Tenant Routes --- */}
-        <Route path="/tenant" element={<Navigate to="/tenant/dashboard" replace />} />
-        <Route 
-          path="/tenant/dashboard" 
+        <Route
+          path="/tenant"
+          element={<Navigate to="/tenant/dashboard" replace />}
+        />
+        <Route
+          path="/tenant/dashboard"
           element={
-            <ProtectedRoute allowedRoles={['tenant']}>
+            <ProtectedRoute allowedRoles={["tenant"]}>
               <TenantLayout>
                 {(activeTab) => <TenantDashboard activeTab={activeTab} />}
               </TenantLayout>
             </ProtectedRoute>
-          } 
+          }
         />
 
         {/* --- Caretaker Routes --- */}
-        <Route path="/caretaker" element={<Navigate to="/caretaker/dashboard" replace />} />
-        <Route 
-          path="/caretaker/dashboard" 
+        <Route
+          path="/caretaker"
+          element={<Navigate to="/caretaker/dashboard" replace />}
+        />
+        <Route
+          path="/caretaker/dashboard"
           element={
-            <ProtectedRoute allowedRoles={['caretaker']}>
+            <ProtectedRoute allowedRoles={["caretaker"]}>
               <CaretakerLayout>
                 <CaretakerDashboard />
               </CaretakerLayout>
             </ProtectedRoute>
-          } 
+          }
         />
 
         {/* --- Legacy / Redirect Aliases --- */}
-        <Route path="/owner/dashboard" element={<Navigate to="/owner" replace />} />
-        <Route path="/admin/dashboard" element={<Navigate to="/admin/overview" replace />} />
+        <Route
+          path="/owner/dashboard"
+          element={<Navigate to="/owner" replace />}
+        />
+        <Route
+          path="/admin/dashboard"
+          element={<Navigate to="/admin/overview" replace />}
+        />
 
         {/* --- Nested Admin Routes --- */}
-        <Route 
-          path="/admin" 
+        <Route
+          path="/admin"
           element={
-            <ProtectedRoute allowedRoles={['admin']}>
+            <ProtectedRoute allowedRoles={["admin"]}>
               <AdminLayout />
             </ProtectedRoute>
           }
         >
           <Route index element={<Navigate to="/admin/overview" replace />} />
           <Route path="overview" element={<AdminOverview />} />
-          
+
           <Route path="owners">
             <Route index element={<ManageOwners />} />
             <Route path=":ownerId" element={<OwnerDetails />} />
@@ -158,10 +198,10 @@ function App() {
         </Route>
 
         {/* --- Nested Owner Routes --- */}
-        <Route 
-          path="/owner" 
+        <Route
+          path="/owner"
           element={
-            <ProtectedRoute allowedRoles={['owner']}>
+            <ProtectedRoute allowedRoles={["owner"]}>
               <OwnerLayout />
             </ProtectedRoute>
           }
@@ -172,7 +212,7 @@ function App() {
           <Route path="properties">
             <Route index element={<PropertyList />} />
             <Route path=":id" element={<PropertyProfile />} />
-            <Route path=":id/edit" element={<PropertyDetails />} />   
+            <Route path=":id/edit" element={<PropertyDetails />} />
           </Route>
 
           {/* Tenants Group */}
