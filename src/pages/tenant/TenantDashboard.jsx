@@ -71,6 +71,11 @@ import { onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, collection, addDoc, updateDoc, arrayUnion, query, where, onSnapshot, serverTimestamp } from "firebase/firestore";
 
 import { auth, db } from "../../config/firebase";
+import {
+  notifyMaintenanceSubmitted,
+  notifyMaintenanceCancelled,
+  notifyMaintenanceFollowUp,
+} from "../../services/notificationService";
 import { normalizePayment } from "../../utils/normalizePayment";
 import { printReceipt as printReceiptDoc } from "../../utils/receiptPrint";
 import { addMonthsClamped } from "../../utils/addMonthsClamped";
@@ -1248,7 +1253,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       let remaining = items;
       for (const item of items) {
         try {
-          await addDoc(collection(db, item.kind === "payment" ? "payments" : "maintenance_tickets"), { ...item.record, createdAt: serverTimestamp() });
+          const sentRef = await addDoc(collection(db, item.kind === "payment" ? "payments" : "maintenance_tickets"), { ...item.record, createdAt: serverTimestamp() });
+          if (item.kind !== "payment") notifyMaintenanceSubmitted({ id: sentRef.id, ...item.record }, "tenant");
           remaining = remaining.filter((x) => x.id !== item.id);
           writeOutbox(user.uid, remaining);
           sent += 1;
@@ -1318,6 +1324,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       const ref = doc(db, "maintenance_tickets", t.id);
       if (ticketDlg.mode === "cancel") {
         await updateDoc(ref, { status: "Cancelled", cancelledAt: serverTimestamp(), cancelledBy: "tenant", updatedAt: serverTimestamp() });
+        notifyMaintenanceCancelled(t, "tenant");
         notify("Request cancelled.");
       } else if (ticketDlg.mode === "edit") {
         await updateDoc(ref, { title: ticketDlg.title.trim(), description: ticketDlg.description.trim(), updatedAt: serverTimestamp() });
@@ -1335,6 +1342,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         }
         const entry = { text: ticketDlg.text.trim(), ...(photoUrl ? { photoUrl } : {}), at: new Date().toISOString(), by: "tenant" };
         await updateDoc(ref, { followUps: arrayUnion(entry), updatedAt: serverTimestamp() });
+        notifyMaintenanceFollowUp(t, "tenant");
         if (t.ownerUid) {
           addDoc(collection(db, "notifications"), {
             userId: t.ownerUid,
@@ -1405,7 +1413,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         }
       }
 
-      await addDoc(collection(db, "maintenance_tickets"), {
+      const ticketRef = await addDoc(collection(db, "maintenance_tickets"), {
         tenantUid: user.uid,
         tenantName: tenantInfo.name,
         ownerUid: tenantInfo.ownerUid,
@@ -1420,6 +1428,19 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         createdAt: serverTimestamp(),
       });
 
+      notifyMaintenanceSubmitted(
+        {
+          id: ticketRef.id,
+          tenantUid: user.uid,
+          tenantName: tenantInfo.name,
+          ownerUid: tenantInfo.ownerUid,
+          propertyId: tenantInfo.propertyId,
+          roomNumber: tenantInfo.roomNumber,
+          title: repairForm.title.trim(),
+          category: repairForm.category,
+        },
+        "tenant",
+      );
       setOpenRepairModal(false);
       setRepairForm({ title: "", description: "", category: CATEGORIES.SAFETY });
       setRepairPhoto(null);
