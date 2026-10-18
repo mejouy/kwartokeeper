@@ -10,6 +10,7 @@ import {
 // --- Guards & Security ---
 import ProtectedRoute from "./components/ProtectedRoute";
 import RedirectIfAuthenticated from "./components/RedirectIfAuthenticated";
+import PushRegistrar from "./components/PushRegistrar";
 import AccountSuspended from "./pages/AccountSuspended";
 import NotFound from "./pages/NotFound";
 
@@ -78,6 +79,7 @@ const AdminCaretakersPlaceholder = () => (
 function App() {
   return (
     <Router>
+      <PushRegistrar />
       <Routes>
         {/* --- Public Routes --- */}
         {/* "/" and "/login" skip straight to the user's role home if a session
