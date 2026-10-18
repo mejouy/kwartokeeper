@@ -15,6 +15,7 @@ const path = require("path");
 const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { startLeaseReminderLoop } = require("./leaseReminderLoop");
 
 const serviceAccount = require(path.join(__dirname, "serviceAccountKey.json"));
 initializeApp({ credential: cert(serviceAccount) });
@@ -91,3 +92,5 @@ db.collection("notifications").onSnapshot(
   },
   (err) => console.error("Listener error:", err),
 );
+
+startLeaseReminderLoop(db);

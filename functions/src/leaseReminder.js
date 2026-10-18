@@ -12,37 +12,73 @@ function toDate(value) {
 
 function parseDuration(value) {
   if (!value) return null;
+
   const normalized = String(value).trim().toLowerCase().replace(/_/g, " ");
-  const match = normalized.match(/^(\d+)\s*(day|days|week|weeks|month|months|year|years)$/);
+  const match = normalized.match(
+    /^(\d+)\s*(day|days|week|weeks|month|months|year|years)$/
+  );
   if (!match) return null;
 
   const amount = Number(match[1]);
   const unit = match[2];
-  const multipliers = {
-    day: 1,
-    days: 1,
-    week: 7,
-    weeks: 7,
-    month: 30,
-    months: 30,
-    year: 365,
-    years: 365,
-  };
 
-  return amount * multipliers[unit] * DAY_IN_MS;
+  if (unit === "day" || unit === "days") {
+    return { amount, unit: "day" };
+  }
+
+  if (unit === "week" || unit === "weeks") {
+    return { amount: amount * 7, unit: "day" };
+  }
+
+  if (unit === "month" || unit === "months") {
+    return { amount, unit: "month" };
+  }
+
+  return { amount: amount * 12, unit: "month" };
+}
+
+function addMonthsClamped(value, months) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const day = date.getDate();
+  date.setDate(1);
+  date.setMonth(date.getMonth() + Number(months));
+
+  const lastDay = new Date(
+    date.getFullYear(),
+    date.getMonth() + 1,
+    0
+  ).getDate();
+
+  date.setDate(Math.min(day, lastDay));
+  return date;
 }
 
 function getLeaseEndDate(tenant) {
   const explicitEndDate = toDate(
-    tenant?.leaseEndDate || tenant?.leaseEnd || tenant?.endDate || tenant?.moveOutDate
+    tenant?.leaseEndDate ||
+      tenant?.leaseEnd ||
+      tenant?.endDate ||
+      tenant?.moveOutDate
   );
   if (explicitEndDate) return explicitEndDate;
 
-  const startDate = toDate(tenant?.leaseStartDate || tenant?.leaseStart || tenant?.startDate);
+  const startDate = toDate(
+    tenant?.leaseStartDate ||
+      tenant?.leaseStart ||
+      tenant?.startDate
+  );
   const duration = parseDuration(tenant?.leaseDuration);
   if (!startDate || !duration) return null;
 
-  return new Date(startDate.getTime() + duration);
+  if (duration.unit === "month") {
+    return addMonthsClamped(startDate, duration.amount);
+  }
+
+  return new Date(
+    startDate.getTime() + duration.amount * DAY_IN_MS
+  );
 }
 
 function getReminderThreshold(endDate, now = new Date()) {
