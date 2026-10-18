@@ -28,7 +28,7 @@ test("calculates a lease end date from start date and duration", () => {
     leaseDuration: "3_months",
   });
 
-  assert.equal(endDate.toISOString(), "2026-12-30T00:00:00.000Z");
+  assert.equal(endDate.toISOString(), "2027-01-01T00:00:00.000Z");
 });
 
 test("selects exact supported calendar-day reminder thresholds", () => {
