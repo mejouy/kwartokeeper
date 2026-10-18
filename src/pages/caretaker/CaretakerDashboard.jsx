@@ -71,7 +71,7 @@ import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
 import { onAuthStateChanged } from "firebase/auth";
 import { addDoc, collection, deleteDoc, deleteField, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
-import { notifyMaintenanceStatusChanged } from "../../services/notificationService";
+import { notifyMaintenanceStatusChanged, notifyCashPaymentRecorded } from "../../services/notificationService";
 import { uploadToCloudinary } from "../../utils/cloudinary";
 import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
 import { getPropertyCoverPhotoUrl } from "../../utils/getPropertyCoverPhotoUrl";
@@ -1521,7 +1521,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           return;
         }
       }
-      await addDoc(collection(db, "payments"), {
+      const cashRef = await addDoc(collection(db, "payments"), {
         tenantId: cashTenant.id,
         tenantName: cashTenant.name,
         propertyId: property.id,
@@ -1542,6 +1542,18 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         ...(proofUrl ? { proofUrl } : {}),
       });
       pushNotices([{ userId: cashTenant.id, kind: "payment", category: "payment", type: "success", title: "Cash payment recorded", message: `Your caretaker recorded your ${peso(cash.amount)} cash payment for ${cash.periodMonth}. Thank you!` }]).catch((err) => console.warn("Cash notice failed:", err?.code || err));
+      notifyCashPaymentRecorded(
+        {
+          id: cashRef.id,
+          tenantName: cashTenant.name,
+          roomNumber: cashTenant.roomNumber,
+          amount: Number(cash.amount),
+          periodMonth: cash.periodMonth,
+          propertyId: property.id,
+          ownerUid: cashTenant.ownerUid || property.ownerUid || profile.ownerUid || "",
+        },
+        "caretaker",
+      );
       setCashOpen(false);
       notify(`Recorded ${peso(cash.amount)} from ${cashTenant.name}.`);
     } catch (err) {
