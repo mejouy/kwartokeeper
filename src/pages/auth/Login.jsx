@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Box, Button, TextField, Typography, Link,
@@ -6,7 +6,7 @@ import {
   FormControlLabel, Checkbox, Divider,
   Dialog, DialogTitle, DialogContent, DialogContentText, DialogActions
 } from '@mui/material';
-import { Visibility, VisibilityOff } from '@mui/icons-material';
+import { Visibility, VisibilityOff, MailOutlineRounded, LockOutlined, ArrowForwardRounded } from '@mui/icons-material';
 import {
   signInWithEmailAndPassword,
   sendPasswordResetEmail,
@@ -16,9 +16,10 @@ import {
 } from 'firebase/auth';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
+import AuthLayout, { FormHeading } from '../../components/AuthLayout';
+import { fieldSx, primaryButtonSx } from '../../components/authStyles';
 
-const FACADE_ROWS = 6;
-const FACADE_COLS = 5;
+// Lit windows on the brand panel's building (6 rows x 5 columns)
 const LIT_PATTERN = [
   1, 0, 0, 1, 0,
   0, 0, 1, 0, 0,
@@ -27,52 +28,6 @@ const LIT_PATTERN = [
   0, 0, 1, 0, 1,
   1, 0, 0, 1, 0,
 ];
-
-function DormFacade() {
-  const windows = useMemo(() => {
-    const w = [];
-    const gap = 18;
-    const size = 34;
-    for (let row = 0; row < FACADE_ROWS; row++) {
-      for (let col = 0; col < FACADE_COLS; col++) {
-        const idx = row * FACADE_COLS + col;
-        w.push({
-          x: col * (size + gap),
-          y: row * (size + gap),
-          lit: LIT_PATTERN[idx] === 1,
-          size,
-        });
-      }
-    }
-    return w;
-  }, []);
-
-  const width = FACADE_COLS * (34 + 18) - 18;
-  const height = FACADE_ROWS * (34 + 18) - 18;
-
-  return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      width="100%"
-      style={{ maxWidth: 300, display: 'block' }}
-      role="img"
-      aria-label="Illustration of a dormitory building at night, with some rooms lit to show occupancy"
-    >
-      {windows.map((win, i) => (
-        <rect
-          key={i}
-          x={win.x}
-          y={win.y}
-          width={win.size}
-          height={win.size}
-          rx={4}
-          fill={win.lit ? '#ff4500' : 'rgba(202, 220, 246, 0.16)'}
-          opacity={win.lit ? 0.92 : 1}
-        />
-      ))}
-    </svg>
-  );
-}
 
 export default function Login() {
   const navigate = useNavigate();
@@ -180,7 +135,8 @@ export default function Login() {
     }
   };
 
-  const handleOpenResetDialog = () => {
+  const handleOpenResetDialog = (e) => {
+    e?.currentTarget?.blur(); // release focus before the dialog hides the page from screen readers
     setResetEmail(email); // Pre-fill with main login email field value if typed
     setResetError('');
     setResetSuccess('');
@@ -225,175 +181,130 @@ export default function Login() {
   };
 
   return (
-    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: { xs: 'column', md: 'row' } }}>
+    <AuthLayout
+      title="Welcome to KwartoKeeper!"
+      subtitle="KwartoKeeper tracks who's in and who's out, in real time, so property owners and caretakers always know their dormitory is safe."
+      lit={LIT_PATTERN}
+    >
+      <FormHeading title="Log in to your account" subtitle="Enter your credentials to manage or view your space." />
 
-      {/* Left panel */}
-      <Box
-        sx={{
-          flex: { xs: '0 0 auto', md: '0 0 42%' },
-          bgcolor: '#202020',
-          color: '#ffffff',
-          display: 'flex',
-          flexDirection: 'column',
-          justifyContent: { xs: 'flex-start', md: 'center' },
-          alignItems: 'flex-start',
-          px: { xs: 4, md: 8 },
-          py: { xs: 4, md: 0 },
-          gap: 4,
-        }}
-      >
-        <Box
-          component="img"
-          src="/KwartoKeeper-DarkMode-Icon.png"
-          alt="KwartoKeeper"
-          sx={{ height: 40, display: { xs: 'none', md: 'block' } }}
+      {error && <Alert severity="error" sx={{ mb: 3, borderRadius: '10px' }}>{error}</Alert>}
+
+      <Box component="form" onSubmit={handleLogin} noValidate sx={{ display: 'grid', gap: 2.25 }}>
+        <TextField
+          required
+          fullWidth
+          id="email"
+          label="Email address"
+          name="email"
+          type="email"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          autoComplete="email"
+          autoFocus
+          sx={fieldSx}
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <MailOutlineRounded />
+                </InputAdornment>
+              ),
+            },
+            htmlInput: { inputMode: 'email', autoCapitalize: 'none' },
+          }}
         />
 
-        <Box sx={{ display: { xs: 'none', md: 'block' } }}>
-          <DormFacade />
-        </Box>
+        <TextField
+          required
+          fullWidth
+          name="password"
+          label="Password"
+          type={showPassword ? 'text' : 'password'}
+          id="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          autoComplete="current-password"
+          sx={fieldSx}
+          slotProps={{
+            input: {
+              startAdornment: (
+                <InputAdornment position="start">
+                  <LockOutlined />
+                </InputAdornment>
+              ),
+              endAdornment: (
+                <InputAdornment position="end">
+                  <IconButton
+                    onClick={() => setShowPassword(!showPassword)}
+                    edge="end"
+                    aria-label={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <VisibilityOff /> : <Visibility />}
+                  </IconButton>
+                </InputAdornment>
+              ),
+            },
+          }}
+        />
 
-        <Box>
-          <Typography
-            variant="h4"
-            sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, color: '#ffffff', lineHeight: 1.15, mb: 1.5 }}
-          >
-            Welcome to KwartoKeeper!
-          </Typography>
-          <Typography variant="body1" sx={{ color: '#cadcf6', maxWidth: 340 }}>
-            KwartoKeeper tracks who's in and who's out, in real time, so property owners and caretakers always know their dormitory is safe.
-          </Typography>
-        </Box>
-      </Box>
-
-      {/* Right panel — form */}
-      <Box
-        sx={{
-          flex: 1,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          px: 3,
-          py: { xs: 5, md: 6 },
-        }}
-      >
-        <Box sx={{ width: '100%', maxWidth: 380 }}>
-
-          <Typography variant="h5" color="text.primary" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Log in to your account
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-            Enter your credentials to manage or view your space.
-          </Typography>
-
-          {error && <Alert severity="error" sx={{ mb: 3 }}>{error}</Alert>}
-
-          <Box component="form" onSubmit={handleLogin} noValidate>
-
-            <TextField
-              margin="normal"
-              required
-              fullWidth
-              id="email"
-              label="Email address"
-              name="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              autoComplete="email"
-              autoFocus
-              sx={{ mb: 2 }}
-            />
-
-            <TextField
-              required
-              fullWidth
-              name="password"
-              label="Password"
-              type={showPassword ? 'text' : 'password'}
-              id="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              sx={{ mb: 1 }}
-              slotProps={{
-                input: {
-                  endAdornment: (
-                    <InputAdornment position="end">
-                      <IconButton
-                        onClick={() => setShowPassword(!showPassword)}
-                        edge="end"
-                        aria-label={showPassword ? 'Hide password' : 'Show password'}
-                      >
-                        {showPassword ? <VisibilityOff /> : <Visibility />}
-                      </IconButton>
-                    </InputAdornment>
-                  ),
-                },
-              }}
-            />
-
-            <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 4 }}>
-              <FormControlLabel
-                control={
-                  <Checkbox
-                    checked={rememberMe}
-                    onChange={(e) => setRememberMe(e.target.checked)}
-                    color="primary"
-                    size="small"
-                  />
-                }
-                label={<Typography variant="body2" color="text.secondary">Remember me</Typography>}
-              />
-              <Link
-                component="button"
-                type="button"
-                variant="body2"
-                underline="hover"
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 1, mt: -0.5 }}>
+          <FormControlLabel
+            control={
+              <Checkbox
+                checked={rememberMe}
+                onChange={(e) => setRememberMe(e.target.checked)}
                 color="primary"
-                onClick={handleOpenResetDialog}
-                sx={{ fontWeight: 500 }}
-              >
-                Forgot password?
-              </Link>
-            </Box>
+                size="small"
+              />
+            }
+            label={<Typography variant="body2" color="text.secondary">Remember me</Typography>}
+          />
+          <Link
+            component="button"
+            type="button"
+            variant="body2"
+            underline="hover"
+            color="primary"
+            onClick={handleOpenResetDialog}
+            sx={{ fontWeight: 600 }}
+          >
+            Forgot password?
+          </Link>
+        </Box>
 
-            <Button
-              type="submit"
-              fullWidth
-              variant="contained"
-              size="large"
-              disabled={loading}
-              sx={{
-                mb: 3,
-                py: 1.5,
-                fontWeight: 600,
-                backgroundColor: 'primary.main',
-                '&:hover': { backgroundColor: 'primary.dark' },
-              }}
-            >
-              {loading ? <CircularProgress size={24} color="inherit" /> : 'Log in'}
-            </Button>
+        <Button
+          type="submit"
+          fullWidth
+          variant="contained"
+          size="large"
+          disabled={loading}
+          endIcon={loading ? null : <ArrowForwardRounded />}
+          sx={primaryButtonSx}
+        >
+          {loading ? <CircularProgress size={24} color="inherit" /> : 'Log in'}
+        </Button>
 
-            <Divider sx={{ mb: 3, typography: 'body2', color: 'text.secondary' }}>or</Divider>
+        <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
+          Caretaker or tenant? Use the login details your owner sent you.
+        </Typography>
 
-            <Box sx={{ textAlign: 'center' }}>
-              <Typography variant="body2" color="text.primary" sx={{ mb: 1.5 }}>
-                Don't have an owner account?
-              </Typography>
-              <Button
-                type="button"
-                fullWidth
-                variant="outlined"
-                size="large"
-                onClick={() => navigate('/signup')}
-                sx={{ py: 1.5, fontWeight: 600 }}
-              >
-                Register your property
-              </Button>
-            </Box>
+        <Divider sx={{ typography: 'body2', color: 'text.secondary', my: 0.5 }}>or</Divider>
 
-          </Box>
+        <Box sx={{ p: 2.25, borderRadius: '14px', bgcolor: 'background.paper', textAlign: 'center' }}>
+          <Typography variant="body2" color="text.primary" sx={{ fontWeight: 600, mb: 1.5 }}>
+            Don't have an owner account?
+          </Typography>
+          <Button
+            type="button"
+            fullWidth
+            variant="outlined"
+            size="large"
+            onClick={() => navigate('/signup')}
+            sx={{ py: 1.25, fontWeight: 700, borderRadius: '10px', bgcolor: '#fff', borderWidth: 1.5, '&:hover': { borderWidth: 1.5 } }}
+          >
+            Register your property
+          </Button>
         </Box>
       </Box>
 
@@ -403,16 +314,17 @@ export default function Login() {
         onClose={handleCloseResetDialog}
         fullWidth
         maxWidth="xs"
+        slotProps={{ paper: { sx: { borderRadius: '20px', m: 2, width: 'calc(100% - 32px)' } } }}
       >
         <Box component="form" onSubmit={handleSendPasswordReset} noValidate>
-          <DialogTitle sx={{ fontWeight: 700 }}>Reset Password</DialogTitle>
+          <DialogTitle sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, pb: 1 }}>Reset Password</DialogTitle>
           <DialogContent>
             <DialogContentText sx={{ mb: 2 }}>
               Enter the email address associated with your KwartoKeeper account, and we'll send you a link to reset your password.
             </DialogContentText>
 
-            {resetError && <Alert severity="error" sx={{ mb: 2 }}>{resetError}</Alert>}
-            {resetSuccess && <Alert severity="success" sx={{ mb: 2 }}>{resetSuccess}</Alert>}
+            {resetError && <Alert severity="error" sx={{ mb: 2, borderRadius: '10px' }}>{resetError}</Alert>}
+            {resetSuccess && <Alert severity="success" sx={{ mb: 2, borderRadius: '10px' }}>{resetSuccess}</Alert>}
 
             {!resetSuccess && (
               <TextField
@@ -427,11 +339,21 @@ export default function Login() {
                 onChange={(e) => setResetEmail(e.target.value)}
                 required
                 disabled={resetLoading}
+                sx={fieldSx}
+                slotProps={{
+                  input: {
+                    startAdornment: (
+                      <InputAdornment position="start">
+                        <MailOutlineRounded />
+                      </InputAdornment>
+                    ),
+                  },
+                }}
               />
             )}
           </DialogContent>
-          <DialogActions sx={{ px: 3, pb: 2.5 }}>
-            <Button onClick={handleCloseResetDialog} color="inherit" disabled={resetLoading}>
+          <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
+            <Button onClick={handleCloseResetDialog} color="inherit" disabled={resetLoading} sx={{ fontWeight: 600 }}>
               {resetSuccess ? 'Close' : 'Cancel'}
             </Button>
             {!resetSuccess && (
@@ -439,6 +361,7 @@ export default function Login() {
                 type="submit"
                 variant="contained"
                 disabled={resetLoading}
+                sx={{ fontWeight: 700, borderRadius: '10px', boxShadow: 'none' }}
               >
                 {resetLoading ? <CircularProgress size={20} color="inherit" /> : 'Send Reset Link'}
               </Button>
@@ -446,7 +369,6 @@ export default function Login() {
           </DialogActions>
         </Box>
       </Dialog>
-
-    </Box>
+    </AuthLayout>
   );
 }

@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState } from "react";
 import { useNavigate, Link as RouterLink } from "react-router-dom";
 import {
   Box,
@@ -15,14 +15,25 @@ import {
   DialogContent,
   DialogActions,
   DialogContentText,
+  InputAdornment,
+  IconButton,
 } from "@mui/material";
+import {
+  Visibility,
+  VisibilityOff,
+  PersonOutlineRounded,
+  MailOutlineRounded,
+  PhoneOutlined,
+  LockOutlined,
+  ArrowForwardRounded,
+} from "@mui/icons-material";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
+import AuthLayout, { FormHeading } from "../../components/AuthLayout";
+import { fieldSx, primaryButtonSx } from "../../components/authStyles";
 
-// Same facade motif as the login page for design continuity.
-const FACADE_ROWS = 6;
-const FACADE_COLS = 5;
+// Same building as the login page, with a different set of lit windows.
 const LIT_PATTERN = [
   0, 0, 1, 0, 0,
   0, 0, 0, 0, 1,
@@ -32,51 +43,13 @@ const LIT_PATTERN = [
   0, 0, 1, 0, 0,
 ];
 
-function DormFacade() {
-  const windows = useMemo(() => {
-    const w = [];
-    const gap = 18;
-    const size = 34;
-    for (let row = 0; row < FACADE_ROWS; row++) {
-      for (let col = 0; col < FACADE_COLS; col++) {
-        const idx = row * FACADE_COLS + col;
-        w.push({
-          x: col * (size + gap),
-          y: row * (size + gap),
-          lit: LIT_PATTERN[idx] === 1,
-          size,
-        });
-      }
-    }
-    return w;
-  }, []);
-
-  const width = FACADE_COLS * (34 + 18) - 18;
-  const height = FACADE_ROWS * (34 + 18) - 18;
-
-  return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      width="100%"
-      style={{ maxWidth: 300, display: "block" }}
-      role="img"
-      aria-label="Illustration of a dormitory building at night, with a few rooms lit"
-    >
-      {windows.map((win, i) => (
-        <rect
-          key={i}
-          x={win.x}
-          y={win.y}
-          width={win.size}
-          height={win.size}
-          rx={4}
-          fill={win.lit ? "#ff4500" : "rgba(202, 220, 246, 0.16)"}
-          opacity={win.lit ? 0.92 : 1}
-        />
-      ))}
-    </svg>
-  );
-}
+const startIcon = (Icon) => ({
+  startAdornment: (
+    <InputAdornment position="start">
+      <Icon />
+    </InputAdornment>
+  ),
+});
 
 export default function OwnerRegister() {
   const navigate = useNavigate();
@@ -91,10 +64,20 @@ export default function OwnerRegister() {
   const [agreed, setAgreed] = useState(false);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
 
   // Modals for Terms and Privacy Policy
   const [termsOpen, setTermsOpen] = useState(false);
   const [privacyOpen, setPrivacyOpen] = useState(false);
+
+  // Opens a dialog from a link inside the checkbox label. preventDefault stops the
+  // click from ticking the box; blur releases focus before the dialog hides the page
+  // from screen readers (otherwise the browser blocks aria-hidden on a focused element).
+  const openDialog = (setOpen) => (e) => {
+    e.preventDefault();
+    e.currentTarget.blur();
+    setOpen(true);
+  };
 
   const handleChange = (field) => (e) => {
     if (field === "phone") {
@@ -163,206 +146,164 @@ export default function OwnerRegister() {
     }
   };
 
-  return (
-    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: { xs: "column", md: "row" } }}>
-
-      {/* Left Branding Panel */}
-      <Box
-        sx={{
-          flex: { xs: "0 0 auto", md: "0 0 42%" },
-          bgcolor: "#202020",
-          color: "#ffffff",
-          display: "flex",
-          flexDirection: "column",
-          justifyContent: { xs: "flex-start", md: "center" },
-          alignItems: "flex-start",
-          px: { xs: 4, md: 8 },
-          py: { xs: 4, md: 0 },
-          gap: 4,
-        }}
+  const passwordToggle = (
+    <InputAdornment position="end">
+      <IconButton
+        onClick={() => setShowPassword((v) => !v)}
+        edge="end"
+        aria-label={showPassword ? "Hide passwords" : "Show passwords"}
       >
-        <Box
-          component="img"
-          src="/KwartoKeeper-DarkMode-Icon.png"
-          alt="KwartoKeeper"
-          sx={{ height: 40, display: { xs: "none", md: "block" } }}
+        {showPassword ? <VisibilityOff /> : <Visibility />}
+      </IconButton>
+    </InputAdornment>
+  );
+  const confirmTouched = form.confirmPassword.length > 0;
+  const passwordsMatch = form.password === form.confirmPassword;
+
+  return (
+    <AuthLayout
+      title="Set up your property in minutes."
+      subtitle="Create your owner account, then add rooms, tenants, and caretakers as your dormitory fills up."
+      lit={LIT_PATTERN}
+    >
+      <FormHeading
+        title="Create your owner account"
+        subtitle="Set up your KwartoKeeper account to start managing your properties."
+      />
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 3, borderRadius: "10px" }}>
+          {error}
+        </Alert>
+      )}
+
+      <Box component="form" onSubmit={handleSubmit} noValidate sx={{ display: "grid", gap: 2.25 }}>
+        <TextField
+          label="Full name"
+          fullWidth
+          required
+          autoComplete="name"
+          value={form.fullName}
+          onChange={handleChange("fullName")}
+          sx={fieldSx}
+          slotProps={{ input: startIcon(PersonOutlineRounded) }}
+        />
+        <TextField
+          label="Email address"
+          type="email"
+          fullWidth
+          required
+          autoComplete="email"
+          value={form.email}
+          onChange={handleChange("email")}
+          sx={fieldSx}
+          slotProps={{
+            input: startIcon(MailOutlineRounded),
+            htmlInput: { inputMode: "email", autoCapitalize: "none" },
+          }}
+        />
+        <TextField
+          label="Phone number"
+          type="tel"
+          fullWidth
+          required
+          autoComplete="tel"
+          value={form.phone}
+          onChange={handleChange("phone")}
+          helperText="Numbers only, e.g. 09171234567"
+          sx={fieldSx}
+          slotProps={{
+            input: startIcon(PhoneOutlined),
+            htmlInput: { maxLength: 15, inputMode: "numeric" },
+          }}
         />
 
-        <Box sx={{ display: { xs: "none", md: "block" } }}>
-          <DormFacade />
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2.25 }}>
+          <TextField
+            label="Password"
+            type={showPassword ? "text" : "password"}
+            fullWidth
+            required
+            autoComplete="new-password"
+            value={form.password}
+            onChange={handleChange("password")}
+            helperText="At least 6 characters"
+            sx={fieldSx}
+            slotProps={{ input: { ...startIcon(LockOutlined), endAdornment: passwordToggle } }}
+          />
+          <TextField
+            label="Confirm password"
+            type={showPassword ? "text" : "password"}
+            fullWidth
+            required
+            autoComplete="new-password"
+            value={form.confirmPassword}
+            onChange={handleChange("confirmPassword")}
+            error={confirmTouched && !passwordsMatch}
+            helperText={confirmTouched ? (passwordsMatch ? "Passwords match" : "Passwords do not match") : " "}
+            sx={{
+              ...fieldSx,
+              "& .MuiFormHelperText-root:not(.Mui-error)": { color: confirmTouched ? "success.main" : "text.secondary" },
+            }}
+            slotProps={{ input: startIcon(LockOutlined) }}
+          />
         </Box>
 
-        <Box>
-          <Typography
-            variant="h4"
-            sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, color: "#ffffff", lineHeight: 1.15, mb: 1.5 }}
-          >
-            Set up your property in minutes.
-          </Typography>
-          <Typography variant="body1" sx={{ color: "#cadcf6", maxWidth: 340 }}>
-            Create your owner account, then add rooms, tenants, and caretakers as your dormitory fills up.
-          </Typography>
-        </Box>
-      </Box>
-
-      {/* Right Registration Form */}
-      <Box
-        sx={{
-          flex: 1,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          px: 3,
-          py: { xs: 5, md: 6 },
-        }}
-      >
-        <Box sx={{ width: "100%", maxWidth: 380 }}>
-
-          <Typography variant="h5" color="text.primary" sx={{ fontWeight: 600, mb: 0.5 }}>
-            Create your owner account
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-            Set up your KwartoKeeper account to start managing your properties.
-          </Typography>
-
-          {error && (
-            <Alert severity="error" sx={{ mb: 3 }}>
-              {error}
-            </Alert>
-          )}
-
-          <Box component="form" onSubmit={handleSubmit} noValidate>
-            <TextField
-              label="Full name"
-              fullWidth
-              required
-              margin="normal"
-              value={form.fullName}
-              onChange={handleChange("fullName")}
-              sx={{ mb: 2 }}
+        <FormControlLabel
+          sx={{ alignItems: "flex-start", mx: 0, p: 1.5, borderRadius: "12px", bgcolor: "background.paper" }}
+          control={
+            <Checkbox
+              checked={agreed}
+              onChange={(e) => setAgreed(e.target.checked)}
+              color="primary"
+              size="small"
+              sx={{ p: 0, mr: 1.25, mt: "2px" }}
             />
-            <TextField
-              label="Email address"
-              type="email"
-              fullWidth
-              required
-              margin="normal"
-              value={form.email}
-              onChange={handleChange("email")}
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              label="Phone number"
-              type="tel"
-              fullWidth
-              required
-              margin="normal"
-              value={form.phone}
-              onChange={handleChange("phone")}
-              sx={{ mb: 2 }}
-              inputProps={{ maxLength: 15 }}
-            />
-            <TextField
-              label="Password"
-              type="password"
-              fullWidth
-              required
-              margin="normal"
-              value={form.password}
-              onChange={handleChange("password")}
-              helperText="At least 6 characters"
-              sx={{ mb: 2 }}
-            />
-            <TextField
-              label="Confirm password"
-              type="password"
-              fullWidth
-              required
-              margin="normal"
-              value={form.confirmPassword}
-              onChange={handleChange("confirmPassword")}
-              sx={{ mb: 1 }}
-            />
-
-            <FormControlLabel
-              sx={{ mt: 1, mb: 1 }}
-              control={
-                <Checkbox
-                  checked={agreed}
-                  onChange={(e) => setAgreed(e.target.checked)}
-                  color="primary"
-                  size="small"
-                />
-              }
-              label={
-                <Typography variant="body2" color="text.secondary">
-                  I agree to the{" "}
-                  <Link
-                    component="span"
-                    variant="body2"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setTermsOpen(true)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setTermsOpen(true);
-                      }
-                    }}
-                    sx={{ cursor: "pointer" }}
-                  >
-                    Terms of Service
-                  </Link>{" "}
-                  and{" "}
-                  <Link
-                    component="span"
-                    variant="body2"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setPrivacyOpen(true)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setPrivacyOpen(true);
-                      }
-                    }}
-                    sx={{ cursor: "pointer" }}
-                  >
-                    Privacy Policy
-                  </Link>
-                </Typography>
-              }
-            />
-
-            <Button
-              type="submit"
-              variant="contained"
-              fullWidth
-              size="large"
-              disabled={loading}
-              sx={{
-                mt: 2,
-                mb: 3,
-                py: 1.5,
-                fontWeight: 600,
-                backgroundColor: "primary.main",
-                "&:hover": { backgroundColor: "primary.dark" },
-              }}
-            >
-              {loading ? (
-                <CircularProgress size={24} color="inherit" />
-              ) : (
-                "Create owner account"
-              )}
-            </Button>
-
-            <Box sx={{ textAlign: "center" }}>
-              <Link component={RouterLink} to="/login" variant="body2" underline="hover" color="text.secondary">
-                Back to log in
+          }
+          label={
+            <Typography variant="body2" color="text.secondary" sx={{ lineHeight: 1.5 }}>
+              I agree to the{" "}
+              <Link
+                component="button"
+                type="button"
+                variant="body2"
+                onClick={openDialog(setTermsOpen)}
+                sx={{ fontWeight: 600, verticalAlign: "baseline" }}
+              >
+                Terms of Service
+              </Link>{" "}
+              and{" "}
+              <Link
+                component="button"
+                type="button"
+                variant="body2"
+                onClick={openDialog(setPrivacyOpen)}
+                sx={{ fontWeight: 600, verticalAlign: "baseline" }}
+              >
+                Privacy Policy
               </Link>
-            </Box>
-          </Box>
-        </Box>
+            </Typography>
+          }
+        />
+
+        <Button
+          type="submit"
+          variant="contained"
+          fullWidth
+          size="large"
+          disabled={loading}
+          endIcon={loading ? null : <ArrowForwardRounded />}
+          sx={primaryButtonSx}
+        >
+          {loading ? <CircularProgress size={24} color="inherit" /> : "Create owner account"}
+        </Button>
+
+        <Typography variant="body2" color="text.secondary" sx={{ textAlign: "center" }}>
+          Already have an account?{" "}
+          <Link component={RouterLink} to="/login" underline="hover" sx={{ fontWeight: 700 }}>
+            Log in
+          </Link>
+        </Typography>
       </Box>
 
       {/* Terms of Service Dialog */}
@@ -464,8 +405,7 @@ export default function OwnerRegister() {
           <Button onClick={() => setPrivacyOpen(false)}>Close</Button>
         </DialogActions>
       </Dialog>
-
-    </Box>
+    </AuthLayout>
   );
 }
 
