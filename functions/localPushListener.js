@@ -16,6 +16,7 @@ const { initializeApp, cert } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
 const { startLeaseReminderLoop } = require("./leaseReminderLoop");
+const { startOverdueLoop } = require("./overdueLoop");
 
 const serviceAccount = require(path.join(__dirname, "serviceAccountKey.json"));
 initializeApp({ credential: cert(serviceAccount) });
@@ -94,3 +95,4 @@ db.collection("notifications").onSnapshot(
 );
 
 startLeaseReminderLoop(db);
+startOverdueLoop(db);
