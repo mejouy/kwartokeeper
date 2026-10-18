@@ -75,6 +75,7 @@ import {
   notifyMaintenanceSubmitted,
   notifyMaintenanceCancelled,
   notifyMaintenanceFollowUp,
+  notifyPaymentSubmitted,
 } from "../../services/notificationService";
 import { normalizePayment } from "../../utils/normalizePayment";
 import { printReceipt as printReceiptDoc } from "../../utils/receiptPrint";
@@ -1254,7 +1255,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       for (const item of items) {
         try {
           const sentRef = await addDoc(collection(db, item.kind === "payment" ? "payments" : "maintenance_tickets"), { ...item.record, createdAt: serverTimestamp() });
-          if (item.kind !== "payment") notifyMaintenanceSubmitted({ id: sentRef.id, ...item.record }, "tenant");
+          if (item.kind === "payment") notifyPaymentSubmitted({ id: sentRef.id, ...item.record }, "tenant");
+          else notifyMaintenanceSubmitted({ id: sentRef.id, ...item.record }, "tenant");
           remaining = remaining.filter((x) => x.id !== item.id);
           writeOutbox(user.uid, remaining);
           sent += 1;
@@ -1548,7 +1550,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         ...(proofUrl ? { proofUrl } : {}),
       };
 
-      await addDoc(collection(db, "payments"), { ...record, createdAt: serverTimestamp() });
+      const paymentRef = await addDoc(collection(db, "payments"), { ...record, createdAt: serverTimestamp() });
+      notifyPaymentSubmitted({ id: paymentRef.id, ...record }, "tenant");
 
       setSubmittedPayment(record);
       setPayStep(2);

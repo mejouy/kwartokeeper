@@ -259,3 +259,79 @@ export async function notifyMaintenanceFollowUp(ticket, actorRole = "tenant") {
     console.warn("notifyMaintenanceFollowUp failed:", error);
   }
 }
+
+/**
+ * A tenant just submitted a rent payment (status "Pending").
+ * Notifies the owner and the property's caretakers who can view financials.
+ * `payment` = payment data plus its id: { id, ...data }
+ */
+export async function notifyPaymentSubmitted(payment = {}, actorRole = "tenant") {
+  try {
+    const propertyId = payment.propertyId || null;
+    const ownerUid = payment.ownerUid || null;
+    const caretakerUids = await getCaretakerUids(propertyId, {
+      permission: "viewFinancials",
+    });
+    const who = payment.tenantName || "A tenant";
+    const room =
+      payment.roomNumber && payment.roomNumber !== "N/A"
+        ? ` (Room ${payment.roomNumber})`
+        : "";
+    const amount = Number(payment.amount);
+    const amountText = Number.isFinite(amount)
+      ? `PHP ${amount.toLocaleString("en-PH")}`
+      : "a payment";
+    await notifyUsers([ownerUid, ...caretakerUids], {
+      kind: "payment",
+      type: "info",
+      title: "Payment awaiting review",
+      message: `${who}${room} submitted ${amountText} for ${payment.periodMonth || "this month"}. Please review it.`,
+      ownerId: ownerUid,
+      actorRole,
+      extra: {
+        category: "payment",
+        paymentId: payment.id || null,
+        propertyId,
+        tenantId: payment.tenantId || null,
+      },
+    });
+  } catch (error) {
+    console.warn("Payment notification failed:", error?.code || error);
+  }
+}
+
+/**
+ * A caretaker just recorded a cash payment. Notifies the owner.
+ * (The tenant is already notified by the existing code.)
+ */
+export async function notifyCashPaymentRecorded(
+  payment = {},
+  actorRole = "caretaker",
+) {
+  try {
+    const ownerUid = payment.ownerUid || null;
+    const room =
+      payment.roomNumber && payment.roomNumber !== "N/A"
+        ? ` (Room ${payment.roomNumber})`
+        : "";
+    const amount = Number(payment.amount);
+    const amountText = Number.isFinite(amount)
+      ? `PHP ${amount.toLocaleString("en-PH")}`
+      : "a cash payment";
+    await notifyUsers([ownerUid], {
+      kind: "payment",
+      type: "success",
+      title: "Cash payment recorded",
+      message: `Your caretaker recorded ${amountText} from ${payment.tenantName || "a tenant"}${room} for ${payment.periodMonth || "this month"}.`,
+      ownerId: ownerUid,
+      actorRole,
+      extra: {
+        category: "payment",
+        paymentId: payment.id || null,
+        propertyId: payment.propertyId || null,
+      },
+    });
+  } catch (error) {
+    console.warn("Cash payment notification failed:", error?.code || error);
+  }
+}
