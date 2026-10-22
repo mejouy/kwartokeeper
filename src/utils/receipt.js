@@ -4,6 +4,10 @@ import { issuerFromProfile } from "./receiptPrint";
 // Receipt numbers run in one sequence per owner. The owner sets an optional prefix and the next
 // number on the Account page, so the series can match their BIR-registered receipt/invoice booklet.
 
+// Money actually received gets a receipt: full (Paid) and partial payments alike
+export const RECEIPT_STATUSES = ["paid", "partial"];
+export const isReceiptable = (status) => RECEIPT_STATUSES.includes(String(status || "").trim().toLowerCase());
+
 export const formatReceiptNo = (prefix, seq) => `${String(prefix || "").trim()}${String(seq).padStart(6, "0")}`;
 
 // Reserve the next number inside a transaction. Do all other reads first, then call this, then write.
@@ -19,7 +23,7 @@ export async function reserveReceiptNo(tx, db, ownerUid) {
   };
 }
 
-// Number a payment that was marked Paid before numbering existed. Safe to call twice.
+// Number a Paid or Partial payment that was recorded before it had a number. Safe to call twice.
 export function issueReceipt(db, ownerUid, paymentId) {
   return runTransaction(db, async (tx) => {
     const paymentRef = doc(db, "payments", paymentId);
@@ -32,7 +36,7 @@ export function issueReceipt(db, ownerUid, paymentId) {
   });
 }
 
-// Number every un-numbered Paid payment, oldest first, so the journal reads in date order.
+// Number every un-numbered Paid / Partial payment, oldest first, so the journal reads in date order.
 export async function issueMissingReceipts(db, ownerUid, payments) {
   let done = 0;
   for (const p of payments) {

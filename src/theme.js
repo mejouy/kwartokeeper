@@ -17,12 +17,20 @@ const theme = createTheme({
     button: { fontFamily: '"Inter", sans-serif', fontWeight: 600 },
   },
   components: {
-    MuiTextField: {
+    // Dialogs are white sheets (like the cards on every page), so the cream
+    // input fields stand out instead of blending into a cream dialog
+    MuiDialog: {
       styleOverrides: {
-        root: { 
-          backgroundColor: '#f2e9dd', 
-          borderRadius: '4px'
-        }
+        // Scoped under the dialog root so it always beats the Paper's own cream background
+        root: { '& .MuiDialog-paper': { backgroundColor: '#ffffff', backgroundImage: 'none' } },
+      },
+    },
+    // The cream fill goes on the input box itself, not the whole TextField:
+    // the TextField also wraps the floating label and helper text, so filling
+    // it made the colour spill past the (rounded) border and behind the label.
+    MuiOutlinedInput: {
+      styleOverrides: {
+        root: { backgroundColor: '#f2e9dd' }
       }
     },
     MuiButton: {

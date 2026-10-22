@@ -7,7 +7,7 @@
 // The accounts are saved on the property document (properties/{id}.paymentMethods
 // and .paymentNote). The tenant dashboard reads them from there.
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   Alert,
@@ -38,6 +38,11 @@ import {
   Accordion,
   AccordionSummary,
   AccordionDetails,
+  Avatar,
+  InputBase,
+  ToggleButton,
+  ToggleButtonGroup,
+  Autocomplete,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 
@@ -57,6 +62,9 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined";
 import SmartphoneOutlinedIcon from "@mui/icons-material/SmartphoneOutlined";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
+import AccountBalanceWalletOutlinedIcon from "@mui/icons-material/AccountBalanceWalletOutlined";
+import PendingActionsOutlinedIcon from "@mui/icons-material/PendingActionsOutlined";
+import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
 
 import {
   addDoc,
@@ -74,8 +82,10 @@ import {
 import { db } from "../../config/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { uploadToCloudinary } from "../../utils/cloudinary";
-import { issueReceipt, reserveReceiptNo } from "../../utils/receipt";
+import { isReceiptable, issueReceipt, reserveReceiptNo } from "../../utils/receipt";
 import { issuerFromProfile, printReceipt as printReceiptDoc } from "../../utils/receiptPrint";
+import { rentStatusOf } from "../../utils/tenantRent";
+import { withoutRemoved } from "../../utils/accountState";
 
 // ------------------------------------------------------------
 // CONSTANTS + PURE HELPERS
@@ -84,7 +94,7 @@ import { issuerFromProfile, printReceipt as printReceiptDoc } from "../../utils/
 const row = { display: "flex", alignItems: "center" };
 const BOTTOM_NAV_H = 64;
 const PAYMENT_METHODS = ["GCash", "Cash", "QR Ph", "Maya", "Other"];
-const PAYMENT_STATUSES = ["Paid", "Pending", "Partial", "Overdue"];
+const PAYMENT_STATUSES = ["Paid", "Partial", "Pending"];
 const MAX_AMOUNT = 10000000;
 const QR_MAX_MB = 5;
 
@@ -138,19 +148,19 @@ const cardSx = {
   bgcolor: "background.default",
   border: "1px solid",
   borderColor: "divider",
-  borderRadius: 3,
+  borderRadius: "18px",
 };
 
 const groupShellSx = {
   ...cardSx,
-  borderRadius: "12px !important",
+  borderRadius: "18px !important",
   overflow: "hidden",
   "&:before": { display: "none" },
 };
 
 // Dialogs: centred pop-ups on phones too (not full screen), scrolling inside
 const dialogPaperSx = {
-  borderRadius: 3,
+  borderRadius: "20px",
   m: { xs: 2, sm: 4 },
   width: { xs: "calc(100% - 32px)", sm: "calc(100% - 64px)" },
   maxHeight: { xs: "calc(100% - 32px)", sm: "calc(100% - 64px)" },
@@ -256,50 +266,6 @@ const cleanMethods = (methods) => {
   return out;
 };
 
-function SummaryStrip({ items }) {
-  return (
-    <Paper
-      elevation={0}
-      sx={{
-        ...cardSx,
-        overflow: "hidden",
-        display: "grid",
-        gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", lg: "repeat(4, minmax(0, 1fr))" },
-        mb: { xs: 2.5, sm: 3 },
-      }}
-    >
-      {items.map((item, i) => (
-        <Box
-          key={item.label}
-          sx={{
-            px: { xs: 1.75, sm: 2.5 },
-            py: { xs: 1.5, sm: 2 },
-            minWidth: 0,
-            borderTop: { xs: i > 1 ? "1px solid" : "none", lg: "none" },
-            borderLeft: { xs: i % 2 === 1 ? "1px solid" : "none", lg: i === 0 ? "none" : "1px solid" },
-            borderColor: "divider",
-          }}
-        >
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }} noWrap component="div">
-            {item.label}
-          </Typography>
-          <Typography
-            noWrap
-            sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: { xs: "1.2rem", sm: "1.5rem" }, lineHeight: 1.25, color: item.color }}
-          >
-            {item.value}
-          </Typography>
-          {item.sub && (
-            <Typography variant="caption" color="text.secondary" noWrap component="div">
-              {item.sub}
-            </Typography>
-          )}
-        </Box>
-      ))}
-    </Paper>
-  );
-}
-
 function SectionTitle({ title, sub, right }) {
   return (
     <Box sx={{ ...row, justifyContent: "space-between", gap: 2, mb: 1.5 }}>
@@ -353,8 +319,12 @@ function PaymentAccountsPanel({ properties, showToast }) {
     [properties]
   );
 
-  const [selectedId, setSelectedId] = useState("");
-  const [draft, setDraft] = useState(() => draftFromProperty(null));
+  // The chosen property (falls back to the first one, and recovers if it disappears)
+  const [pickedId, setPickedId] = useState("");
+  const selectedId = sortedProps.some((p) => p.id === pickedId) ? pickedId : sortedProps[0]?.id || "";
+  // Unsaved edits, per property. With no edits the form simply shows what is
+  // saved, so changes made elsewhere appear without any syncing code.
+  const [drafts, setDrafts] = useState({});
   const [errors, setErrors] = useState({});
   const [applyAll, setApplyAll] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -362,33 +332,18 @@ function PaymentAccountsPanel({ properties, showToast }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const fileInputs = useRef({});
 
-  // Pick the first property once they load (and recover if the selected one disappears)
-  useEffect(() => {
-    if (sortedProps.length === 0) {
-      if (selectedId) setSelectedId("");
-      return;
-    }
-    if (!sortedProps.some((p) => p.id === selectedId)) setSelectedId(sortedProps[0].id);
-  }, [sortedProps, selectedId]);
-
   const property = sortedProps.find((p) => p.id === selectedId) || null;
-  const savedJson = useMemo(() => JSON.stringify(draftFromProperty(property)), [property]);
-  const draftJson = JSON.stringify(draft);
-  const dirty = Boolean(property) && draftJson !== savedJson;
-
-  // Load the saved values when the property changes, or when they change elsewhere and nothing is being edited
-  const dirtyRef = useRef(false);
-  dirtyRef.current = dirty;
-  const lastLoaded = useRef({ id: "", json: "" });
-  useEffect(() => {
-    if (!property) return;
-    const switched = lastLoaded.current.id !== property.id;
-    if (switched || !dirtyRef.current) {
-      setDraft(JSON.parse(savedJson));
-      setErrors({});
-    }
-    lastLoaded.current = { id: property.id, json: savedJson };
-  }, [property, savedJson]);
+  const saved = useMemo(() => draftFromProperty(property), [property]);
+  const savedJson = JSON.stringify(saved);
+  const draft = drafts[selectedId] || saved;
+  const dirty = Boolean(property) && Boolean(drafts[selectedId]) && JSON.stringify(drafts[selectedId]) !== savedJson;
+  const updateDraft = (fn) => setDrafts((prev) => ({ ...prev, [selectedId]: fn(prev[selectedId] || saved) }));
+  const dropDrafts = (ids) =>
+    setDrafts((prev) => {
+      const next = { ...prev };
+      ids.forEach((id) => delete next[id]);
+      return next;
+    });
 
   // Warn before closing the tab with unsaved changes
   useEffect(() => {
@@ -403,11 +358,13 @@ function PaymentAccountsPanel({ properties, showToast }) {
 
   const changeProperty = (id) => {
     if (dirty && !window.confirm("You have unsaved changes. Switch property and discard them?")) return;
-    setSelectedId(id);
+    dropDrafts([selectedId]);
+    setErrors({});
+    setPickedId(id);
   };
 
   const setMethod = (key, patch) => {
-    setDraft((d) => ({ ...d, methods: { ...d.methods, [key]: { ...d.methods[key], ...patch } } }));
+    updateDraft((d) => ({ ...d, methods: { ...d.methods, [key]: { ...d.methods[key], ...patch } } }));
     setErrors((prev) => {
       if (!prev[key]) return prev;
       const next = { ...prev };
@@ -465,8 +422,8 @@ function PaymentAccountsPanel({ properties, showToast }) {
       } else {
         await updateDoc(doc(db, "properties", property.id), payload);
       }
-      // Show exactly what was stored (numbers tidied) so the "unsaved" state clears
-      setDraft({ methods: normalizeMethods(payload.paymentMethods), note: payload.paymentNote });
+      // The saved values now come from the property itself, so the "unsaved" state clears
+      dropDrafts(targets.map((p) => p.id));
       setApplyAll(false);
       showToast(targets.length > 1 ? `Saved for all ${targets.length} properties.` : "Payment accounts saved. Tenants will see them now.");
     } catch (err) {
@@ -483,7 +440,7 @@ function PaymentAccountsPanel({ properties, showToast }) {
   };
 
   const discard = () => {
-    setDraft(JSON.parse(savedJson));
+    dropDrafts([selectedId]);
     setErrors({});
   };
 
@@ -691,7 +648,7 @@ function PaymentAccountsPanel({ properties, showToast }) {
             label="Payment instructions (optional)"
             value={draft.note}
             onChange={(ev) => {
-              setDraft((d) => ({ ...d, note: ev.target.value }));
+              updateDraft((d) => ({ ...d, note: ev.target.value }));
               setErrors((prev) => (prev._note ? { ...prev, _note: undefined } : prev));
             }}
             multiline
@@ -794,7 +751,8 @@ function PaymentAccountsPanel({ properties, showToast }) {
 /* ---------------------------------------------------------------------------
    PAGE
 --------------------------------------------------------------------------- */
-const STATUS_FILTERS = ["All", "Unpaid", "Pending", "Partial", "Paid", "Overdue"];
+// Most urgent first. "Not due" = lease ended, starts later, or not an active tenant.
+const STATUS_FILTERS = ["All", "Overdue", "Unpaid", "Pending", "Partial", "Paid", "Not due"];
 
 export default function PaymentsPage() {
   const { currentUser } = useAuth() || {};
@@ -805,6 +763,8 @@ export default function PaymentsPage() {
   const [properties, setProperties] = useState([]);
   const [ownerProfile, setOwnerProfile] = useState({});
   const [loading, setLoading] = useState(true);
+  // "Today" for due dates, fixed when the page opens
+  const [today] = useState(() => new Date());
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -821,6 +781,8 @@ export default function PaymentsPage() {
   const [paymentForm, setPaymentForm] = useState({
     tenantId: "",
     amount: "",
+    amountTouched: false,
+    statusTouched: false,
     paymentMethod: "GCash",
     periodMonth: "",
     status: "Paid",
@@ -835,37 +797,70 @@ export default function PaymentsPage() {
   // ------------------------------------------------------------
 
   const currentPeriodValue = useMemo(() => periodLabel(new Date()), []);
-  const periodOptions = useMemo(buildPeriodOptions, []);
+  const periodOptions = useMemo(() => buildPeriodOptions(), []);
 
   // ------------------------------------------------------------
   // LOAD TENANTS, PAYMENTS AND PROPERTIES
   // ------------------------------------------------------------
 
   useEffect(() => {
-    if (!currentUser?.uid) {
-      setLoading(false);
-      return undefined;
-    }
+    if (!currentUser?.uid) return undefined;
 
-    setLoading(true);
+    // A tenant can have a `tenants` record, a `users` account, or both:
+    // merge the two so nobody is missing from rent tracking.
+    const sources = { tenants: [], users: [] };
+    const publish = () => {
+      const byId = new Map();
+      [...sources.users, ...sources.tenants].forEach((t) => byId.set(t.id, { ...(byId.get(t.id) || {}), ...t }));
+      setTenants(withoutRemoved([...byId.values()]));
+      setLoading(false);
+    };
 
     const unsubscribeTenants = onSnapshot(
       query(collection(db, "tenants"), where("ownerUid", "==", currentUser.uid)),
       (snapshot) => {
-        setTenants(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })));
-        setLoading(false);
+        sources.tenants = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+        publish();
       },
       (error) => {
         console.error("Error loading tenants:", error);
         setLoading(false);
       }
     );
-
-    const unsubscribePayments = onSnapshot(
-      query(collection(db, "payments"), where("ownerUid", "==", currentUser.uid)),
-      (snapshot) => setPayments(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))),
-      (error) => console.error("Error loading payments:", error)
+    const unsubscribeTenantUsers = onSnapshot(
+      query(collection(db, "users"), where("ownerUid", "==", currentUser.uid)),
+      (snapshot) => {
+        sources.users = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter((u) => u.role === "tenant");
+        publish();
+      },
+      (error) => console.warn("Tenant accounts unavailable:", error?.code || error)
     );
+
+    // Payments: only this month's (rent tracking) and anything still waiting
+    // for review (any month). All-time payments grow every month, so they are
+    // never loaded in one go; a tenant's history is read when it is opened.
+    const paymentSources = { month: [], pending: [], verification: [] };
+    const publishPayments = () => {
+      const byId = new Map();
+      Object.values(paymentSources).flat().forEach((p) => byId.set(p.id, p));
+      setPayments([...byId.values()]);
+    };
+    const watchPayments = (key, ...filters) =>
+      onSnapshot(
+        query(collection(db, "payments"), where("ownerUid", "==", currentUser.uid), ...filters),
+        (snapshot) => {
+          paymentSources[key] = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
+          publishPayments();
+        },
+        (error) => console.error(`Error loading payments (${key}):`, error)
+      );
+    const paymentUnsubs = [
+      // Every screen that records a payment saves the month it covers, e.g. "October 2026"
+      watchPayments("month", where("periodMonth", "==", periodLabel(new Date()))),
+      watchPayments("pending", where("status", "in", ["Pending", "pending"])),
+      watchPayments("verification", where("verificationStatus", "in", ["Pending", "pending"])),
+    ];
+    const unsubscribePayments = () => paymentUnsubs.forEach((u) => u());
 
     // Property names (two properties can both have a "Room 101") and their payment accounts
     const unsubscribeProperties = onSnapshot(
@@ -883,6 +878,7 @@ export default function PaymentsPage() {
 
     return () => {
       unsubscribeTenants();
+      unsubscribeTenantUsers();
       unsubscribePayments();
       unsubscribeProperties();
       unsubscribeOwner();
@@ -936,13 +932,16 @@ export default function PaymentsPage() {
 
   const getPaymentStatus = (payment) => String(payment.status || "").toLowerCase();
 
+  // Money actually received: a Partial payment is real money too
+  const isReceived = (payment) => ["paid", "partial"].includes(getPaymentStatus(payment));
+
   // Rent for the current billing period. The period the payment was FOR decides this
-  // (an October rent paid on September 30 is still October's), like the per-tenant rows.
+  // (an October rent paid on September 30 is still October's). Used for the totals
+  // AND every tenant row, so they always add up.
   const isForCurrentPeriod = (payment) => {
-    if (payment.periodMonth) return payment.periodMonth === currentPeriodValue;
+    if (payment.periodMonth) return String(payment.periodMonth).trim().toLowerCase() === currentPeriodValue.toLowerCase();
     const date = getPaymentDate(payment);
-    const now = new Date();
-    return Boolean(date) && date.getMonth() === now.getMonth() && date.getFullYear() === now.getFullYear();
+    return Boolean(date) && date.getMonth() === today.getMonth() && date.getFullYear() === today.getFullYear();
   };
 
   // Inactive tenants and tenants who haven't finished onboarding aren't expected to pay yet.
@@ -953,8 +952,8 @@ export default function PaymentsPage() {
   };
 
   const printReceipt = async (payment, tenantFallback = {}) => {
-    if (!payment || getPaymentStatus(payment) !== "paid") {
-      showToast("A receipt can only be printed for a confirmed paid payment.", "warning");
+    if (!payment || !isReceiptable(getPaymentStatus(payment))) {
+      showToast("Receipts are for money received: paid or partial payments.", "warning");
       return;
     }
 
@@ -985,49 +984,39 @@ export default function PaymentsPage() {
       method: payment.paymentMethod,
       amountText: formatCurrency(payment.amount),
       remarks: payment.remarks,
+      partial: getPaymentStatus(payment) === "partial",
     });
   };
 
+  // A tenant's full payment history, read only while their history dialog is open
+  const [history, setHistory] = useState({ tenantId: "", list: [], loading: false });
+  useEffect(() => {
+    if (!historyTenant?.id || !currentUser?.uid) return undefined;
+    const tenantId = historyTenant.id;
+    return onSnapshot(
+      query(collection(db, "payments"), where("ownerUid", "==", currentUser.uid), where("tenantId", "==", tenantId)),
+      (snapshot) => setHistory({ tenantId, list: snapshot.docs.map((d) => ({ id: d.id, ...d.data() })), loading: false }),
+      (error) => {
+        console.error("Error loading payment history:", error);
+        setHistory({ tenantId, list: [], loading: false });
+      }
+    );
+  }, [historyTenant, currentUser]);
+  const historyLoading = Boolean(historyTenant) && history.tenantId !== historyTenant.id;
   const paymentHistoryForTenant = useMemo(() => {
-    if (!historyTenant) return [];
-    return payments
-      .filter((payment) => payment.tenantId === historyTenant.id)
-      .sort((a, b) => (getPaymentDate(b)?.getTime() || 0) - (getPaymentDate(a)?.getTime() || 0));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [payments, historyTenant]);
+    if (!historyTenant || history.tenantId !== historyTenant.id) return [];
+    return [...history.list].sort((a, b) => (getPaymentDate(b)?.getTime() || 0) - (getPaymentDate(a)?.getTime() || 0));
+  }, [history, historyTenant]);
 
   // ------------------------------------------------------------
   // SUMMARY
   // ------------------------------------------------------------
 
-  const totalRentCollectedThisMonth = useMemo(
-    () => payments.filter((p) => isForCurrentPeriod(p) && getPaymentStatus(p) === "paid").reduce((total, p) => total + Number(p.amount || 0), 0),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [payments, currentPeriodValue]
-  );
+  // Money received for this month (paid + partial)
+  const totalRentCollectedThisMonth = payments
+    .filter((p) => isForCurrentPeriod(p) && isReceived(p))
+    .reduce((total, p) => total + Number(p.amount || 0), 0);
 
-  const expectedRent = useMemo(
-    () => normalizedTenants.filter(countsTowardRent).reduce((total, t) => total + Number(t.monthlyRent || 0), 0),
-    [normalizedTenants]
-  );
-
-  const pendingPayments = useMemo(
-    () =>
-      payments.filter((p) => {
-        const s = getPaymentStatus(p);
-        return s === "pending" || s === "partial";
-      }).length,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [payments]
-  );
-
-  const overduePayments = useMemo(
-    () => payments.filter((p) => getPaymentStatus(p) === "overdue").length,
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [payments]
-  );
-
-  const collectionRate = expectedRent > 0 ? Math.min(100, Math.round((totalRentCollectedThisMonth / expectedRent) * 100)) : null;
 
   // ------------------------------------------------------------
   // PENDING PAYMENT VERIFICATION
@@ -1042,7 +1031,6 @@ export default function PaymentsPage() {
           return status === "pending" || (verificationStatus === "pending" && status !== "rejected" && status !== "paid");
         })
         .sort((a, b) => (getPaymentDate(b)?.getTime() || 0) - (getPaymentDate(a)?.getTime() || 0)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [payments]
   );
 
@@ -1050,27 +1038,35 @@ export default function PaymentsPage() {
   // PAYMENT STATUS FOR TENANT
   // ------------------------------------------------------------
 
+  // Statuses: Paid, Pending (proof to review), Partial, Overdue (past the due day),
+  // Unpaid (not due yet), Not due (lease ended / starts later / not active).
+  // Due dates use the same rules as the Tenants pages and overdue reminders.
   const getTenantPaymentInfo = (tenant) => {
-    const tenantPayments = payments.filter((payment) => payment.tenantId === tenant.id && payment.periodMonth === currentPeriodValue);
-
-    const paidAmount = tenantPayments.filter((payment) => getPaymentStatus(payment) === "paid").reduce((total, payment) => total + Number(payment.amount || 0), 0);
-
+    const tenantPayments = payments.filter((payment) => payment.tenantId === tenant.id && isForCurrentPeriod(payment));
+    const paidAmount = tenantPayments.filter(isReceived).reduce((total, payment) => total + Number(payment.amount || 0), 0);
     const latestPayment = [...tenantPayments].sort((a, b) => (getPaymentDate(b)?.getTime() || 0) - (getPaymentDate(a)?.getTime() || 0))[0];
-
     const rent = Number(tenant.monthlyRent || 0);
+    const due = rentStatusOf(tenant, tenantPayments, today);
+    const owes = countsTowardRent(tenant) && ["paid", "review", "due", "overdue"].includes(due.key);
 
-    let status = "Unpaid";
+    let status;
+    if (rent > 0 && paidAmount >= rent) status = "Paid";
+    else if (tenantPayments.some((p) => getPaymentStatus(p) === "pending")) status = "Pending";
+    else if (paidAmount > 0) status = "Partial";
+    else if (!owes) status = "Not due";
+    else if (due.key === "overdue") status = "Overdue";
+    else status = "Unpaid";
 
-    if (latestPayment) {
-      const paymentStatus = getPaymentStatus(latestPayment);
-
-      if (paymentStatus === "overdue") status = "Overdue";
-      else if (paidAmount >= rent && rent > 0) status = "Paid";
-      else if (paidAmount > 0) status = "Partial";
-      else if (paymentStatus === "pending") status = "Pending";
-    }
-
-    return { paidAmount, rent, balance: Math.max(rent - paidAmount, 0), status, latestPayment };
+    return {
+      paidAmount,
+      rent,
+      expected: owes ? rent : 0,
+      balance: owes ? Math.max(rent - paidAmount, 0) : 0,
+      status,
+      // e.g. "Overdue 4 days" / "Due in 3 days", shown under the tenant's name
+      dueText: status === "Overdue" || status === "Unpaid" || status === "Partial" ? due.label : "",
+      latestPayment,
+    };
   };
 
   // ------------------------------------------------------------
@@ -1095,7 +1091,7 @@ export default function PaymentsPage() {
       const room = prop.rooms.get(roomNumber);
 
       const info = getTenantPaymentInfo(tenant);
-      const expected = countsTowardRent(tenant) ? info.rent : 0;
+      const expected = info.expected;
 
       // Totals always cover everyone; the filter only decides which rows are listed
       room.collected += info.paidAmount;
@@ -1121,7 +1117,7 @@ export default function PaymentsPage() {
       .filter((prop) => prop.rooms.length > 0)
       .sort((a, b) => a.name.localeCompare(b.name));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [normalizedTenants, payments, currentPeriodValue, search, statusFilter]);
+  }, [normalizedTenants, payments, currentPeriodValue, search, statusFilter, today]);
 
   const filtersActive = Boolean(search.trim()) || statusFilter !== "All";
 
@@ -1209,13 +1205,18 @@ export default function PaymentsPage() {
   // RECORD PAYMENT
   // ------------------------------------------------------------
 
+  // Money maths in whole centavos, so ₱0.10 + ₱0.20 never becomes ₱0.30000000000000004
+  const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
   const handleOpenRecordPayment = () => {
     setPaymentForm({
       tenantId: "",
       amount: "",
-      paymentMethod: "GCash",
+      amountTouched: false, // false = use the suggested amount (the balance)
+      paymentMethod: "Cash",
       periodMonth: currentPeriodValue,
       status: "Paid",
+      statusTouched: false, // false = Paid / Partial follows the amount
       paymentDate: todayInput(),
       remarks: "",
     });
@@ -1232,40 +1233,89 @@ export default function PaymentsPage() {
     const { name, value } = event.target;
 
     setFormErrors((prev) => {
-      if (!prev[name]) return prev;
+      if (!prev[name] && !prev._form) return prev;
       const next = { ...prev };
       delete next[name];
+      delete next._form;
       return next;
     });
 
     setPaymentForm((prev) => {
       const next = { ...prev, [name]: value };
-
-      // Picking a tenant suggests what they still owe this month (only if nothing typed yet)
-      if (name === "tenantId" && !prev.amount) {
-        const tenant = normalizedTenants.find((t) => t.id === value);
-        if (tenant) {
-          const { balance } = getTenantPaymentInfo(tenant);
-          if (balance > 0) next.amount = String(balance);
-        }
+      if (name === "amount") next.amountTouched = true;
+      if (name === "status") next.statusTouched = true;
+      // A different tenant or month has a different balance: go back to suggesting it
+      if (name === "tenantId" || name === "periodMonth") {
+        next.amountTouched = false;
+        next.amount = "";
+        next.statusTouched = false;
       }
       return next;
     });
   };
 
+  // The selected tenant's payments (every month), read while the dialog is open,
+  // so the balance is right for whichever month is being paid
+  const [formTenantPayments, setFormTenantPayments] = useState({ tenantId: "", list: [] });
+  useEffect(() => {
+    if (!openRecordPayment || !paymentForm.tenantId || !currentUser?.uid) return undefined;
+    const tenantId = paymentForm.tenantId;
+    return onSnapshot(
+      query(collection(db, "payments"), where("ownerUid", "==", currentUser.uid), where("tenantId", "==", tenantId)),
+      (snapshot) => setFormTenantPayments({ tenantId, list: snapshot.docs.map((d) => ({ id: d.id, ...d.data() })) }),
+      (error) => {
+        console.error("Error loading the tenant's payments:", error);
+        setFormTenantPayments({ tenantId, list: [] });
+      }
+    );
+  }, [openRecordPayment, paymentForm.tenantId, currentUser]);
+
+  const selectedFormTenant = normalizedTenants.find((t) => t.id === paymentForm.tenantId);
+  const formInfoLoading = Boolean(selectedFormTenant) && formTenantPayments.tenantId !== paymentForm.tenantId;
+
+  // Rent, received and balance for the tenant and month chosen in the form
+  const selectedFormInfo = useMemo(() => {
+    if (!selectedFormTenant || formInfoLoading) return null;
+    const period = String(paymentForm.periodMonth || "").trim().toLowerCase();
+    const forPeriod = formTenantPayments.list.filter((p) => String(p.periodMonth || "").trim().toLowerCase() === period);
+    const sum = (list) => round2(list.reduce((t, p) => t + Number(p.amount || 0), 0));
+    const statusOf = (p) => String(p.status || "").toLowerCase();
+    const rent = round2(selectedFormTenant.monthlyRent);
+    const received = sum(forPeriod.filter((p) => ["paid", "partial"].includes(statusOf(p))));
+    const pending = forPeriod.filter((p) => statusOf(p) === "pending");
+    return {
+      rent,
+      received,
+      balance: round2(Math.max(rent - received, 0)),
+      pendingAmount: sum(pending),
+      pendingCount: pending.length,
+    };
+  }, [selectedFormTenant, formInfoLoading, formTenantPayments, paymentForm.periodMonth]);
+
+  // What the form actually uses: the owner's own entries, or the suggestions
+  const suggestedAmount = selectedFormInfo && selectedFormInfo.balance > 0 ? String(selectedFormInfo.balance) : "";
+  const effectiveAmount = paymentForm.amountTouched ? paymentForm.amount : suggestedAmount;
+  const amountNumber = round2(effectiveAmount);
+  const autoStatus = selectedFormInfo && amountNumber > 0 && amountNumber < selectedFormInfo.balance ? "Partial" : "Paid";
+  const effectiveStatus = paymentForm.statusTouched ? paymentForm.status : autoStatus;
+  const balanceAfter = selectedFormInfo && effectiveStatus !== "Pending" ? round2(Math.max(selectedFormInfo.balance - amountNumber, 0)) : null;
+  const overBy = selectedFormInfo && effectiveStatus !== "Pending" ? round2(amountNumber - selectedFormInfo.balance) : 0;
+
   const validateForm = () => {
     const e = {};
     if (!paymentForm.tenantId) e.tenantId = "Select a tenant.";
 
-    const amount = Number(paymentForm.amount);
-    if (paymentForm.amount === "" || Number.isNaN(amount) || amount <= 0) e.amount = "Enter an amount greater than 0.";
+    const raw = String(effectiveAmount).trim();
+    const amount = Number(raw);
+    if (raw === "" || Number.isNaN(amount) || amount <= 0) e.amount = "Enter an amount greater than 0.";
     else if (amount > MAX_AMOUNT) e.amount = "That amount looks too large.";
-    else if (!/^\d+(\.\d{1,2})?$/.test(String(paymentForm.amount).trim())) e.amount = "Use at most 2 decimal places.";
+    else if (!/^\d+(\.\d{1,2})?$/.test(raw)) e.amount = "Use at most 2 decimal places.";
 
-    if (!paymentForm.periodMonth) e.periodMonth = "Select a billing period.";
+    if (!paymentForm.periodMonth) e.periodMonth = "Select the month this payment is for.";
 
     if (!paymentForm.paymentDate) e.paymentDate = "Choose the payment date.";
     else if (Number.isNaN(new Date(`${paymentForm.paymentDate}T12:00:00`).getTime())) e.paymentDate = "Enter a valid date.";
+    else if (paymentForm.paymentDate > todayInput()) e.paymentDate = "The payment date can't be in the future.";
 
     if (paymentForm.remarks.length > 300) e.remarks = "Keep notes under 300 characters.";
     return e;
@@ -1284,11 +1334,13 @@ export default function PaymentsPage() {
     if (Object.keys(errs).length > 0) return;
 
     const selectedTenant = normalizedTenants.find((tenant) => tenant.id === paymentForm.tenantId);
-
     if (!selectedTenant) {
       setFormErrors({ tenantId: "That tenant could not be found." });
       return;
     }
+
+    const amount = round2(effectiveAmount);
+    const status = effectiveStatus;
 
     setSaving(true);
     try {
@@ -1297,33 +1349,38 @@ export default function PaymentsPage() {
         tenantName: selectedTenant.fullName,
         propertyId: selectedTenant.propertyId || selectedTenant.assignedPropertyId || "",
         propertyName: selectedTenant.propertyName || "Dormitory",
-        roomNumber: selectedTenant.roomNumber || "N/A",
-        amount: Number(paymentForm.amount),
+        roomNumber: selectedTenant.roomId || (selectedTenant.roomNumber !== "Unassigned" ? selectedTenant.roomNumber : "") || "N/A",
+        amount,
         paymentMethod: paymentForm.paymentMethod,
         periodMonth: paymentForm.periodMonth,
-        status: paymentForm.status,
-        verificationStatus: paymentForm.status === "Paid" ? "Approved" : paymentForm.status === "Pending" ? "Pending" : "",
+        status,
+        verificationStatus: status === "Pending" ? "Pending" : "Approved",
         remarks: paymentForm.remarks.trim(),
         ownerUid: currentUser.uid,
+        recordedBy: currentUser.uid,
+        recordedByRole: "owner",
         paymentDate: new Date(`${paymentForm.paymentDate}T12:00:00`),
         createdAt: serverTimestamp(),
       };
       const ref = doc(collection(db, "payments"));
       let receiptNo = "";
       await runTransaction(db, async (tx) => {
-        // A payment recorded as Paid is a confirmed receipt: number it
-        const issued = payload.status === "Paid" ? await reserveReceiptNo(tx, db, currentUser.uid) : {};
+        // Money received (Paid or Partial) is a confirmed receipt: number it
+        const issued = isReceiptable(status) ? await reserveReceiptNo(tx, db, currentUser.uid) : {};
         receiptNo = issued.receiptNo || "";
         tx.set(ref, { ...payload, ...issued });
       });
 
-      if (paymentForm.status === "Paid") {
+      if (status !== "Pending") {
         notifyTenant(
           { id: ref.id, tenantId: selectedTenant.id },
           {
             type: "success",
             title: "Payment recorded",
-            message: `Your landlord recorded a ${formatCurrency(paymentForm.amount)} rent payment for ${paymentForm.periodMonth}. Thank you!${receiptNo ? ` Your receipt (No. ${receiptNo}) is ready: open the payment in your Payments tab to print or save it.` : ""}`,
+            message:
+              status === "Paid"
+                ? `Your landlord recorded a ${formatCurrency(amount)} rent payment for ${paymentForm.periodMonth}. Thank you!${receiptNo ? ` Your receipt (No. ${receiptNo}) is ready: open the payment in your Payments tab to print or save it.` : ""}`
+                : `Your landlord recorded a ${formatCurrency(amount)} partial payment for ${paymentForm.periodMonth}.${balanceAfter > 0 ? ` ${formatCurrency(balanceAfter)} is still due for that month.` : ""}${receiptNo ? ` Your receipt (No. ${receiptNo}) is in your Payments tab.` : ""}`,
           }
         );
       }
@@ -1338,34 +1395,36 @@ export default function PaymentsPage() {
     }
   };
 
-  const selectedFormTenant = normalizedTenants.find((t) => t.id === paymentForm.tenantId);
-  const selectedFormInfo = selectedFormTenant ? getTenantPaymentInfo(selectedFormTenant) : null;
+  // Current tenants first; former tenants can't be picked
+  const recordableTenants = [...normalizedTenants]
+    .filter((t) => !["inactive", "archived", "deactivated"].includes(String(t.status || "").trim().toLowerCase()))
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
 
   // ------------------------------------------------------------
   // TENANT ROW (grid on laptops, compact card on phones)
   // ------------------------------------------------------------
 
-  const COLS = "minmax(0, 1.6fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) 100px 132px";
+  const COLS = "minmax(0, 1.7fr) minmax(0, 0.9fr) minmax(0, 0.9fr) minmax(0, 0.9fr) 112px 132px";
 
   const rowActions = (tenant, info) => {
-    const canReceipt = info.latestPayment && getPaymentStatus(info.latestPayment) === "paid";
+    const canReceipt = info.latestPayment && isReceiptable(getPaymentStatus(info.latestPayment));
     return (
-      <Box sx={{ display: "flex", gap: 0.5, justifyContent: { xs: "flex-end", lg: "flex-start" } }}>
+      <Box sx={{ display: "flex", gap: 0.25, justifyContent: { xs: "flex-end", lg: "flex-start" } }}>
         <Tooltip title={info.latestPayment ? "View latest payment" : "No payment this month"}>
           <span>
-            <IconButton aria-label="View latest payment" disabled={!info.latestPayment} onClick={() => setSelectedPayment(info.latestPayment)} sx={{ width: 40, height: 40 }}>
+            <IconButton aria-label="View latest payment" disabled={!info.latestPayment} onClick={() => setSelectedPayment(info.latestPayment)} sx={{ width: 38, height: 38 }}>
               <VisibilityIcon fontSize="small" />
             </IconButton>
           </span>
         </Tooltip>
         <Tooltip title="Payment history">
-          <IconButton aria-label="Payment history" onClick={() => setHistoryTenant(tenant)} sx={{ width: 40, height: 40 }}>
+          <IconButton aria-label="Payment history" onClick={() => setHistoryTenant(tenant)} sx={{ width: 38, height: 38 }}>
             <HistoryIcon fontSize="small" />
           </IconButton>
         </Tooltip>
-        <Tooltip title={canReceipt ? "Print receipt" : "Receipts are for paid payments"}>
+        <Tooltip title={canReceipt ? "Print receipt" : "Receipts are for paid or partial payments"}>
           <span>
-            <IconButton aria-label="Print receipt" disabled={!canReceipt} onClick={() => printReceipt(info.latestPayment, tenant)} sx={{ width: 40, height: 40 }}>
+            <IconButton aria-label="Print receipt" disabled={!canReceipt} onClick={() => printReceipt(info.latestPayment, tenant)} sx={{ width: 38, height: 38 }}>
               <PrintIcon fontSize="small" />
             </IconButton>
           </span>
@@ -1374,8 +1433,11 @@ export default function PaymentsPage() {
     );
   };
 
+  const initialsOf = (name) =>
+    String(name || "?").split(" ").filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
+
   const renderTenantRow = ({ tenant, info }) => {
-    const dim = !countsTowardRent(tenant);
+    const dim = info.status === "Not due";
     return (
       <Box
         key={tenant.id}
@@ -1384,20 +1446,32 @@ export default function PaymentsPage() {
           gridTemplateColumns: { xs: "minmax(0, 1fr) auto", lg: COLS },
           alignItems: "center",
           columnGap: 2,
-          rowGap: 0.5,
-          px: { xs: 2, sm: 3 },
-          py: { xs: 1.25, lg: 1 },
+          rowGap: 0.75,
+          px: { xs: 2, sm: 2.5 },
+          py: 1.25,
+          transition: "background-color .15s",
+          "&:hover": { bgcolor: "action.hover" },
         }}
       >
-        <Box sx={{ minWidth: 0, opacity: dim ? 0.65 : 1 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }} noWrap>
-            {tenant.fullName}
-          </Typography>
-          {dim && (
-            <Typography variant="caption" color="text.secondary" noWrap component="div">
-              {String(tenant.status).toLowerCase().startsWith("pending") ? "Pending onboarding" : tenant.status}
+        <Box sx={{ ...row, gap: 1.25, minWidth: 0, opacity: dim ? 0.6 : 1 }}>
+          <Avatar sx={{ width: 34, height: 34, fontSize: 13, fontWeight: 800, fontFamily: '"Inter", sans-serif', bgcolor: dim ? "action.selected" : "primary.main", color: "#fff" }}>
+            {initialsOf(tenant.fullName)}
+          </Avatar>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography variant="subtitle2" sx={{ fontWeight: 700 }} noWrap>
+              {tenant.fullName}
             </Typography>
-          )}
+            <Typography
+              variant="caption"
+              noWrap
+              component="div"
+              sx={{ fontWeight: info.status === "Overdue" ? 700 : 400, color: info.status === "Overdue" ? "error.main" : "text.secondary" }}
+            >
+              {!countsTowardRent(tenant)
+                ? String(tenant.status).toLowerCase().startsWith("pending") ? "Pending onboarding" : tenant.status
+                : info.dueText || " "}
+            </Typography>
+          </Box>
         </Box>
 
         {/* Phones: status top right */}
@@ -1406,25 +1480,22 @@ export default function PaymentsPage() {
         </Box>
 
         {/* Phones: one quiet money line */}
-        <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "block", lg: "none" }, gridColumn: "1 / -1", opacity: dim ? 0.65 : 1 }}>
+        <Typography variant="body2" color="text.secondary" sx={{ display: { xs: "block", lg: "none" }, gridColumn: "1 / -1", pl: "46px", opacity: dim ? 0.6 : 1 }}>
           Rent {formatCompact(info.rent)} · Paid{" "}
           <Box component="span" sx={{ color: "text.primary", fontWeight: 600 }}>{formatCompact(info.paidAmount)}</Box>
           {" "}· Balance{" "}
-          <Box component="span" sx={{ color: info.balance > 0 && !dim ? "warning.dark" : "text.primary", fontWeight: 600 }}>
+          <Box component="span" sx={{ color: info.balance > 0 ? "warning.dark" : "text.primary", fontWeight: 600 }}>
             {formatCompact(info.balance)}
           </Box>
         </Typography>
 
         {/* Laptops */}
-        <Typography variant="body2" sx={{ display: { xs: "none", lg: "block" }, opacity: dim ? 0.65 : 1 }}>{formatCurrency(info.rent)}</Typography>
-        <Typography variant="body2" sx={{ display: { xs: "none", lg: "block" }, fontWeight: 600, opacity: dim ? 0.65 : 1 }}>
-          {formatCurrency(info.paidAmount)}
+        <Typography variant="body2" sx={{ display: { xs: "none", lg: "block" }, opacity: dim ? 0.6 : 1 }}>{formatCompact(info.rent)}</Typography>
+        <Typography variant="body2" sx={{ display: { xs: "none", lg: "block" }, fontWeight: 600, opacity: dim ? 0.6 : 1 }}>
+          {formatCompact(info.paidAmount)}
         </Typography>
-        <Typography
-          variant="body2"
-          sx={{ display: { xs: "none", lg: "block" }, fontWeight: 600, opacity: dim ? 0.65 : 1, color: info.balance > 0 && !dim ? "warning.dark" : "text.primary" }}
-        >
-          {formatCurrency(info.balance)}
+        <Typography variant="body2" sx={{ display: { xs: "none", lg: "block" }, fontWeight: 700, opacity: dim ? 0.6 : 1, color: info.balance > 0 ? "warning.dark" : "text.secondary" }}>
+          {formatCompact(info.balance)}
         </Typography>
         <Box sx={{ display: { xs: "none", lg: "block" } }}>
           <StatusPill status={info.status} />
@@ -1442,37 +1513,49 @@ export default function PaymentsPage() {
         display: { xs: "none", lg: "grid" },
         gridTemplateColumns: COLS,
         columnGap: 2,
-        px: 3,
+        px: 2.5,
         py: 1,
-        bgcolor: (t) => alpha(t.palette.background.paper, 0.35),
         borderBottom: "1px solid",
         borderColor: "divider",
-        "& > *": { fontWeight: 700, color: "text.secondary", fontSize: "0.75rem", letterSpacing: 0.3 },
+        "& > *": { fontWeight: 700, color: "text.secondary", fontSize: "0.72rem", letterSpacing: ".06em", textTransform: "uppercase" },
       }}
     >
-      <Box>TENANT</Box>
-      <Box>MONTHLY RENT</Box>
-      <Box>COLLECTED</Box>
-      <Box>BALANCE</Box>
-      <Box>STATUS</Box>
-      <Box>DETAILS</Box>
+      <Box>Tenant</Box>
+      <Box>Rent</Box>
+      <Box>Paid</Box>
+      <Box>Balance</Box>
+      <Box>Status</Box>
+      <Box>Details</Box>
     </Box>
   );
+
+  // ------------------------------------------------------------
+  // THIS MONTH AT A GLANCE (same per-tenant info as the rows)
+  // ------------------------------------------------------------
+
+  const tenantInfos = normalizedTenants.map((tenant) => ({ tenant, info: getTenantPaymentInfo(tenant) }));
+  // Only tenants who actually owe rent this month
+  const expectedRent = tenantInfos.reduce((total, { info }) => total + info.expected, 0);
+  const stillToCollect = tenantInfos.reduce((total, { info }) => total + info.balance, 0);
+  const overdueTenants = tenantInfos.filter(({ info }) => info.status === "Overdue").length;
+  const statusCounts = tenantInfos.reduce((acc, { info }) => ({ ...acc, [info.status]: (acc[info.status] || 0) + 1 }), {});
+  const collectionRate = expectedRent > 0 ? Math.min(100, Math.round((totalRentCollectedThisMonth / expectedRent) * 100)) : null;
+  const monthName = today.toLocaleDateString("en-US", { month: "long" });
 
   // ------------------------------------------------------------
   // LOADING
   // ------------------------------------------------------------
 
-  if (loading) {
+  if (loading && currentUser?.uid) {
     return (
       <Box sx={{ minWidth: 0 }}>
-        <Skeleton variant="rounded" height={44} sx={{ borderRadius: 3, mb: 2 }} />
-        <Skeleton variant="rounded" height={84} sx={{ borderRadius: 3, mb: 3 }} />
+        <Skeleton variant="rounded" height={170} sx={{ borderRadius: "22px", mb: 2.5 }} />
+        <Skeleton variant="rounded" height={46} sx={{ borderRadius: "14px", mb: 2.5 }} />
         {[0, 1].map((i) => (
           <Paper key={i} elevation={0} sx={{ ...groupShellSx, p: 2, mb: 2 }}>
             <Skeleton width="35%" height={28} />
-            <Skeleton variant="rounded" height={52} sx={{ mt: 1.5 }} />
-            <Skeleton variant="rounded" height={52} sx={{ mt: 1 }} />
+            <Skeleton variant="rounded" height={52} sx={{ mt: 1.5, borderRadius: "10px" }} />
+            <Skeleton variant="rounded" height={52} sx={{ mt: 1, borderRadius: "10px" }} />
           </Paper>
         ))}
       </Box>
@@ -1484,33 +1567,97 @@ export default function PaymentsPage() {
   // ------------------------------------------------------------
 
   const needsAccountSetup = properties.length > 0 && propertiesWithoutAccounts.length > 0;
+  const toReview = pendingVerificationPayments.length;
+
+  const headerTiles = [
+    {
+      label: `Collected · ${monthName}`,
+      icon: <PaymentsOutlinedIcon />,
+      value: formatCompact(totalRentCollectedThisMonth),
+      sub: collectionRate !== null ? `${collectionRate}% of ${formatCompact(expectedRent)}` : "No rent expected yet",
+      progress: collectionRate,
+    },
+    { label: "Still to collect", icon: <AccountBalanceWalletOutlinedIcon />, value: formatCompact(stillToCollect), sub: "This month's balances", accent: stillToCollect > 0 ? "warning.dark" : undefined },
+    { label: "To review", icon: <PendingActionsOutlinedIcon />, value: toReview, sub: toReview === 1 ? "payment submitted" : "payments submitted", accent: toReview > 0 ? "info.dark" : undefined },
+    { label: "Overdue", icon: <ErrorOutlineRoundedIcon />, value: overdueTenants, sub: overdueTenants === 1 ? "tenant past due" : "tenants past due", accent: overdueTenants > 0 ? "error.main" : undefined },
+  ];
 
   return (
-    <Box sx={{ minWidth: 0, pb: { xs: 9, sm: 0 } }}>
-      {/* The top bar already says "Payments", so the page adds a line of context and the main action */}
-      <Box sx={{ ...row, justifyContent: "space-between", gap: 2, mb: { xs: 1.5, sm: 2 } }}>
-        <Typography color="text.secondary" sx={{ minWidth: 0 }}>
-          {tab === 0 ? `Rent collection by room · ${currentPeriodValue}` : "Set up where your tenants send their rent"}
-        </Typography>
-        {tab === 0 && (
+    <Box sx={{ minWidth: 0 }}>
+      {/* HEADER: same pattern as Properties / Tenants */}
+      <Paper elevation={0} component="section" sx={{ ...cardSx, borderRadius: "22px", position: "relative", overflow: "hidden", p: { xs: 2, sm: 3 }, mb: { xs: 2, sm: 2.5 } }}>
+        <Box aria-hidden sx={{ position: "absolute", top: -180, right: -120, width: 380, height: 380, borderRadius: "50%", background: "rgba(255,69,0,.10)", filter: "blur(70px)", pointerEvents: "none" }} />
+        {/* The main action, visible on every screen size (full width on phones) */}
+        <Box sx={{ position: "relative", display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: { xs: "stretch", sm: "center" }, justifyContent: "space-between", gap: { xs: 1.5, sm: 2 }, mb: { xs: 2, sm: 2.5 } }}>
+          <Typography color="text.secondary" sx={{ minWidth: 0, fontSize: { xs: 14, sm: 15 } }}>
+            Rent collection for <strong>{currentPeriodValue}</strong>
+          </Typography>
           <Button
             variant="contained"
-            disableElevation
             startIcon={<AddIcon />}
             onClick={handleOpenRecordPayment}
-            sx={{ flexShrink: 0, fontWeight: 700, borderRadius: 2.5, display: { xs: "none", sm: "inline-flex" } }}
+            sx={{ flexShrink: 0, fontWeight: 700, borderRadius: "10px", minHeight: 44, boxShadow: "0 10px 22px -14px rgba(255,69,0,.9)" }}
           >
             Record payment
           </Button>
-        )}
-      </Box>
+        </Box>
+
+        <Box sx={{ position: "relative", display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: { xs: 1, sm: 1.5 } }}>
+          {headerTiles.map((t) => (
+            <Box key={t.label} sx={{ minWidth: 0, display: "flex", alignItems: "flex-start", gap: 1.25, p: { xs: 1.25, sm: 1.75 }, borderRadius: "14px", bgcolor: (th) => alpha(th.palette.background.paper, 0.55) }}>
+              <Box sx={{ width: { xs: 32, sm: 38 }, height: { xs: 32, sm: 38 }, flexShrink: 0, borderRadius: "10px", display: "grid", placeItems: "center", bgcolor: "#fff", color: "primary.main", "& svg": { fontSize: { xs: 18, sm: 20 } } }}>
+                {t.icon}
+              </Box>
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography variant="caption" color="text.secondary" noWrap sx={{ fontWeight: 600, display: "block" }}>
+                  {t.label}
+                </Typography>
+                <Typography noWrap sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, letterSpacing: "-0.02em", fontSize: { xs: "1.15rem", sm: "1.4rem" }, lineHeight: 1.2, color: t.accent || "text.primary" }}>
+                  {t.value}
+                </Typography>
+                {t.progress !== undefined && t.progress !== null && (
+                  <LinearProgress
+                    variant="determinate"
+                    value={t.progress}
+                    color={t.progress >= 100 ? "success" : "primary"}
+                    sx={{ my: 0.6, height: 5, borderRadius: 3, bgcolor: (th) => alpha(th.palette.text.primary, 0.08) }}
+                  />
+                )}
+                <Typography variant="caption" color="text.secondary" noWrap component="div">
+                  {t.sub}
+                </Typography>
+              </Box>
+            </Box>
+          ))}
+        </Box>
+      </Paper>
 
       <Tabs
         value={tab}
         onChange={(_, v) => setTab(v)}
-        sx={{ mb: { xs: 2, sm: 2.5 }, borderBottom: "1px solid", borderColor: "divider", "& .MuiTab-root": { minHeight: 48, fontWeight: 700, textTransform: "none" } }}
+        sx={{
+          mb: { xs: 2, sm: 2.5 },
+          minHeight: 46,
+          borderBottom: "1px solid",
+          borderColor: "divider",
+          "& .MuiTabs-indicator": { height: 3, borderRadius: "3px 3px 0 0" },
+          "& .MuiTab-root": { minWidth: 0, minHeight: 46, px: 0, fontWeight: 700, fontSize: 14.5, textTransform: "none", color: "text.secondary" },
+          "& .MuiTab-root:not(:last-of-type)": { mr: 3.5 },
+          "& .MuiTab-root.Mui-selected": { color: "text.primary" },
+        }}
       >
-        <Tab label="Rent" />
+        <Tab
+          label={
+            <Box sx={{ ...row, gap: 0.75 }}>
+              Rent
+              {toReview > 0 && (
+                <Box component="span" sx={{ px: 0.75, borderRadius: 99, fontSize: 11.5, fontWeight: 800, bgcolor: (t) => alpha(t.palette.info.main, 0.14), color: "info.dark" }}>
+                  {toReview}
+                </Box>
+              )}
+            </Box>
+          }
+        />
         <Tab
           label={
             <Box sx={{ ...row, gap: 0.75 }}>
@@ -1528,7 +1675,7 @@ export default function PaymentsPage() {
         {needsAccountSetup && (
           <Alert
             severity="warning"
-            sx={{ mb: 2.5, borderRadius: 2.5, alignItems: "center" }}
+            sx={{ mb: 2.5, borderRadius: "14px", alignItems: "center" }}
             action={
               <Button color="inherit" size="small" onClick={() => setTab(1)} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>
                 Set up
@@ -1543,63 +1690,69 @@ export default function PaymentsPage() {
           </Alert>
         )}
 
-        <SummaryStrip
-          items={[
-            {
-              label: "Collected this month",
-              value: formatCompact(totalRentCollectedThisMonth),
-              sub: collectionRate !== null ? `${collectionRate}% of expected` : "No expected rent yet",
-              color: "success.main",
-            },
-            { label: "Expected rent", value: formatCompact(expectedRent), sub: "Active tenants" },
-            { label: "Pending", value: pendingPayments, color: pendingPayments > 0 ? "warning.main" : undefined, sub: pendingPayments === 1 ? "payment" : "payments" },
-            { label: "Overdue", value: overduePayments, color: overduePayments > 0 ? "error.main" : undefined, sub: overduePayments === 1 ? "payment" : "payments" },
-          ]}
-        />
-
         {/* PENDING PAYMENT VERIFICATION */}
-        {pendingVerificationPayments.length > 0 && (
-          <Box sx={{ mb: { xs: 3, sm: 4 } }}>
+        {toReview > 0 && (
+          <Box sx={{ mb: { xs: 3, sm: 3.5 } }}>
             <SectionTitle
               title="Needs your review"
-              sub="Payments submitted by tenants. Approve them to mark as paid."
-              right={
-                <Chip size="small" label={pendingVerificationPayments.length} sx={{ fontWeight: 800, bgcolor: (t) => alpha(t.palette.warning.main, 0.16), color: "warning.dark" }} />
-              }
+              sub="Payments submitted by tenants. Check the proof, then approve or reject."
+              right={<Chip size="small" label={toReview} sx={{ fontWeight: 800, bgcolor: (t) => alpha(t.palette.info.main, 0.14), color: "info.dark" }} />}
             />
 
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
               {pendingVerificationPayments.map((payment) => {
                 const isProcessing = processingPaymentId === payment.id;
-
                 return (
-                  <Paper key={payment.id} elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 2.5 }, borderLeft: "3px solid", borderLeftColor: "warning.main" }}>
-                    <Box
-                      sx={{
-                        display: "flex",
-                        flexDirection: { xs: "column", lg: "row" },
-                        alignItems: { xs: "stretch", lg: "center" },
-                        justifyContent: "space-between",
-                        gap: { xs: 1.5, lg: 3 },
-                      }}
-                    >
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography sx={{ fontWeight: 700 }} noWrap>
-                          {payment.tenantName || "Unnamed Tenant"}
-                        </Typography>
-                        <Typography variant="body2" color="text.secondary" noWrap>
-                          Room {payment.roomNumber || "Unassigned"} • {payment.propertyName || "Dormitory"}
-                        </Typography>
-                        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1 }}>
-                          <Chip label={payment.paymentMethod || "Unknown method"} size="small" variant="outlined" />
-                          <Chip label={payment.periodMonth || "No billing period"} size="small" variant="outlined" />
+                  <Paper key={payment.id} elevation={0} sx={{ ...cardSx, p: { xs: 1.75, sm: 2 }, position: "relative", overflow: "hidden" }}>
+                    <Box aria-hidden sx={{ position: "absolute", left: 0, top: 12, bottom: 12, width: 3, borderRadius: "0 3px 3px 0", bgcolor: "info.main" }} />
+                    <Box sx={{ display: "flex", flexDirection: { xs: "column", md: "row" }, alignItems: { md: "center" }, gap: { xs: 1.5, md: 2.5 } }}>
+                      {/* proof thumbnail */}
+                      {payment.proofUrl ? (
+                        <Box component="a" href={payment.proofUrl} target="_blank" rel="noopener noreferrer" aria-label="Open proof of payment" sx={{ display: { xs: "none", sm: "block" }, flexShrink: 0 }}>
+                          <Box component="img" src={payment.proofUrl} alt="Proof of payment" loading="lazy" sx={{ display: "block", width: 72, height: 72, objectFit: "cover", borderRadius: "12px", border: "1px solid", borderColor: "divider" }} />
                         </Box>
+                      ) : null}
+
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Box sx={{ ...row, justifyContent: "space-between", gap: 1.5 }}>
+                          <Typography sx={{ fontWeight: 800 }} noWrap>
+                            {payment.tenantName || "Unnamed Tenant"}
+                          </Typography>
+                          <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: "1.15rem", flexShrink: 0, display: { md: "none" } }}>
+                            {formatCurrency(payment.amount)}
+                          </Typography>
+                        </Box>
+                        <Typography variant="body2" color="text.secondary" noWrap>
+                          Room {payment.roomNumber || "—"} · {payment.propertyName || "Dormitory"}
+                        </Typography>
+                        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 0.75 }}>
+                          {[payment.periodMonth || "No billing month", payment.paymentMethod || "Unknown method", formatDate(payment)].map((t) => (
+                            <Box key={t} component="span" sx={{ px: 0.9, py: 0.25, borderRadius: "6px", fontSize: 12, fontWeight: 700, bgcolor: (th) => alpha(th.palette.background.paper, 0.75) }}>
+                              {t}
+                            </Box>
+                          ))}
+                        </Box>
+                        {(payment.referenceNumber || payment.remarks || payment.recordedByName) && (
+                          <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.75, overflowWrap: "anywhere" }}>
+                            {[
+                              payment.referenceNumber && `Ref. ${payment.referenceNumber}`,
+                              payment.remarks && `“${payment.remarks}”`,
+                              payment.recordedByName && `Recorded by ${payment.recordedByName}${payment.recordedByRole ? ` (${payment.recordedByRole})` : ""}`,
+                            ]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </Typography>
+                        )}
+                        {payment.proofUrl && (
+                          <Box component="a" href={payment.proofUrl} target="_blank" rel="noopener noreferrer" sx={{ display: { xs: "inline-block", sm: "none" }, mt: 1 }}>
+                            <Box component="img" src={payment.proofUrl} alt="Proof of payment" loading="lazy" sx={{ display: "block", width: 120, height: 120, objectFit: "cover", borderRadius: "12px", border: "1px solid", borderColor: "divider" }} />
+                          </Box>
+                        )}
                       </Box>
 
-                      <Box sx={{ textAlign: { xs: "left", lg: "right" }, minWidth: { lg: 150 } }}>
-                        <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: "1.25rem" }}>{formatCurrency(payment.amount)}</Typography>
-                        <Typography variant="body2" color="text.secondary">{formatDate(payment)}</Typography>
-                      </Box>
+                      <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: "1.25rem", flexShrink: 0, display: { xs: "none", md: "block" } }}>
+                        {formatCurrency(payment.amount)}
+                      </Typography>
 
                       <Box sx={{ display: "flex", gap: 1, flexShrink: 0 }}>
                         <Button
@@ -1609,7 +1762,7 @@ export default function PaymentsPage() {
                           disabled={isProcessing}
                           onClick={() => handleVerifyPayment(payment.id, true)}
                           startIcon={isProcessing ? <CircularProgress size={16} color="inherit" /> : <CheckIcon />}
-                          sx={{ flex: { xs: 1, lg: "none" }, fontWeight: 700, minHeight: 44 }}
+                          sx={{ flex: { xs: 1, md: "none" }, fontWeight: 700, minHeight: 42, borderRadius: "10px" }}
                         >
                           {isProcessing ? "Updating…" : "Approve"}
                         </Button>
@@ -1618,41 +1771,12 @@ export default function PaymentsPage() {
                           color="error"
                           disabled={isProcessing}
                           onClick={() => setRejectTarget(payment)}
-                          sx={{ flex: { xs: 1, lg: "none" }, fontWeight: 700, minHeight: 44 }}
+                          sx={{ flex: { xs: 1, md: "none" }, fontWeight: 700, minHeight: 42, borderRadius: "10px" }}
                         >
                           Reject
                         </Button>
                       </Box>
                     </Box>
-
-                    {(payment.referenceNumber || payment.remarks || payment.proofUrl || payment.recordedByName) && (
-                      <>
-                        <Divider sx={{ my: 1.5 }} />
-                        <Box sx={{ display: "flex", flexDirection: "column", gap: 0.25 }}>
-                          {payment.referenceNumber && (
-                            <Typography variant="body2" sx={{ wordBreak: "break-word" }}>
-                              <strong>Reference:</strong> {payment.referenceNumber}
-                            </Typography>
-                          )}
-                          {payment.remarks && (
-                            <Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-word" }}>
-                              <strong>Remarks:</strong> {payment.remarks}
-                            </Typography>
-                          )}
-                          {payment.recordedByName && (
-                            <Typography variant="body2" color="text.secondary" sx={{ wordBreak: "break-word" }}>
-                              <strong>Recorded by:</strong> {payment.recordedByName}
-                              {payment.recordedByRole ? ` (${payment.recordedByRole})` : ""}
-                            </Typography>
-                          )}
-                          {payment.proofUrl && (
-                            <Box component="a" href={payment.proofUrl} target="_blank" rel="noopener noreferrer" sx={{ display: "inline-block", mt: 0.75 }}>
-                              <Box component="img" src={payment.proofUrl} alt="Proof of payment" loading="lazy" sx={{ display: "block", width: 120, height: 120, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider" }} />
-                            </Box>
-                          )}
-                        </Box>
-                      </>
-                    )}
                   </Paper>
                 );
               })}
@@ -1661,54 +1785,81 @@ export default function PaymentsPage() {
         )}
 
         {/* RENT BY ROOM */}
-        <SectionTitle title="Rent by room" sub={`Billing period: ${currentPeriodValue}`} />
+        <SectionTitle title="Rent by room" sub={`Who has paid for ${currentPeriodValue}`} />
 
         {normalizedTenants.length > 0 && (
-          <Box sx={{ mb: 2 }}>
-            <TextField
-              size="small"
-              placeholder="Search tenant or room"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              slotProps={{
-                input: {
-                  startAdornment: (
-                    <InputAdornment position="start">
-                      <SearchIcon fontSize="small" />
-                    </InputAdornment>
-                  ),
-                  endAdornment: search ? (
-                    <InputAdornment position="end">
-                      <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
-                        <CloseIcon fontSize="small" />
-                      </IconButton>
-                    </InputAdornment>
-                  ) : null,
-                },
-                htmlInput: { "aria-label": "Search tenants" },
+          <Box sx={{ display: "flex", flexDirection: { xs: "column", md: "row" }, alignItems: { md: "center" }, gap: 1.25, mb: 2 }}>
+            <Paper
+              elevation={0}
+              sx={{
+                ...cardSx,
+                ...row,
+                gap: 1,
+                px: 1.5,
+                height: 44,
+                borderRadius: "10px",
+                flex: { md: "0 1 320px" },
+                minWidth: 0,
+                transition: "border-color .15s, box-shadow .15s",
+                "&:focus-within": { borderColor: "primary.main", boxShadow: "0 0 0 3px rgba(255,69,0,.12)" },
               }}
-              fullWidth
-              sx={{ maxWidth: { sm: 360 } }}
-            />
-            <Box sx={{ display: "flex", gap: 1, mt: 1.25, flexWrap: "wrap" }}>
-              {STATUS_FILTERS.map((f) => (
-                <Chip
-                  key={f}
-                  label={f}
-                  clickable
-                  onClick={() => setStatusFilter(f)}
-                  color={statusFilter === f ? "primary" : "default"}
-                  variant={statusFilter === f ? "filled" : "outlined"}
-                  sx={{ fontWeight: 700, height: 40, borderRadius: 20, flexShrink: 0 }}
-                />
-              ))}
+            >
+              <SearchIcon sx={{ color: "text.secondary" }} />
+              <InputBase fullWidth placeholder="Search tenant or room" value={search} onChange={(e) => setSearch(e.target.value)} inputProps={{ "aria-label": "Search tenants" }} />
+              {search && (
+                <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              )}
+            </Paper>
+
+            {/* Segmented status filter with counts */}
+            <Box
+              role="group"
+              aria-label="Filter by status"
+              sx={{ display: "flex", gap: 0.5, p: 0.5, ...cardSx, borderRadius: "14px", overflowX: "auto", scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}
+            >
+              {STATUS_FILTERS.filter((f) => f === "All" || f === statusFilter || statusCounts[f] > 0).map((f) => {
+                const on = statusFilter === f;
+                const count = f === "All" ? normalizedTenants.length : statusCounts[f] || 0;
+                return (
+                  <Box
+                    key={f}
+                    component="button"
+                    type="button"
+                    aria-pressed={on}
+                    onClick={() => setStatusFilter(f)}
+                    sx={{
+                      ...row,
+                      gap: 0.6,
+                      px: 1.4,
+                      height: 34,
+                      border: 0,
+                      borderRadius: "10px",
+                      cursor: "pointer",
+                      flexShrink: 0,
+                      fontFamily: '"Inter", sans-serif',
+                      fontWeight: 700,
+                      fontSize: 13.5,
+                      whiteSpace: "nowrap",
+                      color: on ? "primary.main" : "text.secondary",
+                      bgcolor: on ? "rgba(255,69,0,.1)" : "transparent",
+                      "&:hover": { color: on ? "primary.main" : "text.primary" },
+                      "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 1 },
+                    }}
+                  >
+                    {f}
+                    <Box component="span" sx={{ fontSize: 12, opacity: 0.7 }}>{count}</Box>
+                  </Box>
+                );
+              })}
             </Box>
           </Box>
         )}
 
         {propertyGroups.length === 0 ? (
           <Paper elevation={0} sx={{ ...groupShellSx, borderStyle: "dashed", py: 7, px: 3, textAlign: "center" }}>
-            <Box sx={{ width: 64, height: 64, borderRadius: "50%", mx: "auto", mb: 2, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
+            <Box sx={{ width: 64, height: 64, borderRadius: "14px", mx: "auto", mb: 2, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
               <PaymentsOutlinedIcon sx={{ fontSize: 32, color: "primary.main" }} />
             </Box>
             {filtersActive ? (
@@ -1728,22 +1879,22 @@ export default function PaymentsPage() {
             )}
           </Paper>
         ) : (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
             {propertyGroups.map((prop, index) => {
               const pct = prop.expected > 0 ? Math.min(100, Math.round((prop.collected / prop.expected) * 100)) : 0;
               return (
-                <Accordion key={prop.key} defaultExpanded={index === 0 || filtersActive} disableGutters elevation={0} sx={groupShellSx}>
-                  <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ "& .MuiAccordionSummary-content": { alignItems: "center", my: 1.5, minWidth: 0 } }}>
+                <Accordion key={`${prop.key}-${filtersActive}`} defaultExpanded={index === 0 || filtersActive} disableGutters elevation={0} sx={groupShellSx}>
+                  <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: { xs: 2, sm: 2.5 }, "& .MuiAccordionSummary-content": { alignItems: "center", my: 1.5, minWidth: 0 } }}>
                     <Box sx={{ ...row, gap: 1.5, minWidth: 0, flex: 1 }}>
-                      <Box sx={{ width: 36, height: 36, borderRadius: 2, flexShrink: 0, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
+                      <Box sx={{ width: 38, height: 38, borderRadius: "10px", flexShrink: 0, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
                         <ApartmentOutlinedIcon color="primary" fontSize="small" />
                       </Box>
                       <Box sx={{ minWidth: 0, flex: 1 }}>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.25 }} noWrap>
+                        <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, lineHeight: 1.25 }} noWrap>
                           {prop.name}
                         </Typography>
                         <Typography variant="caption" color="text.secondary" noWrap component="div">
-                          {prop.tenantCount} {prop.tenantCount === 1 ? "tenant" : "tenants"} · {formatCompact(prop.collected)} of {formatCompact(prop.expected)}
+                          {prop.tenantCount} {prop.tenantCount === 1 ? "tenant" : "tenants"} · {formatCompact(prop.collected)} of {formatCompact(prop.expected)} collected
                         </Typography>
                       </Box>
                       <Box sx={{ width: { xs: 48, sm: 120 }, flexShrink: 0, mr: 1 }}>
@@ -1753,7 +1904,7 @@ export default function PaymentsPage() {
                           color={pct >= 100 ? "success" : "primary"}
                           sx={{ height: 6, borderRadius: 3, bgcolor: (t) => alpha(t.palette.text.primary, 0.08) }}
                         />
-                        <Typography variant="caption" color="text.secondary" sx={{ display: { xs: "none", sm: "block" }, mt: 0.25, textAlign: "right" }}>
+                        <Typography variant="caption" sx={{ display: { xs: "none", sm: "block" }, mt: 0.25, textAlign: "right", fontWeight: 700 }}>
                           {pct}%
                         </Typography>
                       </Box>
@@ -1770,9 +1921,9 @@ export default function PaymentsPage() {
                             ...row,
                             justifyContent: "space-between",
                             gap: 2,
-                            px: { xs: 2, sm: 3 },
-                            py: 0.9,
-                            bgcolor: (t) => alpha(t.palette.background.paper, 0.55),
+                            px: { xs: 2, sm: 2.5 },
+                            py: 0.75,
+                            bgcolor: (t) => alpha(t.palette.background.paper, 0.45),
                             borderTop: roomIndex === 0 ? "none" : "1px solid",
                             borderBottom: "1px solid",
                             borderColor: "divider",
@@ -1781,15 +1932,15 @@ export default function PaymentsPage() {
                           <Typography variant="body2" sx={{ fontWeight: 800 }}>
                             {room.roomNumber === "Unassigned" ? "No room yet" : `Room ${room.roomNumber}`}
                           </Typography>
-                          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
                             {formatCompact(room.collected)} / {formatCompact(room.expected)}
                           </Typography>
                         </Box>
                         {room.tenants.map((entry, i) => (
-                          <React.Fragment key={entry.tenant.id}>
+                          <Fragment key={entry.tenant.id}>
                             {i > 0 && <Divider />}
                             {renderTenantRow(entry)}
-                          </React.Fragment>
+                          </Fragment>
                         ))}
                       </Box>
                     ))}
@@ -1808,34 +1959,11 @@ export default function PaymentsPage() {
         <PaymentAccountsPanel properties={properties} showToast={showToast} />
       </Box>
 
-      {/* Phone: floating record button */}
-      {tab === 0 && (
-        <Button
-          variant="contained"
-          onClick={handleOpenRecordPayment}
-          startIcon={<AddIcon />}
-          sx={{
-            display: { xs: "inline-flex", sm: "none" },
-            position: "fixed",
-            right: 16,
-            bottom: `calc(${BOTTOM_NAV_H}px + 16px + env(safe-area-inset-bottom, 0px))`,
-            zIndex: (t) => t.zIndex.appBar - 1,
-            borderRadius: 6,
-            px: 2.5,
-            py: 1.2,
-            fontWeight: 700,
-            boxShadow: 6,
-          }}
-        >
-          Record
-        </Button>
-      )}
-
       {/* ======================================================
           REJECT CONFIRMATION
       ====================================================== */}
       <Dialog open={Boolean(rejectTarget)} onClose={() => setRejectTarget(null)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: dialogPaperSx } }}>
-        <DialogTitle sx={{ fontWeight: 800 }}>Reject this payment?</DialogTitle>
+        <DialogTitle sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800 }}>Reject this payment?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
             {rejectTarget
@@ -1844,7 +1972,7 @@ export default function PaymentsPage() {
           </Typography>
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button color="inherit" onClick={() => setRejectTarget(null)} sx={{ fontWeight: 600 }}>
+          <Button color="inherit" onClick={() => setRejectTarget(null)} sx={{ fontWeight: 700 }}>
             Keep pending
           </Button>
           <Button
@@ -1856,7 +1984,7 @@ export default function PaymentsPage() {
               setRejectTarget(null);
               handleVerifyPayment(id, false);
             }}
-            sx={{ fontWeight: 700 }}
+            sx={{ fontWeight: 700, borderRadius: "10px" }}
           >
             Reject payment
           </Button>
@@ -1867,78 +1995,96 @@ export default function PaymentsPage() {
           PAYMENT DETAILS
       ====================================================== */}
       <Dialog open={Boolean(selectedPayment)} onClose={() => setSelectedPayment(null)} fullWidth maxWidth="sm" slotProps={{ paper: { sx: dialogPaperSx } }}>
-        <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
-          Payment details
-          <IconButton onClick={() => setSelectedPayment(null)} size="small" aria-label="Close payment details">
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-        <DialogContent dividers>
-          {selectedPayment && (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-              {[
-                ["Tenant", selectedPayment.tenantName || "—"],
-                ["Property", selectedPayment.propertyName || "—"],
-                ["Room", selectedPayment.roomNumber || "—"],
-                ["Billing period", selectedPayment.periodMonth || "—"],
-                ["Payment date", formatDate(selectedPayment)],
-                ["Amount", formatCurrency(selectedPayment.amount)],
-                ["Method", selectedPayment.paymentMethod || "—"],
-                ["Status", selectedPayment.status || "—"],
-                ["Reference no.", selectedPayment.referenceNumber || "—"],
-                ["Remarks", selectedPayment.remarks || "—"],
-              ].map(([label, value]) => (
-                <Box key={label} sx={{ display: "flex", justifyContent: "space-between", gap: 2 }}>
-                  <Typography color="text.secondary">{label}</Typography>
-                  <Typography fontWeight={600} sx={{ textAlign: "right", overflowWrap: "anywhere" }}>{value}</Typography>
-                </Box>
-              ))}
+        {selectedPayment && (
+          <>
+            <Box sx={{ px: { xs: 2, sm: 3 }, pt: 2.5, pb: 2, borderBottom: "1px solid", borderColor: "divider" }}>
+              <Box sx={{ ...row, justifyContent: "space-between", gap: 1 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+                  Payment · {selectedPayment.periodMonth || "No billing month"}
+                </Typography>
+                <IconButton onClick={() => setSelectedPayment(null)} size="small" aria-label="Close payment details" sx={{ bgcolor: "action.hover" }}>
+                  <CloseIcon fontSize="small" />
+                </IconButton>
+              </Box>
+              <Box sx={{ ...row, gap: 1.5, flexWrap: "wrap" }}>
+                <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, fontSize: "1.8rem", letterSpacing: "-0.02em" }}>
+                  {formatCurrency(selectedPayment.amount)}
+                </Typography>
+                <StatusPill status={selectedPayment.status || "—"} />
+              </Box>
+              <Typography variant="body2" color="text.secondary">
+                {selectedPayment.tenantName || "—"} · Room {selectedPayment.roomNumber || "—"} · {selectedPayment.propertyName || "—"}
+              </Typography>
+            </Box>
+            <DialogContent sx={{ pt: 2 }}>
+              <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1.25 }}>
+                {[
+                  ["Payment date", formatDate(selectedPayment)],
+                  ["Method", selectedPayment.paymentMethod || "—"],
+                  ["Reference no.", selectedPayment.referenceNumber || "—"],
+                  ["Receipt no.", selectedPayment.receiptNo || "—"],
+                ].map(([label, value]) => (
+                  <Box key={label} sx={{ p: 1.25, borderRadius: "10px", bgcolor: (t) => alpha(t.palette.background.paper, 0.5), minWidth: 0 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block" }}>{label}</Typography>
+                    <Typography sx={{ fontWeight: 700, fontSize: "0.92rem", overflowWrap: "anywhere" }}>{value}</Typography>
+                  </Box>
+                ))}
+              </Box>
+              {selectedPayment.remarks && (
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, overflowWrap: "anywhere" }}>
+                  <strong>Remarks:</strong> {selectedPayment.remarks}
+                </Typography>
+              )}
               {selectedPayment.proofUrl && (
-                <Box component="a" href={selectedPayment.proofUrl} target="_blank" rel="noopener noreferrer" sx={{ display: "block", mt: 0.5 }}>
-                  <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.5 }}>Proof of payment</Typography>
-                  <Box component="img" src={selectedPayment.proofUrl} alt="Proof of payment" loading="lazy" sx={{ display: "block", width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: 2, border: "1px solid", borderColor: "divider", bgcolor: "action.hover" }} />
+                <Box component="a" href={selectedPayment.proofUrl} target="_blank" rel="noopener noreferrer" sx={{ display: "block", mt: 2 }}>
+                  <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 0.5, fontWeight: 600 }}>Proof of payment</Typography>
+                  <Box component="img" src={selectedPayment.proofUrl} alt="Proof of payment" loading="lazy" sx={{ display: "block", width: "100%", maxHeight: 320, objectFit: "contain", borderRadius: "12px", border: "1px solid", borderColor: "divider", bgcolor: "action.hover" }} />
                 </Box>
               )}
-            </Box>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => setSelectedPayment(null)} color="inherit" sx={{ fontWeight: 600 }}>
-            Close
-          </Button>
-          <Button
-            startIcon={<PrintIcon />}
-            variant="contained"
-            disableElevation
-            disabled={!selectedPayment || getPaymentStatus(selectedPayment) !== "paid"}
-            onClick={() => printReceipt(selectedPayment)}
-            sx={{ fontWeight: 700 }}
-          >
-            Print receipt
-          </Button>
-        </DialogActions>
+            </DialogContent>
+            <DialogActions sx={{ p: 2, gap: 1, borderTop: "1px solid", borderColor: "divider" }}>
+              <Button onClick={() => setSelectedPayment(null)} color="inherit" sx={{ fontWeight: 700 }}>
+                Close
+              </Button>
+              <Button
+                startIcon={<PrintIcon />}
+                variant="contained"
+                disableElevation
+                disabled={!isReceiptable(getPaymentStatus(selectedPayment))}
+                onClick={() => printReceipt(selectedPayment)}
+                sx={{ fontWeight: 700, borderRadius: "10px" }}
+              >
+                Print receipt
+              </Button>
+            </DialogActions>
+          </>
+        )}
       </Dialog>
 
       {/* ======================================================
           TENANT PAYMENT HISTORY
       ====================================================== */}
       <Dialog open={Boolean(historyTenant)} onClose={() => setHistoryTenant(null)} fullWidth maxWidth="sm" slotProps={{ paper: { sx: dialogPaperSx } }}>
-        <DialogTitle sx={{ ...row, justifyContent: "space-between", gap: 1, fontWeight: 800 }}>
+        <DialogTitle sx={{ ...row, justifyContent: "space-between", gap: 1, fontFamily: '"Inter", sans-serif', fontWeight: 800 }}>
           <Box component="span" sx={{ minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            History{historyTenant ? ` — ${historyTenant.fullName}` : ""}
+            Payment history{historyTenant ? ` · ${historyTenant.fullName}` : ""}
           </Box>
-          <IconButton onClick={() => setHistoryTenant(null)} size="small" aria-label="Close payment history">
-            <CloseIcon />
+          <IconButton onClick={() => setHistoryTenant(null)} size="small" aria-label="Close payment history" sx={{ bgcolor: "action.hover" }}>
+            <CloseIcon fontSize="small" />
           </IconButton>
         </DialogTitle>
         <DialogContent dividers sx={{ p: 0 }}>
-          {paymentHistoryForTenant.length === 0 ? (
+          {historyLoading ? (
+            <Box sx={{ py: 4, display: "grid", placeItems: "center" }}>
+              <CircularProgress size={26} />
+            </Box>
+          ) : paymentHistoryForTenant.length === 0 ? (
             <Typography color="text.secondary" sx={{ py: 4, textAlign: "center" }}>
               No payments recorded for this tenant yet.
             </Typography>
           ) : (
             paymentHistoryForTenant.map((payment, i) => (
-              <React.Fragment key={payment.id}>
+              <Fragment key={payment.id}>
                 {i > 0 && <Divider />}
                 <Box sx={{ ...row, gap: 1.5, px: 2, py: 1.5, alignItems: "flex-start" }}>
                   <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -1951,21 +2097,21 @@ export default function PaymentsPage() {
                   <Box sx={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 0.5, flexShrink: 0 }}>
                     <StatusPill status={payment.status || "Paid"} />
                     <Box sx={{ display: "flex" }}>
-                      <IconButton aria-label="View payment" onClick={() => { setHistoryTenant(null); setSelectedPayment(payment); }} sx={{ width: 40, height: 40 }}>
+                      <IconButton aria-label="View payment" onClick={() => { setHistoryTenant(null); setSelectedPayment(payment); }} sx={{ width: 38, height: 38 }}>
                         <VisibilityIcon fontSize="small" />
                       </IconButton>
-                      <IconButton aria-label="Print receipt" disabled={getPaymentStatus(payment) !== "paid"} onClick={() => printReceipt(payment, historyTenant)} sx={{ width: 40, height: 40 }}>
+                      <IconButton aria-label="Print receipt" disabled={!isReceiptable(getPaymentStatus(payment))} onClick={() => printReceipt(payment, historyTenant)} sx={{ width: 38, height: 38 }}>
                         <PrintIcon fontSize="small" />
                       </IconButton>
                     </Box>
                   </Box>
                 </Box>
-              </React.Fragment>
+              </Fragment>
             ))
           )}
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setHistoryTenant(null)} sx={{ fontWeight: 600 }}>Close</Button>
+          <Button onClick={() => setHistoryTenant(null)} sx={{ fontWeight: 700 }}>Close</Button>
         </DialogActions>
       </Dialog>
 
@@ -1973,109 +2119,243 @@ export default function PaymentsPage() {
           RECORD PAYMENT (centred pop-up, scrolls inside on phones)
       ====================================================== */}
       <Dialog open={openRecordPayment} onClose={handleCloseRecordPayment} fullWidth maxWidth="sm" slotProps={{ paper: { sx: dialogPaperSx } }}>
-        <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
-          Record payment
-          <IconButton onClick={handleCloseRecordPayment} size="small" aria-label="Close" disabled={saving}>
-            <CloseIcon />
+        <Box sx={{ ...row, justifyContent: "space-between", gap: 1, px: { xs: 2, sm: 3 }, pt: 2.5, pb: 2, borderBottom: "1px solid", borderColor: "divider" }}>
+          <Box sx={{ ...row, gap: 1.25, minWidth: 0 }}>
+            <Box sx={{ width: 38, height: 38, borderRadius: "10px", display: "grid", placeItems: "center", bgcolor: "rgba(255,69,0,.1)", color: "primary.main", flexShrink: 0 }}>
+              <PaymentsOutlinedIcon fontSize="small" />
+            </Box>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: "1.15rem", lineHeight: 1.2 }}>Record payment</Typography>
+              <Typography variant="caption" color="text.secondary">For cash or payments you received yourself</Typography>
+            </Box>
+          </Box>
+          <IconButton onClick={handleCloseRecordPayment} size="small" aria-label="Close" disabled={saving} sx={{ bgcolor: "action.hover" }}>
+            <CloseIcon fontSize="small" />
           </IconButton>
-        </DialogTitle>
+        </Box>
 
-        <DialogContent dividers sx={{ p: { xs: 2, sm: 3 } }}>
-          {formErrors._form && <Alert severity="error" sx={{ mb: 2.5 }}>{formErrors._form}</Alert>}
+        <DialogContent sx={{ p: { xs: 2, sm: 3 }, "& .MuiOutlinedInput-root": { borderRadius: "10px" } }}>
+          {formErrors._form && <Alert severity="error" sx={{ mb: 2.5, borderRadius: "10px" }}>{formErrors._form}</Alert>}
 
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2.25, pt: 0.5 }}>
-            <TextField
-              select
-              required
-              fullWidth
-              label="Tenant"
-              name="tenantId"
-              value={paymentForm.tenantId}
-              onChange={handleFormChange}
-              error={Boolean(formErrors.tenantId)}
-              helperText={
-                formErrors.tenantId ||
-                (selectedFormInfo
-                  ? `Rent ${formatCompact(selectedFormInfo.rent)} · Paid ${formatCompact(selectedFormInfo.paidAmount)} · Balance ${formatCompact(selectedFormInfo.balance)} this month`
-                  : "")
-              }
-              sx={{ gridColumn: { sm: "1 / -1" } }}
-            >
-              {[...normalizedTenants]
-                .sort((a, b) => a.fullName.localeCompare(b.fullName))
-                .map((tenant) => (
-                  <MenuItem key={tenant.id} value={tenant.id}>
-                    {tenant.fullName} — Room {tenant.roomNumber}
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 2.5, pt: 0.5 }}>
+            {/* 1. Who and which month */}
+            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(0, 1.4fr) minmax(0, 1fr)" }, gap: 2 }}>
+              <Autocomplete
+                options={recordableTenants}
+                value={selectedFormTenant || null}
+                onChange={(_, t) => handleFormChange({ target: { name: "tenantId", value: t?.id || "" } })}
+                getOptionLabel={(t) => t.fullName}
+                isOptionEqualToValue={(a, b) => a.id === b.id}
+                noOptionsText="No tenants match"
+                renderOption={(props, t) => {
+                  const { key, ...rest } = props;
+                  return (
+                    <Box component="li" key={key} {...rest} sx={{ display: "flex", gap: 1.25, alignItems: "center" }}>
+                      <Avatar sx={{ width: 30, height: 30, fontSize: 12, fontWeight: 800, bgcolor: "primary.main", color: "#fff" }}>{initialsOf(t.fullName)}</Avatar>
+                      <Box sx={{ minWidth: 0 }}>
+                        <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>{t.fullName}</Typography>
+                        <Typography variant="caption" color="text.secondary" noWrap component="div">
+                          Room {t.roomNumber} · {t.propertyName}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  );
+                }}
+                renderInput={(params) => (
+                  <TextField
+                    {...params}
+                    required
+                    label="Tenant"
+                    placeholder="Search by name"
+                    error={Boolean(formErrors.tenantId)}
+                    helperText={formErrors.tenantId || ""}
+                  />
+                )}
+              />
+              <TextField
+                select
+                required
+                fullWidth
+                label="For the month of"
+                name="periodMonth"
+                value={paymentForm.periodMonth}
+                onChange={handleFormChange}
+                error={Boolean(formErrors.periodMonth)}
+                helperText={formErrors.periodMonth || ""}
+              >
+                {periodOptions.map((p) => (
+                  <MenuItem key={p} value={p}>
+                    {p}
+                    {p === currentPeriodValue ? " (this month)" : ""}
                   </MenuItem>
                 ))}
-            </TextField>
+              </TextField>
+            </Box>
+
+            {/* What this tenant owes for that month */}
+            {selectedFormTenant && (
+              <Box sx={{ borderRadius: "14px", border: "1px solid", borderColor: "divider", overflow: "hidden" }}>
+                {formInfoLoading || !selectedFormInfo ? (
+                  <Box sx={{ ...row, gap: 1.25, px: 2, py: 1.75 }}>
+                    <CircularProgress size={18} />
+                    <Typography variant="body2" color="text.secondary">Checking {selectedFormTenant.fullName}'s payments for {paymentForm.periodMonth}…</Typography>
+                  </Box>
+                ) : (
+                  <>
+                    <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", bgcolor: (t) => alpha(t.palette.background.paper, 0.45) }}>
+                      {[
+                        ["Rent", formatCompact(selectedFormInfo.rent)],
+                        ["Already paid", formatCompact(selectedFormInfo.received)],
+                        ["Balance", formatCompact(selectedFormInfo.balance)],
+                      ].map(([label, value], i) => (
+                        <Box key={label} sx={{ px: 1.75, py: 1.25, borderLeft: i ? "1px solid" : "none", borderColor: "divider", minWidth: 0 }}>
+                          <Typography variant="caption" color="text.secondary" noWrap component="div" sx={{ fontWeight: 600 }}>{label}</Typography>
+                          <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, color: label === "Balance" && selectedFormInfo.balance > 0 ? "warning.dark" : "text.primary" }}>
+                            {value}
+                          </Typography>
+                        </Box>
+                      ))}
+                    </Box>
+                    {selectedFormInfo.rent > 0 && (
+                      <LinearProgress
+                        variant="determinate"
+                        value={Math.min(100, (selectedFormInfo.received / selectedFormInfo.rent) * 100)}
+                        color={selectedFormInfo.balance === 0 ? "success" : "primary"}
+                        sx={{ height: 4, bgcolor: (t) => alpha(t.palette.text.primary, 0.06) }}
+                      />
+                    )}
+                  </>
+                )}
+              </Box>
+            )}
+
+            {/* Things to double-check before saving */}
+            {selectedFormInfo && selectedFormInfo.pendingCount > 0 && (
+              <Alert severity="info" sx={{ borderRadius: "12px", py: 0.25 }}>
+                {formatCurrency(selectedFormInfo.pendingAmount)} for {paymentForm.periodMonth} is already waiting for your review. If it's the same payment, approve that one instead of recording it again.
+              </Alert>
+            )}
+            {selectedFormInfo && selectedFormInfo.rent > 0 && selectedFormInfo.balance === 0 && (
+              <Alert severity="success" sx={{ borderRadius: "12px", py: 0.25 }}>
+                {paymentForm.periodMonth} is already fully paid. Anything you record now is extra.
+              </Alert>
+            )}
+
+            {/* 2. How much */}
+            <Box>
+              <TextField
+                required
+                fullWidth
+                label="Amount received"
+                name="amount"
+                type="number"
+                value={effectiveAmount}
+                onChange={handleFormChange}
+                error={Boolean(formErrors.amount)}
+                helperText={
+                  formErrors.amount ||
+                  (overBy > 0 && selectedFormInfo?.balance > 0
+                    ? `${formatCurrency(overBy)} more than the balance. The extra isn't carried over to another month automatically.`
+                    : !paymentForm.amountTouched && suggestedAmount
+                    ? "Filled in with the balance. Change it if they paid a different amount."
+                    : "")
+                }
+                sx={overBy > 0 && selectedFormInfo?.balance > 0 && !formErrors.amount ? { "& .MuiFormHelperText-root": { color: "warning.dark" } } : undefined}
+                slotProps={{
+                  input: { startAdornment: <InputAdornment position="start">₱</InputAdornment> },
+                  htmlInput: { min: 0, step: "0.01", inputMode: "decimal" },
+                }}
+              />
+              {selectedFormInfo && selectedFormInfo.balance > 0 && (
+                <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap", mt: 1 }}>
+                  {[
+                    ["Full balance", selectedFormInfo.balance],
+                    ["Half", round2(selectedFormInfo.balance / 2)],
+                  ].map(([label, value]) => (
+                    <Chip
+                      key={label}
+                      size="small"
+                      clickable
+                      label={`${label} · ${formatCompact(value)}`}
+                      onClick={() => handleFormChange({ target: { name: "amount", value: String(value) } })}
+                      variant={amountNumber === value ? "filled" : "outlined"}
+                      color={amountNumber === value ? "primary" : "default"}
+                      sx={{ fontWeight: 700, borderRadius: "8px" }}
+                    />
+                  ))}
+                </Box>
+              )}
+            </Box>
+
+            {/* 3. How and when */}
+            <Box>
+              <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>Method</Typography>
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
+                {PAYMENT_METHODS.map((m) => {
+                  const on = paymentForm.paymentMethod === m;
+                  return (
+                    <Chip
+                      key={m}
+                      label={m}
+                      clickable
+                      color={on ? "primary" : "default"}
+                      variant={on ? "filled" : "outlined"}
+                      onClick={() => handleFormChange({ target: { name: "paymentMethod", value: m } })}
+                      sx={{ fontWeight: 700, borderRadius: "8px", height: 34 }}
+                    />
+                  );
+                })}
+              </Box>
+            </Box>
 
             <TextField
               required
               fullWidth
-              label="Amount"
-              name="amount"
-              type="number"
-              value={paymentForm.amount}
-              onChange={handleFormChange}
-              error={Boolean(formErrors.amount)}
-              helperText={formErrors.amount || ""}
-              slotProps={{
-                input: { startAdornment: <InputAdornment position="start">₱</InputAdornment> },
-                htmlInput: { min: 0, step: "0.01", inputMode: "decimal" },
-              }}
-            />
-
-            <TextField select required fullWidth label="Payment method" name="paymentMethod" value={paymentForm.paymentMethod} onChange={handleFormChange}>
-              {PAYMENT_METHODS.map((m) => (
-                <MenuItem key={m} value={m}>{m}</MenuItem>
-              ))}
-            </TextField>
-
-            <TextField
-              select
-              required
-              fullWidth
-              label="Billing period"
-              name="periodMonth"
-              value={paymentForm.periodMonth}
-              onChange={handleFormChange}
-              error={Boolean(formErrors.periodMonth)}
-              helperText={formErrors.periodMonth || ""}
-            >
-              {periodOptions.map((p) => (
-                <MenuItem key={p} value={p}>{p}</MenuItem>
-              ))}
-            </TextField>
-
-            <TextField
-              required
-              fullWidth
-              label="Payment date"
+              label="Date received"
               name="paymentDate"
               type="date"
               value={paymentForm.paymentDate}
               onChange={handleFormChange}
               error={Boolean(formErrors.paymentDate)}
               helperText={formErrors.paymentDate || ""}
-              slotProps={{ inputLabel: { shrink: true } }}
+              slotProps={{ inputLabel: { shrink: true }, htmlInput: { max: todayInput() } }}
             />
 
-            <TextField
-              select
-              required
-              fullWidth
-              label="Status"
-              name="status"
-              value={paymentForm.status}
-              onChange={handleFormChange}
-              helperText={paymentForm.status === "Paid" ? "Counts toward rent collected right away. The tenant gets a notice." : ""}
-              sx={{ gridColumn: { sm: "1 / -1" } }}
-            >
-              {PAYMENT_STATUSES.map((s) => (
-                <MenuItem key={s} value={s}>{s}</MenuItem>
-              ))}
-            </TextField>
+            {/* 4. Status (follows the amount unless the owner picks one) */}
+            <Box>
+              <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 0.75 }}>
+                <Typography variant="body2" sx={{ fontWeight: 700 }}>Status</Typography>
+                {!paymentForm.statusTouched && selectedFormInfo && (
+                  <Typography variant="caption" color="text.secondary">Set from the amount</Typography>
+                )}
+              </Box>
+              <ToggleButtonGroup
+                exclusive
+                fullWidth
+                value={effectiveStatus}
+                onChange={(e, value) => value && handleFormChange({ target: { name: "status", value } })}
+                aria-label="Payment status"
+                sx={{
+                  p: 0.5,
+                  gap: 0.5,
+                  borderRadius: "12px",
+                  bgcolor: (t) => alpha(t.palette.background.paper, 0.6),
+                  "& .MuiToggleButton-root": { textTransform: "none", fontWeight: 700, py: 0.85, border: "none", borderRadius: "9px !important", color: "text.secondary" },
+                  "& .MuiToggleButton-root.Mui-selected": { bgcolor: "#fff", color: "primary.main", boxShadow: "0 2px 8px rgba(0,0,0,.08)", "&:hover": { bgcolor: "#fff" } },
+                }}
+              >
+                {PAYMENT_STATUSES.map((s) => (
+                  <ToggleButton key={s} value={s}>{s}</ToggleButton>
+                ))}
+              </ToggleButtonGroup>
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                {effectiveStatus === "Paid"
+                  ? "Counts toward rent collected right away. The tenant gets a notice and a numbered receipt."
+                  : effectiveStatus === "Partial"
+                  ? "Part of the month's rent. It counts toward what they've paid; the rest stays as their balance."
+                  : "Not confirmed yet. It goes to “Needs your review” and doesn't count until you approve it."}
+              </Typography>
+            </Box>
 
             <TextField
               fullWidth
@@ -2085,28 +2365,45 @@ export default function PaymentsPage() {
               onChange={handleFormChange}
               multiline
               minRows={2}
-              placeholder="Optional payment notes"
+              placeholder="Optional, e.g. paid in cash to the caretaker"
               error={Boolean(formErrors.remarks)}
               helperText={formErrors.remarks || `${paymentForm.remarks.length}/300`}
-              sx={{ gridColumn: { sm: "1 / -1" } }}
             />
           </Box>
         </DialogContent>
 
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={handleCloseRecordPayment} color="inherit" disabled={saving} sx={{ fontWeight: 600, flex: { xs: 1, sm: "none" } }}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            disableElevation
-            onClick={handleRecordPayment}
-            disabled={saving}
-            sx={{ px: 4, py: 1.1, fontWeight: 700, flex: { xs: 1, sm: "none" } }}
-          >
-            {saving ? <CircularProgress size={22} color="inherit" /> : "Save payment"}
-          </Button>
-        </DialogActions>
+        {/* Footer: what saving will do, then the actions */}
+        <Box sx={{ borderTop: "1px solid", borderColor: "divider", bgcolor: (t) => alpha(t.palette.background.paper, 0.35) }}>
+          {selectedFormInfo && amountNumber > 0 && (
+            <Typography variant="body2" sx={{ px: { xs: 2, sm: 3 }, pt: 1.5, color: "text.secondary" }}>
+              {effectiveStatus === "Pending" ? (
+                <>Saves {formatCurrency(amountNumber)} as waiting for review.</>
+              ) : (
+                <>
+                  {formatCurrency(amountNumber)} for {paymentForm.periodMonth} · balance after:{" "}
+                  <Box component="strong" sx={{ color: balanceAfter > 0 ? "warning.dark" : "success.dark" }}>
+                    {balanceAfter > 0 ? formatCurrency(balanceAfter) : "fully paid"}
+                  </Box>
+                </>
+              )}
+            </Typography>
+          )}
+          <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 1.5, gap: 1 }}>
+            <Button onClick={handleCloseRecordPayment} color="inherit" disabled={saving} sx={{ fontWeight: 700, borderRadius: "10px", flex: { xs: 1, sm: "none" } }}>
+              Cancel
+            </Button>
+            <Button
+              variant="contained"
+              disableElevation
+              onClick={handleRecordPayment}
+              disabled={saving || formInfoLoading}
+              startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <SaveOutlinedIcon />}
+              sx={{ px: 3, fontWeight: 700, borderRadius: "10px", flex: { xs: 1, sm: "none" } }}
+            >
+              {saving ? "Saving…" : "Save payment"}
+            </Button>
+          </DialogActions>
+        </Box>
       </Dialog>
 
       <Snackbar

@@ -324,7 +324,7 @@ function Group({ icon, title, children }) {
     >
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 1.5 }}>
         {icon}
-        <Typography variant="body2" color="text.secondary" fontWeight={600}>
+        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
           {title}
         </Typography>
       </Box>
@@ -385,6 +385,7 @@ export default function InviteCaretaker() {
         setProperties(list);
         if (list.length === 1) setForm((prev) => ({ ...prev, assignedPropertyId: list[0].id }));
       } catch (err) {
+        console.error("Failed to load properties:", err);
         setError("Failed to load properties. Please refresh and try again.");
       } finally {
         setLoadingProperties(false);
@@ -526,6 +527,11 @@ export default function InviteCaretaker() {
           dispatchMethod,
           smsStatus,
           smsError,
+          propertyName: (() => {
+            const p = properties.find((x) => x.id === form.assignedPropertyId);
+            return p ? p.propertyName || p.name || "" : "";
+          })(),
+          permissionCount: Object.values(permissions || {}).filter(Boolean).length,
         },
       });
     } catch (err) {

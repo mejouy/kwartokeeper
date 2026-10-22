@@ -1,134 +1,160 @@
-import React, { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Box,
-  Typography,
-  TextField,
-  MenuItem,
-  ToggleButtonGroup,
-  ToggleButton,
-  Button,
-  IconButton,
-  Paper,
-  Stack,
-  Divider,
-  Alert,
-  CircularProgress,
-  InputAdornment,
-} from "@mui/material";
+import { Box, Typography, TextField, MenuItem, Button, IconButton, Alert, InputAdornment, Tooltip } from "@mui/material";
+import { alpha } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
-import RemoveIcon from "@mui/icons-material/Remove";
+import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlineOutlined";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
-import AssessmentOutlinedIcon from "@mui/icons-material/AssessmentOutlined";
+import TagOutlinedIcon from "@mui/icons-material/TagOutlined";
+import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
+import ViewAgendaOutlinedIcon from "@mui/icons-material/ViewAgendaOutlined";
+import LayersOutlinedIcon from "@mui/icons-material/LayersOutlined";
+import ApartmentOutlinedIcon from "@mui/icons-material/ApartmentOutlined";
+import CheckIcon from "@mui/icons-material/Check";
 
-import {
-  buildUniformRooms,
-  buildPerFloorRooms,
-  computeSummary,
-} from "../../../utils/roomGenerator";
+import { buildUniformRooms, buildPerFloorRooms, computeSummary } from "../../../utils/roomGenerator";
 import { saveProperty } from "../../services/propertyService";
 import { useAuth } from "../../../context/AuthContext";
+import { StepHeader, FormCard, ChoiceTile, Counter, WizardFooter } from "./wizardUi";
 
-const CAPACITY_OPTIONS = [1, 2, 3, 4, 6, 8, 10, 12];
+const HEAD = '"Inter", sans-serif';
+const fieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "10px" } };
+const CAPACITY_OPTIONS = [1, 2, 3, 4, 5, 6, 8, 10, 12];
+const ROOM_TYPES = ["Bedspace", "Studio-type", "Solo / Single", "Private / Shared", "Custom"];
+const MAX_ROOMS_PER_FLOOR = 99; // "floor" numbering (101...199) runs out after 99
+const MAX_ALPHA_FLOORS = 26; // A...Z
+const PREVIEW_PER_ROW = 24;
 
-const ROOM_TYPES = [
-  "Bedspace",
-  "Studio-type",
-  "Solo / Single",
-  "Private / Shared",
-  "Custom",
+const NAMING = [
+  { value: "floor", title: "By floor", hint: (f) => (f > 1 ? "101, 102 … 201, 202" : "101, 102, 103") },
+  { value: "alpha", title: "Letters", hint: (f) => (f > 1 ? "A1, A2 … B1, B2" : "A1, A2, A3") },
+  { value: "sequential", title: "Plain numbers", hint: () => "1, 2, 3, 4 …" },
 ];
 
-const labelColStyle = {
-  fontSize: "0.875rem",
-  color: "text.secondary",
-  fontWeight: 600,
-  textAlign: { xs: "left", sm: "right" },
+const peso = (n) => `₱${Math.round(Number(n) || 0).toLocaleString("en-PH")}`;
+const ordinal = (n) => {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 };
+const uid = () =>
+  typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+const newGroup = (from) => ({
+  id: uid(),
+  roomType: from?.roomType || "Bedspace",
+  customRoomType: from?.customRoomType || "",
+  numberOfRooms: from?.numberOfRooms || 4,
+  capacityPerRoom: from?.capacityPerRoom || 4,
+  monthlyRate: from?.monthlyRate ?? 2500,
+});
+const typeName = (g) => (g.roomType === "Custom" ? g.customRoomType?.trim() || "Custom room" : g.roomType);
+const rateInput = (v) => (v === "" ? "" : Math.min(1000000, Math.max(0, parseInt(String(v).replace(/\D/g, ""), 10) || 0)));
 
-const rowSx = {
-  display: "flex",
-  flexDirection: { xs: "column", sm: "row" },
-  alignItems: { xs: "stretch", sm: "center" },
-  gap: { xs: 0.8, sm: 3 },
-};
+// One kind of room on a floor: type, how many, beds each, rate per bed
+function GroupEditor({ group, onChange, onRemove, canRemove, errors }) {
+  return (
+    <Box sx={{ p: { xs: 1.5, sm: 2 }, borderRadius: "14px", border: "1px solid", borderColor: errors ? "error.main" : "divider", bgcolor: (t) => alpha(t.palette.background.paper, 0.3) }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(0, 1.3fr) minmax(0, 1fr)" }, gap: 1.5, alignItems: "start" }}>
+        <Box sx={{ display: "flex", gap: 1, alignItems: "flex-start" }}>
+          <TextField
+            select
+            fullWidth
+            label="Room type"
+            value={group.roomType}
+            onChange={(e) => onChange({ roomType: e.target.value, ...(e.target.value === "Solo / Single" ? { capacityPerRoom: 1 } : {}), ...(e.target.value !== "Custom" ? { customRoomType: "" } : {}) })}
+            sx={{ ...fieldSx, "& .MuiOutlinedInput-root": { borderRadius: "10px", bgcolor: "background.default" } }}
+          >
+            {ROOM_TYPES.map((t) => (
+              <MenuItem key={t} value={t}>{t}</MenuItem>
+            ))}
+          </TextField>
+          {canRemove && (
+            <Tooltip title="Remove this room type">
+              <IconButton onClick={onRemove} aria-label="Remove this room type" sx={{ mt: 1, color: "text.secondary", "&:hover": { color: "error.main" } }}>
+                <DeleteOutlineIcon />
+              </IconButton>
+            </Tooltip>
+          )}
+        </Box>
+        {group.roomType === "Custom" ? (
+          <TextField
+            fullWidth
+            label="Name this room type"
+            placeholder="e.g. Quad sharing"
+            value={group.customRoomType}
+            onChange={(e) => onChange({ customRoomType: e.target.value.slice(0, 40) })}
+            error={Boolean(errors?.custom)}
+            helperText={errors?.custom}
+            sx={{ ...fieldSx, "& .MuiOutlinedInput-root": { borderRadius: "10px", bgcolor: "background.default" } }}
+          />
+        ) : (
+          <Box sx={{ display: { xs: "none", sm: "block" } }} />
+        )}
+      </Box>
 
-const labelColSx = { width: { xs: "100%", sm: "34%" }, flexShrink: 0, textAlign: { sm: "right" } };
-const fieldColSx = { width: { xs: "100%", sm: "66%" } };
-
-function ordinal(n) {
-  const num = Number(n) || 0;
-  const suffixes = ["th", "st", "nd", "rd"];
-  const v = num % 100;
-  return num + (suffixes[(v - 20) % 10] || suffixes[v] || suffixes[0]);
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "auto minmax(0, 1fr) minmax(0, 1fr)" }, gap: 1.5, mt: 1.75, alignItems: "end" }}>
+        <Box sx={{ gridColumn: { xs: "1 / -1", sm: "auto" } }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.5 }}>Rooms</Typography>
+          <Counter value={Number(group.numberOfRooms) || 1} onChange={(v) => onChange({ numberOfRooms: v })} min={1} max={MAX_ROOMS_PER_FLOOR} label="rooms" />
+        </Box>
+        <TextField
+          select
+          label="Beds per room"
+          value={group.capacityPerRoom}
+          onChange={(e) => onChange({ capacityPerRoom: Number(e.target.value) })}
+          disabled={group.roomType === "Solo / Single"}
+          sx={{ ...fieldSx, "& .MuiOutlinedInput-root": { borderRadius: "10px", bgcolor: "background.default" } }}
+        >
+          {CAPACITY_OPTIONS.map((n) => (
+            <MenuItem key={n} value={n}>{n} {n === 1 ? "bed" : "beds"}</MenuItem>
+          ))}
+        </TextField>
+        <TextField
+          label="Rate per bed / month"
+          value={group.monthlyRate}
+          onChange={(e) => onChange({ monthlyRate: rateInput(e.target.value) })}
+          error={Boolean(errors?.rate)}
+          helperText={errors?.rate}
+          slotProps={{ htmlInput: { inputMode: "numeric" }, input: { startAdornment: <InputAdornment position="start">₱</InputAdornment> } }}
+          sx={{ ...fieldSx, "& .MuiOutlinedInput-root": { borderRadius: "10px", bgcolor: "background.default" } }}
+        />
+      </Box>
+    </Box>
+  );
 }
 
-// Collision-free unique ID generator
-const generateUniqueId = () =>
-  typeof crypto !== "undefined" && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-
-const generateDefaultGroup = () => ({
-  id: generateUniqueId(),
-  roomType: "Bedspace",
-  customRoomType: "",
-  numberOfRooms: 4,
-  capacityPerRoom: 4,
-  monthlyRate: 2500,
-});
-
-function Counter({ value, onDecrement, onIncrement, decrementLabel, incrementLabel, min = 1 }) {
-  const isMin = value <= min;
+// The building, drawn as room squares: top floor first, like looking at it from the street
+function BuildingPreview({ rooms, floors }) {
+  const byFloor = Array.from({ length: floors }, (_, i) => rooms.filter((r) => Number(r.floor) === i + 1));
   return (
-    <Box sx={{ display: "inline-flex", alignItems: "center", gap: 1 }}>
-      <IconButton
-        size="small"
-        onClick={onDecrement}
-        disabled={isMin}
-        aria-label={decrementLabel}
-        sx={{
-          border: "1px solid",
-          borderColor: isMin ? "action.disabledBackground" : "divider",
-          borderRadius: "4px",
-          color: isMin ? "action.disabled" : "text.primary",
-          "&:hover": {
-            borderColor: isMin ? "action.disabledBackground" : "primary.main",
-            color: isMin ? "action.disabled" : "primary.main",
-          },
-        }}
-      >
-        <RemoveIcon fontSize="small" />
-      </IconButton>
-      <Typography
-        sx={{
-          minWidth: 44,
-          textAlign: "center",
-          fontWeight: 700,
-          fontSize: "1rem",
-          bgcolor: "background.paper",
-          borderRadius: "4px",
-          py: 0.75,
-          border: "1px solid",
-          borderColor: "divider",
-        }}
-      >
-        {value}
-      </Typography>
-      <IconButton
-        size="small"
-        onClick={onIncrement}
-        aria-label={incrementLabel}
-        sx={{
-          border: "1px solid",
-          borderColor: "divider",
-          borderRadius: "4px",
-          color: "text.primary",
-          "&:hover": { borderColor: "primary.main", color: "primary.main" },
-        }}
-      >
-        <AddIcon fontSize="small" />
-      </IconButton>
+    <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75 }}>
+      {byFloor
+        .map((list, i) => ({ list, floor: i + 1 }))
+        .reverse()
+        .map(({ list, floor }) => (
+          <Box key={floor} sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
+            <Typography variant="caption" color="text.secondary" sx={{ width: 30, flexShrink: 0, fontWeight: 700, textAlign: "right" }}>
+              {floor}F
+            </Typography>
+            <Box sx={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
+              {list.length === 0 && (
+                <Typography variant="caption" color="text.disabled">No rooms</Typography>
+              )}
+              {list.slice(0, PREVIEW_PER_ROW).map((r, j) => (
+                <Tooltip key={j} title={`Room ${r.roomName} · ${r.capacity} ${r.capacity === 1 ? "bed" : "beds"}`} disableInteractive>
+                  <Box sx={{ width: 16, height: 16, borderRadius: "4px", bgcolor: "primary.main", opacity: 0.35 + Math.min(r.capacity, 8) * 0.08 }} />
+                </Tooltip>
+              ))}
+              {list.length > PREVIEW_PER_ROW && (
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, ml: 0.5 }}>+{list.length - PREVIEW_PER_ROW}</Typography>
+              )}
+            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
+              {list.length} · {list.reduce((s, r) => s + (Number(r.capacity) || 0), 0)} beds
+            </Typography>
+          </Box>
+        ))}
+      <Box sx={{ height: 4, borderRadius: 2, bgcolor: (t) => alpha(t.palette.text.primary, 0.15), ml: "38px", mt: 0.25 }} />
     </Box>
   );
 }
@@ -138,740 +164,328 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
   const { currentUser, loading: authLoading } = useAuth() || {};
 
   const totalFloors = Math.max(1, Number(wizardData?.totalFloors) || 1);
-  const estimatedRooms = Number(wizardData?.estimatedRooms);
-  const hasValidEstimatedRooms = Number.isInteger(estimatedRooms) && estimatedRooms > 0;
+  const saved = wizardData.roomLayout || {};
 
-  // Added defaults from wizardData to preserve state when navigating back
-  const [namingPattern, setNamingPattern] = useState(wizardData?.namingPattern || "floor");
-  const [configMode, setConfigMode] = useState(wizardData?.configMode || (totalFloors > 1 ? "perFloor" : "uniform"));
-
-  const [uniform, setUniform] = useState({
-    roomsPerFloor: Number(wizardData?.uniform?.roomsPerFloor) || 1,
-    capacityPerRoom: Number(wizardData?.uniform?.capacityPerRoom) || 4,
-    monthlyRate: Number(wizardData?.uniform?.monthlyRate) || 2500,
-  });
-
-  const [floorConfigs, setFloorConfigs] = useState(() =>
-    Array.from({ length: totalFloors }, (_, i) => ({
-      floorNumber: i + 1,
-      roomGroups: [generateDefaultGroup()],
-    }))
+  // Picks up where the owner left off if they went back a step
+  const [namingPattern, setNamingPattern] = useState(saved.namingPattern || wizardData.namingPattern || "floor");
+  const [configMode, setConfigMode] = useState(saved.configMode || "uniform");
+  const [uniform, setUniform] = useState(() => saved.uniform || newGroup());
+  const [floorConfigs, setFloorConfigs] = useState(
+    () => saved.floorConfigs || Array.from({ length: totalFloors }, (_, i) => ({ floorNumber: i + 1, roomGroups: [newGroup()] }))
   );
-
+  const [activeFloor, setActiveFloor] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [showErrors, setShowErrors] = useState(false);
+  const [copied, setCopied] = useState("");
 
-  // Sync floor configs array whenever totalFloors in wizardData changes
-  useEffect(() => {
+  // Keep one config per floor when the number of floors changed in step 2 (adjusted while rendering)
+  const [floorsSynced, setFloorsSynced] = useState(totalFloors);
+  if (floorsSynced !== totalFloors) {
+    setFloorsSynced(totalFloors);
+    setActiveFloor((f) => Math.min(f, totalFloors - 1));
     setFloorConfigs((prev) => {
-      if (prev.length === totalFloors) return prev;
-      if (prev.length < totalFloors) {
-        const added = Array.from({ length: totalFloors - prev.length }, (_, i) => {
-          const lastConfig = prev[prev.length - 1];
-          const copiedGroups = lastConfig?.roomGroups
-            ? lastConfig.roomGroups.map((g) => ({ ...g, id: generateUniqueId() }))
-            : [generateDefaultGroup()];
-            
-          return {
-            floorNumber: prev.length + i + 1,
-            roomGroups: copiedGroups,
-          };
-        });
-        return [...prev, ...added];
-      }
-      return prev.slice(0, totalFloors);
+      if (prev.length >= totalFloors) return prev.slice(0, totalFloors);
+      const last = prev[prev.length - 1];
+      const added = Array.from({ length: totalFloors - prev.length }, (_, i) => ({
+        floorNumber: prev.length + i + 1,
+        roomGroups: last ? last.roomGroups.map((g) => newGroup(g)) : [newGroup()],
+      }));
+      return [...prev, ...added];
     });
-  }, [totalFloors]);
+  }
+  const safeFloor = Math.min(activeFloor, floorConfigs.length - 1);
 
-  // Derived generated rooms with robust safeguards against missing/NaN data
+  // Letters only go up to Z
+  const alphaTooMany = totalFloors > MAX_ALPHA_FLOORS;
+  const effectivePattern = namingPattern === "alpha" && alphaTooMany ? "floor" : namingPattern;
+
   const rooms = useMemo(() => {
     try {
-      let generated = [];
       if (configMode === "uniform") {
-        generated = buildUniformRooms({
-          totalFloors: Number(totalFloors) || 1,
-          roomsPerFloor: Math.max(0, Number(uniform.roomsPerFloor) || 0),
+        return buildUniformRooms({
+          totalFloors,
+          roomsPerFloor: Math.max(0, Number(uniform.numberOfRooms) || 0),
           capacityPerRoom: Math.max(0, Number(uniform.capacityPerRoom) || 0),
           monthlyRate: Math.max(0, Number(uniform.monthlyRate) || 0),
-          namingPattern,
-        });
-      } else {
-        // Deeply parse per-floor data and resolve custom room types
-        const safeFloorConfigs = floorConfigs.map((floor) => ({
-          ...floor,
-          roomGroups: floor.roomGroups.map((group) => {
-            const resolvedType =
-              group.roomType === "Custom"
-                ? group.customRoomType?.trim() || "Custom Room"
-                : group.roomType;
-
-            return {
-              ...group,
-              roomType: resolvedType,
-              numberOfRooms: Math.max(0, Number(group.numberOfRooms) || 0),
-              capacityPerRoom: Math.max(0, Number(group.capacityPerRoom) || 0),
-              monthlyRate: Math.max(0, Number(group.monthlyRate) || 0),
-            };
-          }),
-        }));
-        
-        generated = buildPerFloorRooms({ floorConfigs: safeFloorConfigs, namingPattern });
+          namingPattern: effectivePattern,
+        }).map((r) => ({ ...r, roomType: typeName(uniform) }));
       }
-      return generated || [];
+      return buildPerFloorRooms({
+        namingPattern: effectivePattern,
+        floorConfigs: floorConfigs.map((f) => ({
+          ...f,
+          roomGroups: f.roomGroups.map((g) => ({
+            ...g,
+            roomType: typeName(g),
+            numberOfRooms: Math.max(0, Number(g.numberOfRooms) || 0),
+            capacityPerRoom: Math.max(0, Number(g.capacityPerRoom) || 0),
+            monthlyRate: Math.max(0, Number(g.monthlyRate) || 0),
+          })),
+        })),
+      });
     } catch (err) {
-      console.error("Room generation utility failed:", err);
+      console.error("Room generation failed:", err);
       return [];
     }
-  }, [configMode, uniform, floorConfigs, namingPattern, totalFloors]);
+  }, [configMode, uniform, floorConfigs, effectivePattern, totalFloors]);
 
-  const roomCountMismatch = hasValidEstimatedRooms && rooms.length !== estimatedRooms;
+  const summary = useMemo(() => (rooms.length ? computeSummary(rooms) : null), [rooms]);
+  const totalBeds = rooms.reduce((s, r) => s + (Number(r.capacity) || 0), 0);
+  const fullRent = rooms.reduce((s, r) => s + (Number(r.capacity) || 0) * (Number(r.monthlyRatePerBed) || 0), 0);
 
-  // Live room & bed layout summary computation
-  const summary = useMemo(() => {
-    if (!rooms || rooms.length === 0) return null;
-    try {
-      let result = computeSummary(rooms);
-      
-      // Fallback calculation if utility returns unexpected schema
-      if (!result || !result.perFloorBreakdown || Object.keys(result.perFloorBreakdown).length === 0) {
-        const perFloorBreakdown = {};
-        let totalBeds = 0;
-        
-        rooms.forEach((room) => {
-          const fNum = room.floorNumber || room.floor || 1;
-          if (!perFloorBreakdown[fNum]) perFloorBreakdown[fNum] = { rooms: 0, beds: 0 };
-          const capacity = Number(room.capacity || room.capacityPerRoom || 0);
-          perFloorBreakdown[fNum].rooms += 1;
-          perFloorBreakdown[fNum].beds += capacity;
-          totalBeds += capacity;
-        });
+  // ---- validation (shown after the first save attempt) ----
+  const groupErrors = (g) => {
+    const e = {};
+    if (!(Number(g.monthlyRate) > 0)) e.rate = "Set a rate above ₱0.";
+    if (g.roomType === "Custom" && !g.customRoomType?.trim()) e.custom = "Give this room type a name.";
+    return Object.keys(e).length ? e : null;
+  };
+  const allGroups = configMode === "uniform" ? [uniform] : floorConfigs.flatMap((f) => f.roomGroups);
+  const invalidCount = allGroups.filter(groupErrors).length;
+  const floorHasErrors = (f) => f.roomGroups.some(groupErrors);
 
-        result = { totalRooms: rooms.length, totalBeds, perFloorBreakdown };
-      }
-      return result;
-    } catch (err) {
-      console.error("Summary computation failed:", err);
-      return null;
-    }
-  }, [rooms]);
-
-  const handleGroupFieldChange = (floorIndex, groupIndex, field, value) => {
-    setFloorConfigs((prev) => {
-      const next = [...prev];
-      const updatedGroups = [...next[floorIndex].roomGroups];
-      let updatedGroup = { ...updatedGroups[groupIndex], [field]: value };
-
-      // Solo / Single rooms are inherently one-bed spaces.
-      if (field === "roomType" && value === "Solo / Single") {
-        updatedGroup.capacityPerRoom = 1;
-      }
-
-      // Reset customRoomType if switching room type away from "Custom"
-      if (field === "roomType" && value !== "Custom") {
-        updatedGroup.customRoomType = "";
-      }
-
-      updatedGroups[groupIndex] = updatedGroup;
-      next[floorIndex] = { ...next[floorIndex], roomGroups: updatedGroups };
-      return next;
-    });
+  // ---- editing ----
+  const patchUniform = (p) => setUniform((u) => ({ ...u, ...p }));
+  const patchGroup = (floorIndex, groupId, p) =>
+    setFloorConfigs((prev) => prev.map((f, i) => (i !== floorIndex ? f : { ...f, roomGroups: f.roomGroups.map((g) => (g.id === groupId ? { ...g, ...p } : g)) })));
+  const addGroup = (floorIndex) =>
+    setFloorConfigs((prev) => prev.map((f, i) => (i !== floorIndex ? f : { ...f, roomGroups: [...f.roomGroups, newGroup({ roomType: "Solo / Single", capacityPerRoom: 1, numberOfRooms: 2, monthlyRate: 4500 })] })));
+  const removeGroup = (floorIndex, groupId) =>
+    setFloorConfigs((prev) => prev.map((f, i) => (i !== floorIndex ? f : { ...f, roomGroups: f.roomGroups.filter((g) => g.id !== groupId) })));
+  const copyFloor = (fromIndex, toAll) => {
+    setFloorConfigs((prev) => prev.map((f, i) => ((toAll ? i > fromIndex : i === fromIndex + 1) ? { ...f, roomGroups: prev[fromIndex].roomGroups.map((g) => newGroup(g)) } : f)));
+    setCopied(toAll ? `Copied to floors ${fromIndex + 2}–${totalFloors}.` : `Copied to the ${ordinal(fromIndex + 2)} floor.`);
+    setTimeout(() => setCopied(""), 2500);
   };
 
-  const handleAddRoomGroup = (floorIndex) => {
-    setFloorConfigs((prev) => {
-      const next = [...prev];
-      next[floorIndex] = {
-        ...next[floorIndex],
-        roomGroups: [...next[floorIndex].roomGroups, generateDefaultGroup()],
-      };
-      return next;
-    });
+  const layoutSnapshot = () => ({ namingPattern, configMode, uniform, floorConfigs });
+
+  const goBack = () => {
+    updateWizardData?.({ roomLayout: layoutSnapshot(), namingPattern: effectivePattern });
+    onBack?.();
   };
 
-  const handleRemoveRoomGroup = (floorIndex, groupIndex) => {
-    setFloorConfigs((prev) => {
-      const next = [...prev];
-      const updatedGroups = next[floorIndex].roomGroups.filter((_, i) => i !== groupIndex);
-      next[floorIndex] = { ...next[floorIndex], roomGroups: updatedGroups };
-      return next;
-    });
-  };
-
-  const handleCopyToNextFloor = (index) => {
-    setFloorConfigs((prev) => {
-      if (index + 1 >= prev.length) return prev;
-      const next = [...prev];
-      const copiedGroups = next[index].roomGroups.map((g) => ({
-        ...g,
-        id: generateUniqueId(),
-      }));
-      next[index + 1] = {
-        ...next[index + 1],
-        roomGroups: copiedGroups,
-      };
-      return next;
-    });
-  };
-
-  const handleCopyToAllUpperFloors = (fromIndex) => {
-    setFloorConfigs((prev) => {
-      return prev.map((floor, idx) => {
-        if (idx <= fromIndex) return floor;
-        return {
-          ...floor,
-          roomGroups: prev[fromIndex].roomGroups.map((g) => ({
-            ...g,
-            id: generateUniqueId(),
-          })),
-        };
-      });
-    });
-  };
-
-  const handleGenerate = async () => {
+  const handleSave = async () => {
     setError(null);
-
-    // Validation check before proceeding
-    if (!rooms || rooms.length === 0) {
-      setError("Please configure at least 1 room for your property.");
+    setShowErrors(true);
+    if (!rooms.length) {
+      setError("Add at least one room.");
       return;
     }
-    if (!hasValidEstimatedRooms) {
-      setError("Enter a valid estimated room count in Step 2 before generating rooms.");
-      return;
-    }
-    if (roomCountMismatch) {
-      setError(`Step 2 estimates ${estimatedRooms} rooms, but this layout generates ${rooms.length}. Adjust the layout so the totals match.`);
+    if (invalidCount > 0) {
+      setError(`${invalidCount === 1 ? "One room type needs" : `${invalidCount} room types need`} fixing. They're marked in red.`);
+      if (configMode === "perFloor") {
+        const firstBad = floorConfigs.findIndex(floorHasErrors);
+        if (firstBad >= 0) setActiveFloor(firstBad);
+      }
       return;
     }
 
     setSaving(true);
     try {
-      // 1. Strip undefined values strictly to prevent Firestore errors
-      const cleanWizardData = Object.fromEntries(
-        Object.entries(wizardData).filter(([_, v]) => v !== undefined)
-      );
-
-      // 2. Prepare payload with sensible defaults
+      const clean = Object.fromEntries(Object.entries(wizardData).filter(([, v]) => v !== undefined));
       const finalWizardData = {
-        ...cleanWizardData,
-        propertyName: cleanWizardData.propertyName || cleanWizardData.name || "Untitled Property",
-        address: cleanWizardData.address || "",
-        totalFloors: Number(cleanWizardData.totalFloors) || totalFloors,
-        genderRestriction: cleanWizardData.genderRestriction || "coed",
-        amenities: cleanWizardData.amenities || [],
-        rules: cleanWizardData.rules || [],
-        description: cleanWizardData.description || "",
-        namingPattern,
+        ...clean,
+        propertyName: clean.propertyName || "Untitled Property",
+        totalFloors,
+        amenities: clean.amenities || [],
+        rules: clean.rules || [],
+        estimatedRooms: rooms.length,
+        namingPattern: effectivePattern,
         configMode,
-        uniform: {
-          roomsPerFloor: Math.max(1, Number(uniform.roomsPerFloor) || 1),
-          capacityPerRoom: Math.max(0, Number(uniform.capacityPerRoom) || 4),
-          monthlyRate: Math.max(0, Number(uniform.monthlyRate) || 2500),
-        },
       };
+      updateWizardData?.({ roomLayout: layoutSnapshot() });
 
-      updateWizardData?.(finalWizardData);
-
-      const ownerUid = currentUser?.uid || finalWizardData.ownerUid || "";
-      const coverPhotoFile = finalWizardData.coverPhoto || null;
-
-      // 3. Clean rooms array to prevent Firestore schema errors with undefined/NaN
       const safeRooms = rooms.map((room) => {
-        const cleanRoom = { ...room };
-        Object.keys(cleanRoom).forEach((key) => {
-          if (cleanRoom[key] === undefined || Number.isNaN(cleanRoom[key])) {
-            // Usually, deleting the key is safer for Firestore than explicitly setting null
-            delete cleanRoom[key]; 
-          }
+        const r = { ...room };
+        Object.keys(r).forEach((k) => {
+          if (r[k] === undefined || Number.isNaN(r[k])) delete r[k];
         });
-        return cleanRoom;
+        return r;
       });
 
-      const savedProperty = await saveProperty(
-        finalWizardData,
-        safeRooms,
-        ownerUid,
-        coverPhotoFile
-      );
+      const savedProperty = await saveProperty(finalWizardData, safeRooms, currentUser?.uid || "", clean.coverPhoto || null);
 
       navigate("/wizard-success", {
         state: {
-          summary,
           propertyId: savedProperty.id,
+          propertyName: finalWizardData.propertyName,
           coverPhotoUrl: savedProperty.coverPhotoUrl,
+          totalRooms: rooms.length,
+          totalBeds,
+          totalFloors,
+          summary,
         },
       });
     } catch (err) {
       console.error("Save Property Error:", err);
-      setError(
-        err.message || "Something went wrong while saving your property. Please try again."
-      );
+      setError(err.message || "Something went wrong while saving your property. Please try again.");
     } finally {
       setSaving(false);
     }
   };
 
+  const floor = floorConfigs[safeFloor];
+
   return (
-    <Box sx={{ width: "100%", maxWidth: 700, mx: "auto", px: { xs: 1, sm: 2 } }}>
-      <Box sx={{ mb: 4 }}>
-        <Typography
-          variant="h5"
-          sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 600 }}
-          color="text.primary"
-        >
-          Set up rooms &amp; beds
-        </Typography>
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-          Configure rooms uniformly, or customize capacities and room types floor by floor.
-        </Typography>
-      </Box>
+    <Box>
+      <StepHeader step={3} total={3} title="Rooms and beds" subtitle="Tell us how many rooms each floor has. Room numbers are made for you, and you can rename or fine-tune any room later." />
 
-      <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-
-        {/* Room Naming Pattern */}
-        <Box sx={rowSx}>
-          <Box sx={labelColSx}>
-            <Typography sx={labelColStyle}>Room naming pattern</Typography>
+      <Box sx={{ display: "flex", flexDirection: "column", gap: { xs: 2, sm: 2.5 } }}>
+        {/* ───── Room numbers ───── */}
+        <FormCard icon={TagOutlinedIcon} title="Room numbers">
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(3, minmax(0, 1fr))" }, gap: 1 }}>
+            {NAMING.map((n) => {
+              const disabled = n.value === "alpha" && alphaTooMany;
+              return (
+                <ChoiceTile
+                  key={n.value}
+                  active={effectivePattern === n.value}
+                  onClick={() => !disabled && setNamingPattern(n.value)}
+                  title={n.title}
+                  hint={disabled ? `Only up to ${MAX_ALPHA_FLOORS} floors` : n.hint(totalFloors)}
+                  sx={disabled ? { opacity: 0.5, cursor: "not-allowed" } : undefined}
+                />
+              );
+            })}
           </Box>
-          <Box sx={fieldColSx}>
-            <TextField
-              select
-              fullWidth
-              value={namingPattern}
-              onChange={(e) => setNamingPattern(e.target.value)}
-            >
-              <MenuItem value="floor">Floor-based (101, 102... / 201, 202...)</MenuItem>
-              <MenuItem value="alpha">Alphabetical (A1, A2...)</MenuItem>
-              <MenuItem value="sequential">Sequential numbers (1, 2, 3...)</MenuItem>
-            </TextField>
-          </Box>
-        </Box>
+        </FormCard>
 
-        {/* Configuration Mode Toggle */}
-        <Box sx={rowSx}>
-          <Box sx={labelColSx}>
-            <Typography sx={labelColStyle}>Configuration mode</Typography>
-          </Box>
-          <Box sx={fieldColSx}>
-            <ToggleButtonGroup
-              value={configMode}
-              exclusive
-              onChange={(_, val) => val && setConfigMode(val)}
-              fullWidth
-              sx={{
-                "& .MuiToggleButton-root": {
-                  textTransform: "none",
-                  fontWeight: 600,
-                  fontSize: "0.875rem",
-                  borderColor: "divider",
-                  color: "text.secondary",
-                  "&.Mui-selected": {
-                    bgcolor: "primary.main",
-                    color: "#fff",
-                    borderColor: "primary.main",
-                    "&:hover": { bgcolor: "primary.main" },
-                  },
-                },
-              }}
-            >
-              <ToggleButton value="uniform">Uniform layout</ToggleButton>
-              <ToggleButton value="perFloor">Configure per floor</ToggleButton>
-            </ToggleButtonGroup>
-          </Box>
-        </Box>
+        {/* ───── Layout ───── */}
+        <FormCard icon={LayersOutlinedIcon} title="Rooms on each floor" description={totalFloors === 1 ? "Your property has 1 floor." : `Your property has ${totalFloors} floors.`}>
+          {totalFloors > 1 && (
+            <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1, mb: 2 }}>
+              <ChoiceTile active={configMode === "uniform"} onClick={() => setConfigMode("uniform")} icon={ViewAgendaOutlinedIcon} title="Same on every floor" hint="Quickest" />
+              <ChoiceTile active={configMode === "perFloor"} onClick={() => setConfigMode("perFloor")} icon={DashboardOutlinedIcon} title="Different per floor" hint="Mix room types" />
+            </Box>
+          )}
 
-        {/* --- Uniform Layout Mode --- */}
-        {configMode === "uniform" && (
-          <Paper
-            elevation={0}
-            sx={{ border: "1px solid", borderColor: "divider", borderRadius: "4px", p: { xs: 2, sm: 3 } }}
-          >
-            <Stack spacing={2.5}>
-              <Box sx={rowSx}>
-                <Box sx={labelColSx}>
-                  <Typography sx={labelColStyle}>Rooms per floor</Typography>
-                </Box>
-                <Box sx={fieldColSx}>
-                  <Counter
-                    value={uniform.roomsPerFloor || 1}
-                    min={1}
-                    decrementLabel="Decrease rooms per floor"
-                    incrementLabel="Increase rooms per floor"
-                    onDecrement={() =>
-                      setUniform((u) => ({
-                        ...u,
-                        roomsPerFloor: Math.max(1, (Number(u.roomsPerFloor) || 1) - 1),
-                      }))
-                    }
-                    onIncrement={() =>
-                      setUniform((u) => ({
-                        ...u,
-                        roomsPerFloor: (Number(u.roomsPerFloor) || 0) + 1,
-                      }))
-                    }
-                  />
-                </Box>
-              </Box>
-
-              <Box sx={rowSx}>
-                <Box sx={labelColSx}>
-                  <Typography sx={labelColStyle}>Capacity per room</Typography>
-                </Box>
-                <Box sx={fieldColSx}>
-                  <TextField
-                    select
-                    fullWidth
-                    value={uniform.capacityPerRoom ?? 4}
-                    onChange={(e) =>
-                      setUniform((u) => ({
-                        ...u,
-                        capacityPerRoom: Number(e.target.value) || 0,
-                      }))
-                    }
-                  >
-                    {CAPACITY_OPTIONS.map((n) => (
-                      <MenuItem key={n} value={n}>
-                        {n} {n === 1 ? "bed" : "beds"} / room
-                      </MenuItem>
-                    ))}
-                  </TextField>
-                </Box>
-              </Box>
-
-              <Box sx={rowSx}>
-                <Box sx={labelColSx}>
-                  <Typography sx={labelColStyle}>Monthly rate per bed</Typography>
-                </Box>
-                <Box sx={fieldColSx}>
-                  <TextField
-                    type="number"
-                    value={uniform.monthlyRate ?? ""}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setUniform((u) => ({
-                        ...u,
-                        monthlyRate: val === "" ? "" : Math.max(0, parseInt(val, 10) || 0),
-                      }));
-                    }}
-                    InputProps={{
-                      startAdornment: (
-                        <InputAdornment position="start">₱</InputAdornment>
-                      ),
-                    }}
-                    fullWidth
-                    sx={{ maxWidth: 200 }}
-                  />
-                </Box>
-              </Box>
-            </Stack>
-          </Paper>
-        )}
-
-        {/* --- Configure per Floor Mode --- */}
-        {configMode === "perFloor" &&
-          floorConfigs.map((floor, floorIndex) => (
-            <Paper
-              key={floor.floorNumber}
-              elevation={0}
-              sx={{ border: "1px solid", borderColor: "divider", borderRadius: "4px", p: { xs: 2, sm: 3 } }}
-            >
-              <Typography
-                sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 600, mb: 3 }}
-                color="text.primary"
-              >
-                {ordinal(floor.floorNumber)} floor
-              </Typography>
-
-              <Stack spacing={4}>
-                {floor.roomGroups.map((group, groupIndex) => (
-                  <Box key={group.id} sx={{ position: "relative" }}>
-                    
-                    {floor.roomGroups.length > 1 && (
-                      <IconButton
-                        size="small"
-                        color="error"
-                        onClick={() => handleRemoveRoomGroup(floorIndex, groupIndex)}
-                        aria-label="Remove room group"
-                        sx={{ position: "absolute", top: -8, right: 0 }}
+          {configMode === "uniform" ? (
+            <>
+              {totalFloors > 1 && (
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25 }}>
+                  Each of the {totalFloors} floors gets:
+                </Typography>
+              )}
+              <GroupEditor group={uniform} onChange={patchUniform} canRemove={false} errors={showErrors ? groupErrors(uniform) : null} />
+              {totalFloors === 1 && (
+                <Button size="small" startIcon={<AddIcon />} onClick={() => setConfigMode("perFloor")} sx={{ mt: 1.25, fontWeight: 700 }}>
+                  Mix room types on this floor
+                </Button>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Floor picker */}
+              {totalFloors > 1 && (
+                <Box role="tablist" aria-label="Floor" sx={{ display: "flex", gap: 0.75, overflowX: "auto", pb: 0.5, mb: 1.5, mx: { xs: -2, sm: 0 }, px: { xs: 2, sm: 0 }, scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
+                  {floorConfigs.map((f, i) => {
+                    const on = i === safeFloor;
+                    const bad = showErrors && floorHasErrors(f);
+                    const count = f.roomGroups.reduce((s, g) => s + (Number(g.numberOfRooms) || 0), 0);
+                    return (
+                      <Box
+                        key={f.floorNumber}
+                        component="button"
+                        type="button"
+                        role="tab"
+                        aria-selected={on}
+                        onClick={() => setActiveFloor(i)}
+                        sx={{
+                          flexShrink: 0,
+                          minWidth: 64,
+                          px: 1.25,
+                          py: 0.75,
+                          borderRadius: "12px",
+                          font: "inherit",
+                          cursor: "pointer",
+                          textAlign: "center",
+                          border: "1.5px solid",
+                          borderColor: bad ? "error.main" : on ? "text.primary" : "divider",
+                          bgcolor: on ? "text.primary" : "background.default",
+                          color: on ? "background.default" : "text.primary",
+                        }}
                       >
-                        <RemoveIcon fontSize="small" />
-                      </IconButton>
-                    )}
-
-                    <Stack spacing={2.5}>
-                      <Box sx={rowSx}>
-                        <Box sx={labelColSx}>
-                          <Typography sx={labelColStyle}>Room type</Typography>
-                        </Box>
-                        <Box sx={fieldColSx}>
-                          <Stack spacing={1}>
-                            <TextField
-                              select
-                              fullWidth
-                              value={group.roomType}
-                              onChange={(e) =>
-                                handleGroupFieldChange(floorIndex, groupIndex, "roomType", e.target.value)
-                              }
-                            >
-                              {ROOM_TYPES.map((type) => (
-                                <MenuItem key={type} value={type}>
-                                  {type}
-                                </MenuItem>
-                              ))}
-                            </TextField>
-                            
-                            {group.roomType === "Custom" && (
-                              <TextField
-                                fullWidth
-                                placeholder="e.g. Quadruple sharing, Master's BR..."
-                                value={group.customRoomType}
-                                onChange={(e) =>
-                                  handleGroupFieldChange(floorIndex, groupIndex, "customRoomType", e.target.value)
-                                }
-                                size="small"
-                              />
-                            )}
-                          </Stack>
-                        </Box>
+                        <Box sx={{ fontWeight: 800, fontSize: 14 }}>{f.floorNumber}F</Box>
+                        <Box sx={{ fontSize: 11.5, opacity: 0.7 }}>{count} rooms</Box>
                       </Box>
-
-                      <Box sx={rowSx}>
-                        <Box sx={labelColSx}>
-                          <Typography sx={labelColStyle}>Number of rooms</Typography>
-                        </Box>
-                        <Box sx={fieldColSx}>
-                          <Counter
-                            value={group.numberOfRooms || 1}
-                            min={1}
-                            decrementLabel="Decrease rooms"
-                            incrementLabel="Increase rooms"
-                            onDecrement={() =>
-                              handleGroupFieldChange(
-                                floorIndex,
-                                groupIndex,
-                                "numberOfRooms",
-                                Math.max(1, (Number(group.numberOfRooms) || 1) - 1)
-                              )
-                            }
-                            onIncrement={() =>
-                              handleGroupFieldChange(
-                                floorIndex,
-                                groupIndex,
-                                "numberOfRooms",
-                                (Number(group.numberOfRooms) || 0) + 1
-                              )
-                            }
-                          />
-                        </Box>
-                      </Box>
-
-                      <Box sx={rowSx}>
-                        <Box sx={labelColSx}>
-                          <Typography sx={labelColStyle}>Capacity</Typography>
-                        </Box>
-                        <Box sx={fieldColSx}>
-                          <TextField
-                            select
-                            fullWidth
-                            value={group.capacityPerRoom ?? 4}
-                            onChange={(e) =>
-                              handleGroupFieldChange(
-                                floorIndex,
-                                groupIndex,
-                                "capacityPerRoom",
-                                Number(e.target.value) || 0
-                              )
-                            }
-                          >
-                            {CAPACITY_OPTIONS.map((n) => (
-                              <MenuItem key={n} value={n}>
-                                {n} {n === 1 ? "bed" : "beds"}
-                              </MenuItem>
-                            ))}
-                          </TextField>
-                        </Box>
-                      </Box>
-
-                      <Box sx={rowSx}>
-                        <Box sx={labelColSx}>
-                          <Typography sx={labelColStyle}>Monthly rate per bed</Typography>
-                        </Box>
-                        <Box sx={fieldColSx}>
-                          <TextField
-                            type="number"
-                            value={group.monthlyRate ?? ""}
-                            onChange={(e) => {
-                              const val = e.target.value;
-                              handleGroupFieldChange(
-                                floorIndex,
-                                groupIndex,
-                                "monthlyRate",
-                                val === "" ? "" : Math.max(0, parseInt(val, 10) || 0)
-                              );
-                            }}
-                            InputProps={{
-                              startAdornment: (
-                                <InputAdornment position="start">₱</InputAdornment>
-                              ),
-                            }}
-                            fullWidth
-                            sx={{ maxWidth: 200 }}
-                          />
-                        </Box>
-                      </Box>
-                    </Stack>
-                    
-                    {groupIndex < floor.roomGroups.length - 1 && (
-                      <Divider sx={{ mt: 4 }} />
-                    )}
-                  </Box>
-                ))}
-
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5, pt: 1 }}>
-                  <Button
-                    variant="text"
-                    size="small"
-                    startIcon={<AddIcon />}
-                    onClick={() => handleAddRoomGroup(floorIndex)}
-                    sx={{ alignSelf: "flex-start", fontWeight: 600 }}
-                  >
-                    Add another room type to this floor
-                  </Button>
-
-                  {floorIndex + 1 < floorConfigs.length && (
-                    <Button
-                      size="small"
-                      startIcon={<ContentCopyIcon />}
-                      onClick={() => handleCopyToNextFloor(floorIndex)}
-                      sx={{
-                        alignSelf: "flex-start",
-                        color: "text.secondary",
-                        "&:hover": { bgcolor: "transparent", color: "primary.main", textDecoration: "underline" },
-                      }}
-                    >
-                      Copy entire floor settings to floor {floor.floorNumber + 1}
-                    </Button>
-                  )}
-
-                  {floorIndex + 2 < floorConfigs.length && (
-                    <Button
-                      size="small"
-                      startIcon={<ContentCopyIcon />}
-                      onClick={() => handleCopyToAllUpperFloors(floorIndex)}
-                      sx={{
-                        alignSelf: "flex-start",
-                        color: "text.secondary",
-                        "&:hover": { bgcolor: "transparent", color: "primary.main", textDecoration: "underline" },
-                      }}
-                    >
-                      Copy entire floor settings to all upper floors
-                    </Button>
-                  )}
+                    );
+                  })}
                 </Box>
-              </Stack>
-            </Paper>
-          ))}
+              )}
 
-        {/* Live Summary Breakdown Preview */}
-        <Paper
-          elevation={0}
-          sx={{
-            border: "1px solid",
-            borderColor: "primary.main",
-            bgcolor: "rgba(255, 69, 0, 0.04)",
-            borderRadius: "4px",
-            p: { xs: 2, sm: 3 },
-          }}
-        >
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5 }}>
-            <AssessmentOutlinedIcon sx={{ fontSize: 20, color: "primary.main" }} />
-            <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 600 }} color="text.primary">
-              Property layout breakdown
-            </Typography>
+              <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 1.25 }}>{ordinal(floor.floorNumber)} floor</Typography>
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
+                {floor.roomGroups.map((g) => (
+                  <GroupEditor
+                    key={g.id}
+                    group={g}
+                    onChange={(p) => patchGroup(safeFloor, g.id, p)}
+                    onRemove={() => removeGroup(safeFloor, g.id)}
+                    canRemove={floor.roomGroups.length > 1}
+                    errors={showErrors ? groupErrors(g) : null}
+                  />
+                ))}
+              </Box>
+              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 1.5, alignItems: "center" }}>
+                <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => addGroup(safeFloor)} sx={{ fontWeight: 700, borderRadius: "10px" }}>
+                  Add another room type
+                </Button>
+                {safeFloor + 1 < totalFloors && (
+                  <Button size="small" color="inherit" startIcon={<ContentCopyIcon sx={{ fontSize: 16 }} />} onClick={() => copyFloor(safeFloor, false)} sx={{ fontWeight: 700, color: "text.secondary" }}>
+                    Copy to {ordinal(safeFloor + 2)} floor
+                  </Button>
+                )}
+                {safeFloor + 2 < totalFloors && (
+                  <Button size="small" color="inherit" startIcon={<ContentCopyIcon sx={{ fontSize: 16 }} />} onClick={() => copyFloor(safeFloor, true)} sx={{ fontWeight: 700, color: "text.secondary" }}>
+                    Copy to all floors above
+                  </Button>
+                )}
+                {copied && (
+                  <Typography variant="caption" sx={{ display: "flex", alignItems: "center", gap: 0.5, color: "success.dark", fontWeight: 700 }}>
+                    <CheckIcon sx={{ fontSize: 15 }} /> {copied}
+                  </Typography>
+                )}
+              </Box>
+            </>
+          )}
+        </FormCard>
+
+        {/* ───── Live preview ───── */}
+        <FormCard icon={ApartmentOutlinedIcon} title="Your building" description="Each square is a room. Darker squares have more beds.">
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(4, minmax(0, 1fr))" }, gap: 1, mb: 2 }}>
+            {[
+              { label: "Floors", value: totalFloors },
+              { label: "Rooms", value: rooms.length },
+              { label: "Beds", value: totalBeds },
+              { label: "Rent when full", value: peso(fullRent), sub: "per month" },
+            ].map((t) => (
+              <Box key={t.label} sx={{ p: 1.5, borderRadius: "14px", bgcolor: (th) => alpha(th.palette.background.paper, 0.55), minWidth: 0 }}>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>{t.label}</Typography>
+                <Typography noWrap sx={{ fontFamily: HEAD, fontWeight: 900, fontSize: "1.3rem", lineHeight: 1.25, fontVariantNumeric: "tabular-nums" }}>{t.value}</Typography>
+                {t.sub && <Typography variant="caption" color="text.secondary">{t.sub}</Typography>}
+              </Box>
+            ))}
           </Box>
+          {rooms.length > 0 ? (
+            <BuildingPreview rooms={rooms} floors={totalFloors} />
+          ) : (
+            <Typography variant="body2" color="text.secondary">Add rooms above to see your building.</Typography>
+          )}
+        </FormCard>
 
-          <Stack spacing={0.5}>
-            {summary?.perFloorBreakdown && Object.keys(summary.perFloorBreakdown).length > 0 ? (
-              Object.entries(summary.perFloorBreakdown).map(
-                ([floorNum, data]) => {
-                  const numRooms = Number(data?.rooms) || 0;
-                  const numBeds = Number(data?.beds) || 0;
-                  const roomTypes = Object.entries(data?.roomTypes || {})
-                    .map(([type, counts]) => `${type}: ${counts.rooms} rooms / ${counts.beds} beds`)
-                    .join(", ");
-                  return (
-                    <Box key={floorNum}>
-                      <Typography variant="body2" color="text.secondary">
-                        {ordinal(Number(floorNum))} floor: {numRooms} rooms | {numBeds} total beds
-                      </Typography>
-                      {roomTypes && (
-                        <Typography variant="caption" color="text.secondary">
-                          {roomTypes}
-                        </Typography>
-                      )}
-                    </Box>
-                  );
-                }
-              )
-            ) : (
-              <Typography variant="body2" color="text.secondary">
-                Configure floor settings above to view layout breakdown...
-              </Typography>
-            )}
-          </Stack>
-
-          <Divider sx={{ my: 1.5, borderColor: "rgba(255, 69, 0, 0.25)" }} />
-
-          <Typography sx={{ fontWeight: 700 }} color="text.primary">
-            Total building capacity: {summary?.totalRooms || 0} rooms |{" "}
-            {summary?.totalBeds || 0} beds
-          </Typography>
-        </Paper>
-
-        {error && <Alert severity="error">{error}</Alert>}
-        {roomCountMismatch && (
-          <Alert severity="error">
-            Step 2 estimates {estimatedRooms} rooms, but this layout generates {rooms.length}. Adjust the room counts so the totals match before saving.
-          </Alert>
-        )}
-
-        {/* Sticky Action Footer */}
-        <Stack
-          direction="row"
-          spacing={2}
-          sx={{
-            position: "sticky",
-            bottom: 0,
-            bgcolor: "background.default",
-            py: 2,
-            zIndex: 10,
-            borderTop: "1px solid",
-            borderColor: "divider",
-          }}
-        >
-          <Button variant="outlined" onClick={onBack} disabled={saving || authLoading}>
-            Back
-          </Button>
-          <Button
-            variant="contained"
-            fullWidth
-            onClick={handleGenerate}
-            disabled={saving || authLoading}
-            startIcon={
-              saving || authLoading ? (
-                <CircularProgress size={18} color="inherit" />
-              ) : null
-            }
-          >
-            {saving
-              ? "Saving..."
-              : authLoading
-              ? "Authenticating..."
-              : `Generate ${summary?.totalRooms || 0} rooms & finish setup`}
-          </Button>
-        </Stack>
+        {error && <Alert severity="error" sx={{ borderRadius: "14px" }}>{error}</Alert>}
       </Box>
+
+      <WizardFooter
+        onBack={goBack}
+        primaryLabel={saving ? "Creating…" : authLoading ? "Checking your account…" : `Create property`}
+        onPrimary={handleSave}
+        busy={saving || authLoading}
+        hint={`${rooms.length} ${rooms.length === 1 ? "room" : "rooms"} · ${totalBeds} ${totalBeds === 1 ? "bed" : "beds"}`}
+        primaryIcon={<CheckIcon />}
+      />
     </Box>
   );
 }

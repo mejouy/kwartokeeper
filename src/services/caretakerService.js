@@ -14,14 +14,15 @@
 // touch the owner's session at all. We sign out of the secondary instance right
 // after, since we don't need to keep that session alive.
 
-import { initializeApp, getApps, getApp } from "firebase/app";
+import { initializeApp, getApps } from "firebase/app";
 import {
   getAuth,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   signOut,
 } from "firebase/auth";
-import { doc, setDoc, serverTimestamp } from "firebase/firestore";
-import { db } from "../config/firebase";
+import { doc, setDoc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { auth as mainAuth, db } from "../config/firebase";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -108,4 +109,16 @@ export async function createCaretakerAccount({
   });
 
   return caretakerUid;
+}
+
+/**
+ * Password reset for a caretaker (works on the free Firebase plan): emails the caretaker a link to choose a new password
+ * themselves. Since they pick their own, they aren't asked again on sign-in.
+ */
+export async function emailCaretakerResetLink({ id, email }) {
+  const address = String(email || "").trim();
+  if (!address) throw new Error("This caretaker has no email address on file.");
+  await sendPasswordResetEmail(mainAuth, address);
+  const stamp = { mustChangePassword: false, passwordResetEmailedAt: new Date().toISOString() };
+  await Promise.allSettled([updateDoc(doc(db, "users", id), stamp), updateDoc(doc(db, "caretakers", id), stamp)]);
 }

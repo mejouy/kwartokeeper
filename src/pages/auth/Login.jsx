@@ -14,10 +14,11 @@ import {
   browserLocalPersistence,
   browserSessionPersistence
 } from 'firebase/auth';
-import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
+import { doc, getDoc, collection, getDocs, query, where, limit } from 'firebase/firestore';
 import { auth, db } from '../../config/firebase';
 import AuthLayout, { FormHeading } from '../../components/AuthLayout';
 import { fieldSx, primaryButtonSx } from '../../components/authStyles';
+import { SIGNED_OUT_REASON_KEY } from '../../utils/accountState';
 
 // Lit windows on the brand panel's building (6 rows x 5 columns)
 const LIT_PATTERN = [
@@ -35,7 +36,19 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  // Shown once if the app signed someone out because their account was deleted or disabled
+  const [error, setError] = useState(() => {
+    try {
+      const reason = sessionStorage.getItem(SIGNED_OUT_REASON_KEY);
+      if (!reason) return '';
+      sessionStorage.removeItem(SIGNED_OUT_REASON_KEY);
+      return reason === 'disabled'
+        ? 'This account has been disabled. Contact your property owner or KwartoKeeper support.'
+        : 'This account no longer exists. Contact your property owner or KwartoKeeper support.';
+    } catch {
+      return '';
+    }
+  });
   const [rememberMe, setRememberMe] = useState(false);
 
   // Password Reset Modal States
@@ -57,8 +70,18 @@ export default function Login() {
         rememberMe ? browserLocalPersistence : browserSessionPersistence
       );
 
-      // 2. Authenticate with Firebase Auth
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      // 2. Authenticate with Firebase Auth. Emails pasted or typed on a phone often
+      // carry a trailing space; a temporary password copied from an invite message
+      // can too, so a padded password is retried once without the padding.
+      const cleanEmail = email.trim();
+      let userCredential;
+      try {
+        userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password);
+      } catch (firstErr) {
+        const padded = password !== password.trim() && password.trim();
+        if (!padded || firstErr?.code !== 'auth/invalid-credential') throw firstErr;
+        userCredential = await signInWithEmailAndPassword(auth, cleanEmail, password.trim());
+      }
       const user = userCredential.user;
 
       // 3. Fetch user profile from Firestore
@@ -85,26 +108,23 @@ export default function Login() {
       }
 
       if (userData) {
-        if (userData.role === 'owner') {
-          const propertiesRef = collection(db, 'properties');
-          const propertySnap = await getDocs(propertiesRef);
+        if (userData.mustChangePassword === true) {
+          // Signed in with a temporary password: pick their own before anything else
+          navigate('/set-password');
+        } else if (userData.role === 'owner') {
+          // Only this owner's properties (reading every property just to check was slow and leaked data)
+          let hasRegisteredProperty = Boolean(userData.hasProperty);
+          if (!hasRegisteredProperty) {
+            try {
+              const mine = await getDocs(query(collection(db, 'properties'), where('ownerUid', '==', user.uid), limit(1)));
+              hasRegisteredProperty = !mine.empty;
+            } catch (err) {
+              console.warn('Could not check for properties:', err?.code || err);
+              hasRegisteredProperty = true; // the dashboard offers setup if there really are none
+            }
+          }
 
-          const hasRegisteredProperty = propertySnap.docs.some((docSnap) => {
-            const property = docSnap.data();
-            const ownerValue =
-              property.ownerUid ??
-              property.ownerId ??
-              property.createdBy ??
-              property.userId ??
-              property.uid ??
-              property.owner?.uid ??
-              property.owner?.id ??
-              '';
-
-            return String(ownerValue).trim().toLowerCase() === String(user.uid).trim().toLowerCase();
-          });
-
-          if (!hasRegisteredProperty && !userData.hasProperty) {
+          if (!hasRegisteredProperty) {
             navigate('/setup');
           } else {
             navigate('/owner');
@@ -122,11 +142,20 @@ export default function Login() {
         setError('We could not find a profile for this account. Please contact your property owner.');
       }
     } catch (err) {
-      console.error(err);
-      if (err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
-        setError('Invalid email or password. Please try again.');
-      } else if (err.code === 'auth/too-many-requests') {
+      const code = err?.code || '';
+      // A wrong email or password is an expected outcome, not an app error
+      const expected = ['auth/invalid-credential', 'auth/user-not-found', 'auth/wrong-password', 'auth/invalid-email', 'auth/too-many-requests', 'auth/user-disabled'];
+      if (!expected.includes(code)) console.error('Login failed:', err);
+      if (code === 'auth/invalid-credential' || code === 'auth/user-not-found' || code === 'auth/wrong-password') {
+        setError("That email and password don't match. Passwords are case-sensitive; if you were sent a temporary password, type it exactly as it appears (e.g. Kwarto-12345).");
+      } else if (code === 'auth/invalid-email') {
+        setError("That doesn't look like a valid email address.");
+      } else if (code === 'auth/user-disabled') {
+        setError('This account has been turned off. Please contact your property owner.');
+      } else if (code === 'auth/too-many-requests') {
         setError('Access temporarily disabled due to many failed attempts. Try resetting your password.');
+      } else if (code === 'auth/network-request-failed') {
+        setError("You're offline. Connect to the internet and try again.");
       } else {
         setError('Failed to log in. Please check your credentials.');
       }

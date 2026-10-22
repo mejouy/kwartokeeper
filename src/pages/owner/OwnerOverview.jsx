@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -6,11 +6,8 @@ import {
   Paper,
   Typography,
   Button,
-  Stack,
   Chip,
   Card,
-  CardContent,
-  CardActionArea,
   LinearProgress,
   CircularProgress,
   Alert,
@@ -19,18 +16,23 @@ import {
   GlobalStyles,
   IconButton,
   Skeleton,
+  Avatar,
 } from "@mui/material";
 import HomeWorkIcon from "@mui/icons-material/HomeWork";
-import PeopleIcon from "@mui/icons-material/People";
-import AttachMoneyIcon from "@mui/icons-material/AttachMoney";
+import HomeWorkOutlinedIcon from "@mui/icons-material/HomeWorkOutlined";
+import PeopleOutlineIcon from "@mui/icons-material/PeopleOutlined";
+import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import ReceiptLongIcon from "@mui/icons-material/ReceiptLong";
 import PersonAddIcon from "@mui/icons-material/PersonAdd";
-import FormatListNumberedIcon from "@mui/icons-material/FormatListNumbered";
-import GroupAddIcon from "@mui/icons-material/GroupAdd";
+import PersonAddAlt1OutlinedIcon from "@mui/icons-material/PersonAddAlt1Outlined";
+import GroupAddOutlinedIcon from "@mui/icons-material/GroupAddOutlined";
+import BadgeOutlinedIcon from "@mui/icons-material/BadgeOutlined";
+import CampaignOutlinedIcon from "@mui/icons-material/CampaignOutlined";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import ChevronLeftIcon from "@mui/icons-material/ChevronLeft";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import ArrowForwardRoundedIcon from "@mui/icons-material/ArrowForwardRounded";
 import LockIcon from "@mui/icons-material/Lock";
 import AddHomeWorkIcon from "@mui/icons-material/AddHomeWork";
 import EventBusyOutlinedIcon from "@mui/icons-material/EventBusyOutlined";
@@ -41,9 +43,17 @@ import { normalizePayment } from "../../utils/normalizePayment";
 import { addMonthsClamped } from "../../utils/addMonthsClamped";
 import { uploadFileToCloudinary } from "../../utils/cloudinary";
 import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
+import { ownerAccessOf, resubmissionPatch } from "../../utils/ownerAccess";
+import { occupancyOf, holdsBed, isMovingIn } from "../../utils/occupancy";
 import { alpha } from "@mui/material/styles";
 
-// Windows light up once on load; switched off for "reduce motion" users.
+const INK = "#202020";
+const HEAD = '"Inter", sans-serif';
+// One set of corner radii for the page
+const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
+const LOCKED_TIP = "Available once your account is approved";
+
+// Squares pop in once on load; switched off for "reduce motion" users.
 const AnimationStyles = (
   <GlobalStyles
     styles={{
@@ -91,8 +101,8 @@ const tenantLabel = (t) => t.fullName || t.name || t.tenantName || "A tenant";
 function FilePickRow({ label, hint, file, onChange }) {
   return (
     <Box sx={{ mb: 3 }}>
-      <Typography variant="subtitle2" fontWeight="700" sx={{ mb: 0.5 }}>{label}</Typography>
-      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>{hint}</Typography>
+      <Typography variant="subtitle2" sx={{ fontWeight: "700", mb: 0.5 }}>{label}</Typography>
+      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>{hint}</Typography>
       <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 1.5 }}>
         <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} sx={{ minHeight: 44 }}>
           {file ? "Change file" : "Choose file"}
@@ -107,123 +117,143 @@ function FilePickRow({ label, hint, file, onChange }) {
 }
 
 /* ---------------------------------------------------------------------------
-   Brand visual: the dorm-facade windows from the login/landing pages, used as
-   a tiny data chart. 30 windows = 100% occupancy; the lit (orange) ones are
-   scattered in a fixed order so it reads as a building, not a progress bar.
+   Occupancy as room squares (same motif as the login/landing pages):
+   30 squares = 100%; the lit (orange) ones are scattered in a fixed order
+   so it reads as a building, not a progress bar.
    ------------------------------------------------------------------------- */
-const WINDOW_COUNT = 30;
+const SQUARE_COUNT = 30;
 const LIGHT_ORDER = [3, 17, 8, 24, 1, 12, 27, 5, 20, 14, 9, 29, 2, 22, 11, 6, 25, 16, 0, 19, 28, 7, 13, 23, 4, 21, 10, 26, 15, 18];
-const WINDOW_RANK = LIGHT_ORDER.reduce((acc, cell, rank) => ({ ...acc, [cell]: rank }), {});
+const SQUARE_RANK = LIGHT_ORDER.reduce((acc, cell, rank) => ({ ...acc, [cell]: rank }), {});
 
-function OccupancyWindows({ rate, occupied, total }) {
-  const rawLit = total > 0 ? Math.round((rate / 100) * WINDOW_COUNT) : 0;
+function OccupancyPanel({ rate, occupied, total }) {
+  const rawLit = total > 0 ? Math.round((rate / 100) * SQUARE_COUNT) : 0;
   const litCount = rate > 0 ? Math.max(1, rawLit) : 0;
 
   return (
-    <Box>
+    <Box sx={{ borderRadius: R.lg, bgcolor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", p: { xs: 2, sm: 2.5 } }}>
+      <Box sx={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 1, mb: 1.75 }}>
+        <Typography sx={{ fontFamily: HEAD, fontWeight: 700, fontSize: 12, letterSpacing: ".1em", textTransform: "uppercase", color: "rgba(255,255,255,0.6)" }}>
+          Occupancy
+        </Typography>
+        <Typography sx={{ fontFamily: HEAD, fontWeight: 900, fontSize: { xs: "1.6rem", sm: "1.9rem" }, lineHeight: 1, color: "#fff" }}>
+          {rate}%
+        </Typography>
+      </Box>
       <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: "repeat(10, 1fr)",
-          gap: { xs: 0.75, md: 1 },
-          width: "100%",
-          maxWidth: 320,
-        }}
+        role="img"
+        aria-label={`Occupancy ${rate}%`}
+        sx={{ display: "grid", gridTemplateColumns: "repeat(10, minmax(0, 1fr))", gap: { xs: 0.75, md: 1 } }}
       >
-        {Array.from({ length: WINDOW_COUNT }).map((_, i) => (
+        {Array.from({ length: SQUARE_COUNT }).map((_, i) => (
           <Box
             key={i}
             sx={{
               aspectRatio: "1",
               borderRadius: "4px",
-              bgcolor: WINDOW_RANK[i] < litCount ? "primary.main" : "rgba(202, 220, 246, 0.14)",
+              bgcolor: SQUARE_RANK[i] < litCount ? "primary.main" : "rgba(202, 220, 246, 0.14)",
               animation: `kkPop 0.4s ease-out ${i * 18}ms both`,
             }}
           />
         ))}
       </Box>
-      <Typography variant="caption" sx={{ color: "#cadcf6", display: "block", mt: 1.25 }}>
+      <Typography variant="caption" sx={{ color: "#cadcf6", display: "block", mt: 1.5 }}>
         {total > 0 ? `${occupied} of ${total} beds occupied` : "Add rooms to start tracking occupancy"}
       </Typography>
     </Box>
   );
 }
 
-function MetricBox({ title, value, subtitle, icon, subtitleColor = "text.secondary", onClick, progress }) {
-  const body = (
-    <CardContent sx={{ p: { xs: 1.75, sm: 2.5 }, "&:last-child": { pb: { xs: 1.75, sm: 2.5 } } }}>
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, mb: 1 }}>
-        <Typography variant="body2" color="text.secondary" fontWeight="600" sx={{ lineHeight: 1.3 }}>
+/** White surface used by every panel on the page. */
+const panelSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: R.lg };
+
+function Panel({ title, action, children, sx }) {
+  return (
+    <Paper elevation={0} sx={{ ...panelSx, p: { xs: 2, sm: 2.5 }, height: "100%", display: "flex", flexDirection: "column", ...sx }}>
+      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 1.5, mb: 2, minHeight: 32 }}>
+        <Typography component="h2" sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: { xs: "1.05rem", sm: "1.15rem" }, letterSpacing: "-0.01em" }}>
           {title}
         </Typography>
-        <Box sx={{ p: { xs: 0.75, sm: 1 }, borderRadius: 2, bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main", display: "flex", flexShrink: 0 }}>
-          {icon}
-        </Box>
+        {action}
       </Box>
-      <Typography
-        variant="h4"
-        fontWeight="800"
-        sx={{ fontFamily: '"Inter", sans-serif', fontSize: { xs: "1.5rem", sm: "2.125rem" }, wordBreak: "break-word" }}
-      >
-        {value}
-      </Typography>
-      {progress !== undefined && (
-        <LinearProgress
-          variant="determinate"
-          value={Math.min(100, Math.max(0, progress))}
-          sx={{ height: 5, borderRadius: 3, my: 0.75, bgcolor: (t) => alpha(t.palette.text.primary, 0.08) }}
-        />
-      )}
-      <Typography variant="caption" sx={{ color: subtitleColor, display: "block" }}>
-        {subtitle}
-      </Typography>
-    </CardContent>
+      {children}
+    </Paper>
   );
+}
 
+function MetricCard({ title, value, subtitle, icon, onClick, progress, subtitleColor = "text.secondary" }) {
+  const clickable = Boolean(onClick);
   return (
-    <Card elevation={0} sx={{ bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%", overflow: "hidden" }}>
-      {onClick ? (
-        <CardActionArea onClick={onClick} sx={{ height: "100%", alignItems: "stretch", "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } }}>
-          {body}
-        </CardActionArea>
-      ) : (
-        body
-      )}
+    <Card elevation={0} sx={{ ...panelSx, height: "100%", overflow: "hidden", transition: "border-color .15s, box-shadow .15s", ...(clickable && { "@media (hover: hover)": { "&:hover": { borderColor: "primary.main", boxShadow: "0 10px 24px -18px rgba(32,32,32,.45)" } } }) }}>
+      <Box
+        component={clickable ? ButtonBase : "div"}
+        onClick={onClick}
+        sx={{
+          display: "block",
+          width: "100%",
+          height: "100%",
+          textAlign: "left",
+          p: { xs: 1.75, sm: 2.25 },
+          "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 },
+        }}
+      >
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", mb: { xs: 1.25, sm: 1.75 } }}>
+          <Box sx={{ width: { xs: 34, sm: 40 }, height: { xs: 34, sm: 40 }, borderRadius: R.sm, bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main", display: "grid", placeItems: "center" }}>
+            {icon}
+          </Box>
+          {clickable && <ArrowForwardRoundedIcon sx={{ fontSize: 18, color: "text.disabled" }} />}
+        </Box>
+        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
+          {title}
+        </Typography>
+        <Typography sx={{ fontFamily: HEAD, fontWeight: 800, letterSpacing: "-0.02em", fontSize: { xs: "1.45rem", sm: "1.9rem" }, lineHeight: 1.2, mt: 0.25, overflowWrap: "anywhere" }}>
+          {value}
+        </Typography>
+        {progress !== undefined && (
+          <LinearProgress
+            variant="determinate"
+            value={Math.min(100, Math.max(0, progress))}
+            sx={{ height: 6, borderRadius: 3, my: 0.75, bgcolor: (t) => alpha(t.palette.text.primary, 0.08) }}
+          />
+        )}
+        <Typography variant="caption" sx={{ color: subtitleColor, display: "block", lineHeight: 1.4 }}>
+          {subtitle}
+        </Typography>
+      </Box>
     </Card>
   );
 }
 
 function PropertyCard({ property, onClick }) {
+  const clickable = Boolean(onClick);
   return (
     <Card
       elevation={0}
       onClick={onClick}
-      role="button"
-      tabIndex={0}
+      role={clickable ? "button" : undefined}
+      tabIndex={clickable ? 0 : undefined}
       onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
+        if (clickable && (e.key === "Enter" || e.key === " ")) {
           e.preventDefault();
           onClick();
         }
       }}
       sx={{
-        bgcolor: "background.default",
-        border: "1px solid",
-        borderColor: "divider",
-        borderRadius: 3,
+        ...panelSx,
         height: "100%",
-        cursor: "pointer",
+        cursor: clickable ? "pointer" : "default",
         overflow: "hidden",
-        transition: "border-color 0.15s ease, box-shadow 0.15s ease",
-        "@media (hover: hover)": {
-          "&:hover": { borderColor: "primary.main", boxShadow: "0 6px 18px rgba(0,0,0,0.06)" },
-        },
+        transition: "border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease",
+        ...(clickable && {
+          "@media (hover: hover)": {
+            "&:hover": { borderColor: "primary.main", boxShadow: "0 12px 26px -18px rgba(32,32,32,.45)", transform: "translateY(-2px)" },
+          },
+        }),
         "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
       }}
     >
       <Box
         sx={{
-          height: 120,
+          height: 128,
           bgcolor: (theme) => alpha(theme.palette.background.paper, 0.7),
           display: "flex",
           alignItems: "center",
@@ -235,20 +265,23 @@ function PropertyCard({ property, onClick }) {
           }),
         }}
       >
-        {!property.coverPhotoUrl && <HomeWorkIcon sx={{ fontSize: 36, color: "text.disabled" }} />}
+        {!property.coverPhotoUrl && <HomeWorkIcon sx={{ fontSize: 38, color: "text.disabled" }} />}
       </Box>
-      <CardContent sx={{ p: 2 }}>
-        <Typography variant="subtitle1" fontWeight="700" noWrap>
+      <Box sx={{ p: 2 }}>
+        <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1rem" }} noWrap>
           {property.propertyName}
         </Typography>
-        <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.25 }}>
+        <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block", mb: 1.25 }}>
           {property.propertyType || "Property"}
         </Typography>
-        <Stack direction="row" spacing={1}>
-          <Chip size="small" variant="outlined" label={`${property.totalRooms} rooms`} />
-          <Chip size="small" variant="outlined" label={`${property.totalBeds} beds`} />
-        </Stack>
-      </CardContent>
+        <Box sx={{ display: "flex", gap: 1 }}>
+          {[`${property.totalRooms} rooms`, `${property.totalBeds} beds`].map((label) => (
+            <Box key={label} sx={{ px: 1, py: 0.25, borderRadius: "6px", bgcolor: (t) => alpha(t.palette.background.paper, 0.8), fontSize: 12, fontWeight: 700 }}>
+              {label}
+            </Box>
+          ))}
+        </Box>
+      </Box>
     </Card>
   );
 }
@@ -279,7 +312,6 @@ function PropertyCarousel({ properties, onOpen }) {
     updateState();
     window.addEventListener("resize", updateState);
     return () => window.removeEventListener("resize", updateState);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [properties.length]);
 
   const scrollByPage = (dir) => {
@@ -355,13 +387,13 @@ function PropertyCarousel({ properties, onOpen }) {
               minWidth: 0,
             }}
           >
-            <PropertyCard property={property} onClick={() => onOpen(property)} />
+            <PropertyCard property={property} onClick={onOpen ? () => onOpen(property) : undefined} />
           </Box>
         ))}
       </Box>
 
       {showControls && (
-        <Box sx={{ display: "flex", justifyContent: "center", gap: 0.75, mt: 1 }}>
+        <Box sx={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: 0.75, mt: 1 }}>
           {properties.map((property, i) => (
             <Box
               key={property.id}
@@ -419,7 +451,7 @@ export default function OwnerOverview() {
   const [tickets, setTickets] = useState([]);
   const [payments, setPayments] = useState([]);
 
-  const propertiesDataRef = useRef({ count: 0, totalBeds: 0, propertyIds: [] });
+  const propertiesDataRef = useRef({ count: 0, totalBeds: 0, propertyIds: [], list: [] });
   const tenantsDataRef = useRef([]);
 
   useEffect(() => {
@@ -470,21 +502,22 @@ export default function OwnerOverview() {
       };
 
       const recalculateOccupancy = (currentOwnerId) => {
-        const beds = propertiesDataRef.current.totalBeds;
         const ownerPropertyIds = new Set(propertiesDataRef.current.propertyIds);
         const ownerTenants = tenantsDataRef.current.filter((tenant) =>
           tenant.ownerUid === currentOwnerId || ownerPropertyIds.has(tenant.propertyId)
         );
-        
+        // Beds come from bed assignments, with the same rule as Properties and Reports
+        const occ = occupancyOf(propertiesDataRef.current.list, ownerTenants);
+
         let active = 0;
         let pending = 0;
         let expected = 0;
         const leaseEnded = [];
         const leaseSoon = [];
         ownerTenants.forEach((tenant) => {
-          const rawStatus = (tenant.status || "active").toString().trim().toLowerCase();
-          if (rawStatus.includes("pending")) pending++;
-          else if (rawStatus !== "inactive" && rawStatus !== "archived") {
+          if (!holdsBed(tenant)) return;
+          if (isMovingIn(tenant)) pending++;
+          else {
             active++;
             expected += Number(tenant.monthlyRent ?? tenant.rentAmount ?? tenant.roomMonthlyRate ?? tenant.monthlyRate ?? tenant.rent ?? 0) || 0;
 
@@ -495,17 +528,16 @@ export default function OwnerOverview() {
         });
         
         const propertiesCount = propertiesDataRef.current.count;
-        const occRate = beds > 0 ? Math.min(Math.round((active / beds) * 100), 100) : 0;
 
         setStats((prev) => ({
           ...prev,
           totalProperties: propertiesCount,
-          totalBeds: beds,
+          totalBeds: occ.beds,
           activeTenants: active,
           pendingTenants: pending,
-          occupiedBeds: active,
+          occupiedBeds: occ.occupied,
           expectedRent: expected,
-          occupancyRate: occRate,
+          occupancyRate: occ.rate,
           leaseEnded,
           leaseSoon: leaseSoon.sort((a, b) => a.left - b.left),
         }));
@@ -556,6 +588,7 @@ export default function OwnerOverview() {
             count: snapshot.docs.length,
             totalBeds: totalCapacity,
             propertyIds: snapshot.docs.map((propertyDoc) => propertyDoc.id),
+            list: propertyList.map((p) => ({ id: p.id, beds: p.totalBeds })),
           };
 
           tenantPropertyUnsubscribers.forEach((unsubscribe) => unsubscribe());
@@ -608,12 +641,32 @@ export default function OwnerOverview() {
         (error) => console.error("Error fetching caretakers:", error)
       );
 
-      // 4. Listen to Payments Data
-      unsubPayments = onSnapshot(
-        query(collection(db, "payments"), where("ownerUid", "==", ownerId)),
-        (snapshot) => setPayments(snapshot.docs.map((d) => normalizePayment({ id: d.id, ...d.data() }))),
-        (error) => console.error("Error fetching payments:", error)
-      );
+      // 4. Payments: only what the dashboard shows (this and last month's rent, and
+      // anything waiting for review), not the owner's whole payment history
+      const now = new Date();
+      const monthLabel = (d) => d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+      const periods = [monthLabel(now), monthLabel(new Date(now.getFullYear(), now.getMonth() - 1, 1))];
+      const paymentSources = new Map();
+      const publishPayments = () => {
+        const byId = new Map();
+        paymentSources.forEach((list) => list.forEach((p) => byId.set(p.id, p)));
+        setPayments([...byId.values()]);
+      };
+      const watchPayments = (key, condition) =>
+        onSnapshot(
+          query(collection(db, "payments"), where("ownerUid", "==", ownerId), condition),
+          (snapshot) => {
+            paymentSources.set(key, snapshot.docs.map((d) => normalizePayment({ id: d.id, ...d.data() })));
+            publishPayments();
+          },
+          (error) => console.error(`Error fetching payments (${key}):`, error)
+        );
+      const paymentUnsubs = [
+        watchPayments("months", where("periodMonth", "in", [...periods, ...periods.map((p) => p.toLowerCase())])),
+        watchPayments("pending", where("status", "in", ["Pending", "pending"])),
+        watchPayments("review", where("verificationStatus", "in", ["Pending", "pending"])),
+      ];
+      unsubPayments = () => paymentUnsubs.forEach((u) => u());
 
       // 5. Listen to Maintenance Tickets
       unsubTickets = onSnapshot(
@@ -640,18 +693,28 @@ export default function OwnerOverview() {
 
   const collectedThisMonth = useMemo(() => {
     const now = new Date();
+    // Money received, same as the Payments page: full and partial payments
     return payments
-      .filter((p) => String(p.status || "").toLowerCase() === "paid")
+      .filter((p) => ["paid", "partial"].includes(String(p.status || "").toLowerCase()))
       .filter((p) => {
         // The month the rent was FOR decides it; fall back to the payment date
-        if (p.periodMonth) return p.periodMonth === thisPeriod;
+        if (p.periodMonth) return String(p.periodMonth).trim().toLowerCase() === thisPeriod.toLowerCase();
         const d = paymentDateOf(p);
         return Boolean(d) && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
       })
       .reduce((sum, p) => sum + Number(p.amount || 0), 0);
   }, [payments, thisPeriod]);
 
-  const paymentsToReview = useMemo(() => payments.filter((p) => String(p.status || "").toLowerCase() === "pending").length, [payments]);
+  // Same rule as the Payments page's "To review"
+  const paymentsToReview = useMemo(
+    () =>
+      payments.filter((p) => {
+        const s = String(p.status || "").toLowerCase();
+        const v = String(p.verificationStatus || "").toLowerCase();
+        return s === "pending" || (v === "pending" && !["paid", "partial", "rejected", "cancelled"].includes(s));
+      }).length,
+    [payments]
+  );
 
   const recentPayments = useMemo(
     () => [...payments].sort((a, b) => (paymentDateOf(b)?.getTime() || 0) - (paymentDateOf(a)?.getTime() || 0)).slice(0, 4),
@@ -689,7 +752,7 @@ export default function OwnerOverview() {
     setUploading(true);
     try {
       const verificationDocs = await uploadVerificationDocs();
-      await setDoc(doc(db, "users", auth.currentUser.uid), { approvalStatus: "pending", verificationDocs }, { merge: true });
+      await setDoc(doc(db, "users", auth.currentUser.uid), { ...resubmissionPatch(owner), verificationDocs }, { merge: true });
       setIdFile(null);
       setClearanceFile(null);
       // No property yet: continue straight into the setup wizard
@@ -711,7 +774,7 @@ export default function OwnerOverview() {
     setResubmitting(true);
     try {
       const verificationDocs = await uploadVerificationDocs();
-      await setDoc(doc(db, "users", auth.currentUser.uid), { approvalStatus: "pending", verificationDocs }, { merge: true });
+      await setDoc(doc(db, "users", auth.currentUser.uid), { ...resubmissionPatch(owner), verificationDocs }, { merge: true });
       setIdFile(null);
       setClearanceFile(null);
       setResubmitDone(true);
@@ -726,13 +789,13 @@ export default function OwnerOverview() {
   if (loading || !owner || !propsLoaded) {
     return (
       <Container maxWidth="xl" disableGutters>
-        <Skeleton variant="rounded" height={190} sx={{ borderRadius: 4, mb: 3 }} />
-        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }, gap: { xs: 1.5, md: 2.5 }, mb: 3 }}>
+        <Skeleton variant="rounded" height={210} sx={{ borderRadius: R.xl, mb: 3 }} />
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }, gap: { xs: 1.5, md: 2 }, mb: 3 }}>
           {[0, 1, 2, 3].map((k) => (
-            <Skeleton key={k} variant="rounded" height={104} sx={{ borderRadius: 3 }} />
+            <Skeleton key={k} variant="rounded" height={128} sx={{ borderRadius: R.lg }} />
           ))}
         </Box>
-        <Skeleton variant="rounded" height={220} sx={{ borderRadius: 3 }} />
+        <Skeleton variant="rounded" height={220} sx={{ borderRadius: R.lg }} />
       </Container>
     );
   }
@@ -744,8 +807,8 @@ export default function OwnerOverview() {
   if (owner?.approvalStatus === "pending" && !docsOnFile) {
     return (
       <Container maxWidth="sm" disableGutters sx={{ py: { xs: 1, md: 6 } }}>
-        <Paper elevation={0} sx={{ bgcolor: "background.default", p: { xs: 2.5, md: 5 }, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
-          <Typography variant="h5" component="h1" fontWeight="800" sx={{ mb: 1, fontFamily: '"Inter", sans-serif' }}>
+        <Paper elevation={0} sx={{ ...panelSx, p: { xs: 2.5, md: 5 } }}>
+          <Typography variant="h5" component="h1" sx={{ fontWeight: "800", mb: 1, fontFamily: HEAD }}>
             Verify your account
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
@@ -777,7 +840,7 @@ export default function OwnerOverview() {
               fullWidth
               size="large"
               disabled={uploading}
-              sx={{ py: 1.5, fontWeight: "bold" }}
+              sx={{ py: 1.5, fontWeight: "bold", borderRadius: R.sm }}
             >
               {uploading ? <CircularProgress size={24} color="inherit" /> : "Submit for approval"}
             </Button>
@@ -788,10 +851,16 @@ export default function OwnerOverview() {
   }
 
   // --- ACTUAL DASHBOARD ---
-  const isPending = owner?.approvalStatus === "pending";
-  const isRejected = owner?.approvalStatus === "rejected";
+  // Same rule as the route guard and the menu
+  const access = ownerAccessOf(owner);
+  const isPending = access === "pending";
+  const isRejected = access === "rejected";
   // The first property is part of setup, so it stays open; further ones wait for approval.
   const addLocked = isPending && stats.totalProperties > 0;
+
+  // The route guard sends a pending owner back here from every other owner page,
+  // so links to those pages are switched off until approval instead of bouncing.
+  const linkTo = (path) => (isPending || isRejected ? undefined : () => navigate(path));
 
   const ownerName =
     owner?.fullName || owner?.name || owner?.ownerName || owner?.firstName || auth.currentUser?.displayName || "Owner";
@@ -810,7 +879,7 @@ export default function OwnerOverview() {
   const welcomeSubtitle = isRejected
     ? "There was an issue with your verification. Please review and resubmit your documents."
     : isPending
-    ? "Your account is under review. You can explore the dashboard while you wait."
+    ? "Your account is under review. You can look around the dashboard while you wait."
     : `Here's what's happening across your ${stats.totalProperties} ${stats.totalProperties === 1 ? "property" : "properties"} today.`;
 
   // "Maria's lease ends in 5 days" / "3 tenant leases end within 30 days" / "2 tenant leases have ended"
@@ -881,101 +950,127 @@ export default function OwnerOverview() {
     navigate("/setup");
   };
 
-  const addPropertyTooltip = addLocked ? "Account pending approval. Adding properties is disabled." : "Add a new property";
+  const addPropertyTooltip = addLocked ? "Account pending approval. Adding properties is disabled." : "";
+
+  const quickActions = [
+    { label: "Register tenant", icon: <PersonAddAlt1OutlinedIcon />, to: "/owner/tenants/register" },
+    { label: "Invite caretaker", icon: <GroupAddOutlinedIcon />, to: "/owner/caretakers/invite" },
+    { label: "Caretakers", icon: <BadgeOutlinedIcon />, to: "/owner/caretakers" },
+    { label: "Announcement", icon: <CampaignOutlinedIcon />, to: "/owner/announcements" },
+  ];
+
+  const statusColor = (status) => {
+    const s = String(status || "Paid").toLowerCase();
+    if (s === "paid") return "success";
+    if (["rejected", "overdue", "cancelled"].includes(s)) return "error";
+    return "warning";
+  };
+
+  const initialsOf = (name) =>
+    String(name || "T")
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0].toUpperCase())
+      .join("");
 
   return (
     <Container maxWidth="xl" disableGutters>
       {AnimationStyles}
 
-      {/* Welcome hero — the dark brand surface from the login/landing pages,
-          with occupancy drawn as lit windows. */}
+      {/* ================= Hero: greeting + occupancy ================= */}
       <Box
+        component="section"
         sx={{
           position: "relative",
           overflow: "hidden",
-          bgcolor: "#202020",
+          bgcolor: INK,
           color: "#ffffff",
-          borderRadius: 4,
-          p: { xs: 2.5, sm: 4 },
-          mb: 3,
+          borderRadius: R.xl,
+          p: { xs: 2.5, sm: 3.5, md: 4 },
+          mb: { xs: 2, md: 3 },
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", md: "1.2fr 0.8fr" },
-          gap: { xs: 3, md: 4 },
+          gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "minmax(0, 1.25fr) minmax(0, 0.75fr)" },
+          gap: { xs: 2.5, md: 5 },
           alignItems: "center",
         }}
       >
-        <Box
-          sx={{
-            position: "absolute",
-            top: -140,
-            right: -100,
-            width: 380,
-            height: 380,
-            borderRadius: "50%",
-            background: "radial-gradient(circle, rgba(255, 69, 0, 0.22), transparent 70%)",
-            pointerEvents: "none",
-          }}
-        />
+        <Box aria-hidden sx={{ position: "absolute", top: -200, right: -140, width: 460, height: 460, borderRadius: "50%", background: "rgba(255,69,0,.24)", filter: "blur(100px)", pointerEvents: "none" }} />
+        <Box aria-hidden sx={{ position: "absolute", bottom: -220, left: -160, width: 360, height: 360, borderRadius: "50%", background: "rgba(202,220,246,.12)", filter: "blur(90px)", pointerEvents: "none" }} />
 
-        <Box sx={{ position: "relative" }}>
-          <Chip
-            size="small"
-            label={statusTone.label}
-            sx={{ bgcolor: statusTone.bg, color: statusTone.fg, fontWeight: 700, mb: 1.5 }}
-          />
+        <Box sx={{ position: "relative", minWidth: 0 }}>
+          <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 1, mb: 1.5 }}>
+            <Chip size="small" label={statusTone.label} sx={{ bgcolor: statusTone.bg, color: statusTone.fg, fontWeight: 700 }} />
+          </Box>
           <Typography
-            variant="h4"
             component="h1"
             sx={{
-              fontFamily: '"Inter", sans-serif',
+              fontFamily: HEAD,
               fontWeight: 900,
+              letterSpacing: "-0.03em",
               color: "#ffffff",
-              fontSize: { xs: "1.6rem", sm: "2.1rem" },
-              lineHeight: 1.15,
-              wordBreak: "break-word",
+              fontSize: { xs: "1.55rem", sm: "2.1rem", md: "2.35rem" },
+              lineHeight: 1.12,
+              overflowWrap: "anywhere",
             }}
           >
-            {greeting}, {ownerName}
+            {greeting},{" "}
+            <Box component="span" sx={{ color: "primary.main" }}>
+              {ownerName}
+            </Box>
           </Typography>
-          <Typography variant="body2" sx={{ color: "#cadcf6", mt: 1, maxWidth: 460 }}>
+          <Typography variant="body2" sx={{ color: "#cadcf6", mt: 1, maxWidth: 480, lineHeight: 1.6 }}>
             {welcomeSubtitle}
           </Typography>
-          <Tooltip title={addPropertyTooltip}>
-            <span style={{ display: "block" }}>
+
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1.25, mt: 2.5, "& > *": { flex: { xs: "1 1 auto", sm: "0 0 auto" } } }}>
+            <Tooltip title={addPropertyTooltip}>
+              <span style={{ display: "flex" }}>
+                <Button
+                  variant="contained"
+                  startIcon={addLocked ? <LockIcon /> : <AddHomeWorkIcon />}
+                  onClick={handleAddPropertyClick}
+                  disabled={addLocked}
+                  sx={{
+                    flex: 1,
+                    fontWeight: 700,
+                    borderRadius: R.sm,
+                    boxShadow: "0 12px 26px -14px rgba(255,69,0,.85)",
+                    "&.Mui-disabled": { bgcolor: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.45)" },
+                  }}
+                >
+                  Add Property
+                </Button>
+              </span>
+            </Tooltip>
+            {!isPending && paymentsToReview > 0 && (
               <Button
-                variant="contained"
-                startIcon={addLocked ? <LockIcon /> : <AddHomeWorkIcon />}
-                onClick={handleAddPropertyClick}
-                disabled={addLocked}
-                sx={{
-                  mt: 2.5,
-                  width: { xs: "100%", sm: "auto" },
-                  fontWeight: 700,
-                  "&.Mui-disabled": { bgcolor: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.45)" },
-                }}
+                onClick={() => navigate("/owner/payments")}
+                startIcon={<ReceiptLongIcon />}
+                sx={{ fontWeight: 700, borderRadius: R.sm, color: "#fff", border: "1px solid rgba(255,255,255,.22)", "&:hover": { bgcolor: "rgba(255,255,255,.08)" } }}
               >
-                Add Property
+                Review {paymentsToReview} {paymentsToReview === 1 ? "payment" : "payments"}
               </Button>
-            </span>
-          </Tooltip>
+            )}
+          </Box>
         </Box>
 
-        <Box sx={{ position: "relative" }}>
-          <OccupancyWindows rate={stats.occupancyRate} occupied={stats.occupiedBeds} total={stats.totalBeds} />
+        <Box sx={{ position: "relative", minWidth: 0 }}>
+          <OccupancyPanel rate={stats.occupancyRate} occupied={stats.occupiedBeds} total={stats.totalBeds} />
         </Box>
       </Box>
 
       {/* Pending Account Alert */}
       {isPending && (
-        <Alert severity="warning" sx={{ mb: 3, borderRadius: 2 }}>
-          <strong>Account Pending Approval:</strong> Your verification documents are under review by our admin team. You can explore the dashboard, but property management actions (adding tenants, inviting caretakers, adding more properties) are locked until approval.
+        <Alert severity="warning" sx={{ mb: { xs: 2, md: 3 }, borderRadius: R.md }}>
+          <strong>Account pending approval.</strong> Our admin team is reviewing your documents. Until then you can finish setting up your first property; the other owner pages, adding tenants, inviting caretakers and adding more properties open up once you're approved.
         </Alert>
       )}
 
       {/* Rejected: let them fix it right here */}
       {isRejected && (
-        <Paper elevation={0} sx={{ bgcolor: "background.default", p: { xs: 2, sm: 3 }, mb: 3, border: "1px solid", borderColor: "error.main", borderRadius: 3 }}>
-          <Typography variant="h6" fontWeight="700" sx={{ mb: 0.5, fontFamily: '"Inter", sans-serif' }}>
+        <Paper elevation={0} sx={{ ...panelSx, borderColor: "error.main", p: { xs: 2, sm: 3 }, mb: { xs: 2, md: 3 } }}>
+          <Typography variant="h6" sx={{ fontWeight: "700", mb: 0.5, fontFamily: HEAD }}>
             Resubmit your documents
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
@@ -985,123 +1080,137 @@ export default function OwnerOverview() {
           {resubmitDone && <Alert severity="success" sx={{ mb: 2 }}>Submitted. You'll see your status update here once it's reviewed.</Alert>}
           <FilePickRow label="Government ID" hint="A clear photo or PDF of a valid ID." file={idFile} onChange={setIdFile} />
           <FilePickRow label="Proof of Ownership" hint="Land title, tax declaration, lease / authorization letter, or business permit." file={clearanceFile} onChange={setClearanceFile} />
-          <Button variant="contained" onClick={handleResubmit} disabled={resubmitting} sx={{ fontWeight: 700, minHeight: 46, width: { xs: "100%", sm: "auto" } }}>
+          <Button variant="contained" onClick={handleResubmit} disabled={resubmitting} sx={{ fontWeight: 700, minHeight: 46, borderRadius: R.sm, width: { xs: "100%", sm: "auto" } }}>
             {resubmitting ? <CircularProgress size={22} color="inherit" /> : "Resubmit for approval"}
           </Button>
         </Paper>
       )}
 
-      {/* Needs your attention: only shows when there is something to do */}
-      {attentionItems.length > 0 && (
-        <Paper elevation={0} sx={{ bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3, mb: 3, overflow: "hidden" }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: 2, pt: 1.75, pb: 1.25 }}>
-            <Typography variant="subtitle2" fontWeight="800">
-              Needs your attention
-            </Typography>
-            <Chip size="small" label={attentionItems.length} sx={{ height: 20, fontWeight: 800, bgcolor: "primary.main", color: "#fff" }} />
-          </Box>
-          {attentionItems.map((item) => (
-            <ButtonBase
-              key={item.text}
-              onClick={() => navigate(item.to)}
-              sx={{
-                width: "100%",
-                justifyContent: "flex-start",
-                alignItems: "center",
-                gap: 1.5,
-                px: 2,
-                py: 1.25,
-                minHeight: 60,
-                textAlign: "left",
-                borderTop: "1px solid",
-                borderColor: "divider",
-                "&:hover": { bgcolor: "action.hover" },
-                "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 },
-              }}
-            >
-              <Box
-                sx={{
-                  width: 36,
-                  height: 36,
-                  borderRadius: 2,
-                  flexShrink: 0,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: `${item.tone}.main`,
-                  bgcolor: (t) => alpha(t.palette[item.tone].main, 0.12),
-                }}
-              >
-                {item.icon}
-              </Box>
-              <Box sx={{ minWidth: 0, flex: 1 }}>
-                <Typography variant="body2" sx={{ fontWeight: 700, overflowWrap: "anywhere" }}>{item.text}</Typography>
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block", overflowWrap: "anywhere" }}>{item.caption}</Typography>
-              </Box>
-              <ChevronRightIcon fontSize="small" sx={{ color: "text.secondary", flexShrink: 0 }} />
-            </ButtonBase>
-          ))}
-        </Paper>
-      )}
-
-      {/* Top Metrics — 2x2 on phones, 4 across on desktop */}
+      {/* ================= Metrics: 2x2 on phones, 4 across on desktop ================= */}
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" },
-          gap: { xs: 1.5, md: 2.5 },
-          mb: 4,
+          gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" },
+          gap: { xs: 1.25, sm: 1.5, md: 2 },
+          mb: { xs: 2, md: 3 },
         }}
       >
-        <MetricBox
+        <MetricCard
           title="Properties"
           value={stats.totalProperties}
-          subtitle={`${stats.totalBeds} total beds`}
-          icon={<HomeWorkIcon fontSize="small" />}
-          onClick={() => navigate("/owner/properties")}
+          subtitle={`${stats.totalBeds} beds in total`}
+          icon={<HomeWorkOutlinedIcon fontSize="small" />}
+          onClick={linkTo("/owner/properties")}
         />
-        <MetricBox
-          title="Occupancy"
-          value={`${stats.occupancyRate}%`}
-          subtitle={`${stats.occupiedBeds} / ${stats.totalBeds} occupied`}
-          icon={<PeopleIcon fontSize="small" />}
-          onClick={() => navigate("/owner/tenants")}
-          progress={stats.occupancyRate}
+        <MetricCard
+          title="Tenants"
+          value={stats.activeTenants}
+          subtitle={stats.pendingTenants > 0 ? `${stats.pendingTenants} still registering` : `${stats.occupiedBeds} of ${stats.totalBeds} beds filled`}
+          subtitleColor={stats.pendingTenants > 0 ? "warning.main" : "text.secondary"}
+          icon={<PeopleOutlineIcon fontSize="small" />}
+          onClick={linkTo("/owner/tenants")}
         />
-        <MetricBox
-          title="Collected This Month"
+        <MetricCard
+          title="Collected this month"
           value={peso(collectedThisMonth)}
           subtitle={stats.expectedRent > 0 ? `of ${peso(stats.expectedRent)} expected` : "Paid rent this month"}
-          icon={<AttachMoneyIcon fontSize="small" />}
-          onClick={() => navigate("/owner/payments")}
+          icon={<PaymentsOutlinedIcon fontSize="small" />}
+          onClick={linkTo("/owner/payments")}
           progress={stats.expectedRent > 0 ? (collectedThisMonth / stats.expectedRent) * 100 : undefined}
         />
-        <MetricBox
-          title="Open Repairs"
+        <MetricCard
+          title="Open repairs"
           value={repairStats.open}
-          subtitle={`${repairStats.high} high priority`}
-          subtitleColor={repairStats.high > 0 ? "warning.main" : "text.secondary"}
+          subtitle={repairStats.high > 0 ? `${repairStats.high} high priority` : "None urgent"}
+          subtitleColor={repairStats.high > 0 ? "error.main" : "text.secondary"}
           icon={<BuildOutlinedIcon fontSize="small" />}
-          onClick={() => navigate("/owner/maintenance")}
+          onClick={linkTo("/owner/maintenance")}
         />
       </Box>
 
-      {/* Your Properties — carousel */}
-      <Box sx={{ mb: 4 }}>
-        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-          <Typography variant="h6" fontWeight="700" sx={{ fontFamily: '"Inter", sans-serif' }}>
-            Your Properties
+      {/* ================= Needs your attention: only when there is something to do ================= */}
+      {attentionItems.length > 0 && (
+        <Paper elevation={0} sx={{ ...panelSx, mb: { xs: 2, md: 3 }, overflow: "hidden" }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: { xs: 2, sm: 2.5 }, pt: 2, pb: 1.5 }}>
+            <Typography component="h2" sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: { xs: "1.05rem", sm: "1.15rem" } }}>
+              Needs your attention
+            </Typography>
+            <Box sx={{ minWidth: 22, height: 22, px: 0.75, borderRadius: 99, display: "grid", placeItems: "center", bgcolor: "primary.main", color: "#fff", fontSize: 12, fontWeight: 800 }}>
+              {attentionItems.length}
+            </Box>
+          </Box>
+          {attentionItems.map((item) => {
+            const clickable = !isPending;
+            return (
+              <Box
+                key={item.text}
+                component={clickable ? ButtonBase : "div"}
+                onClick={clickable ? () => navigate(item.to) : undefined}
+                sx={{
+                  width: "100%",
+                  display: "flex",
+                  justifyContent: "flex-start",
+                  alignItems: "center",
+                  gap: 1.5,
+                  px: { xs: 2, sm: 2.5 },
+                  py: 1.25,
+                  minHeight: 64,
+                  textAlign: "left",
+                  borderTop: "1px solid",
+                  borderColor: "divider",
+                  position: "relative",
+                  "&::before": { content: '""', position: "absolute", left: 0, top: 10, bottom: 10, width: 3, borderRadius: "0 3px 3px 0", bgcolor: `${item.tone}.main` },
+                  ...(clickable && { "&:hover": { bgcolor: "action.hover" } }),
+                  "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 },
+                }}
+              >
+                <Box
+                  sx={{
+                    width: 38,
+                    height: 38,
+                    borderRadius: R.sm,
+                    flexShrink: 0,
+                    display: "grid",
+                    placeItems: "center",
+                    color: `${item.tone}.main`,
+                    bgcolor: (t) => alpha(t.palette[item.tone].main, 0.12),
+                  }}
+                >
+                  {item.icon}
+                </Box>
+                <Box sx={{ minWidth: 0, flex: 1 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, overflowWrap: "anywhere" }}>{item.text}</Typography>
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", overflowWrap: "anywhere" }}>
+                    {clickable ? item.caption : LOCKED_TIP}
+                  </Typography>
+                </Box>
+                {clickable && <ChevronRightIcon fontSize="small" sx={{ color: "text.secondary", flexShrink: 0 }} />}
+              </Box>
+            );
+          })}
+        </Paper>
+      )}
+
+      {/* ================= Your properties: carousel ================= */}
+      <Box component="section" sx={{ mb: { xs: 2.5, md: 3.5 } }}>
+        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1.5 }}>
+          <Typography component="h2" sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: { xs: "1.05rem", sm: "1.15rem" } }}>
+            Your properties
           </Typography>
-          {properties.length > 0 && (
-            <Button size="small" onClick={() => navigate("/owner/properties")} sx={{ fontWeight: 600 }}>
+          {properties.length > 0 && !isPending && (
+            <Button size="small" endIcon={<ChevronRightIcon />} onClick={() => navigate("/owner/properties")} sx={{ fontWeight: 700 }}>
               View all
             </Button>
           )}
         </Box>
         {properties.length === 0 ? (
-          <Paper elevation={0} sx={{ bgcolor: "background.default", p: 4, textAlign: "center", border: "1px dashed", borderColor: "divider", borderRadius: 3 }}>
+          <Paper elevation={0} sx={{ ...panelSx, borderStyle: "dashed", p: { xs: 3, sm: 4 }, textAlign: "center" }}>
+            <Box sx={{ width: 52, height: 52, mx: "auto", mb: 1.5, borderRadius: R.md, bgcolor: "rgba(255,69,0,.1)", color: "primary.main", display: "grid", placeItems: "center" }}>
+              <AddHomeWorkIcon />
+            </Box>
+            <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 0.5 }}>No properties yet</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              You haven't added a property yet.
+              Add your first property to start tracking rooms, beds and tenants.
             </Typography>
             <Tooltip title={addPropertyTooltip}>
               <span>
@@ -1110,6 +1219,7 @@ export default function OwnerOverview() {
                   startIcon={addLocked ? <LockIcon /> : <AddHomeWorkIcon />}
                   onClick={handleAddPropertyClick}
                   disabled={addLocked}
+                  sx={{ fontWeight: 700, borderRadius: R.sm }}
                 >
                   Add your first property
                 </Button>
@@ -1117,146 +1227,146 @@ export default function OwnerOverview() {
             </Tooltip>
           </Paper>
         ) : (
-          <PropertyCarousel properties={properties} onOpen={(property) => navigate(`/owner/properties/${property.id}`)} />
+          <PropertyCarousel properties={properties} onOpen={isPending ? null : (property) => navigate(`/owner/properties/${property.id}`)} />
         )}
       </Box>
 
-      {/* Bottom Dashboard Panels */}
+      {/* ================= Bottom panels ================= */}
       <Box
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" },
+          gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "minmax(0, 1.15fr) minmax(0, 0.85fr)" },
           gap: { xs: 2, md: 3 },
           mb: 2,
+          alignItems: "stretch", // both panels end at the same height
         }}
       >
-        {/* Left Panel */}
-        <Paper elevation={0} sx={{ bgcolor: "background.default", p: { xs: 2, sm: 3 }, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1.5, mb: 2 }}>
-            <Typography variant="h6" fontWeight="700" sx={{ fontFamily: '"Inter", sans-serif' }}>
-              Recent Rent Collections
-            </Typography>
-            <Button size="small" variant="outlined" startIcon={<ReceiptLongIcon />} onClick={() => navigate("/owner/payments")}>
-              View Payments
-            </Button>
-          </Box>
-          <Stack spacing={1.5}>
-            {recentPayments.length === 0 ? (
-              <Box sx={{ textAlign: "center", py: 3 }}>
-                <ReceiptLongIcon sx={{ fontSize: 32, color: "text.disabled", mb: 0.5 }} />
-                <Typography variant="body2" sx={{ fontWeight: 700 }}>No payments yet</Typography>
-                <Typography variant="caption" color="text.secondary">Rent your tenants pay will show up here.</Typography>
-              </Box>
-            ) : (
-              recentPayments.map((p) => (
-                <Box
-                  key={p.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => navigate("/owner/payments")}
-                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate("/owner/payments"); } }}
-                  sx={{
-                    cursor: "pointer",
-                    "&:hover": { borderColor: "primary.main" },
-                    "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
-                    p: 1.5,
-                    borderRadius: 2,
-                    bgcolor: (theme) => alpha(theme.palette.background.paper, 0.35),
-                    border: "1px solid",
-                    borderColor: "divider",
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    gap: 1.5,
-                  }}
-                >
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography variant="subtitle2" fontWeight="700" sx={{ wordBreak: "break-word" }}>
-                      {p.tenantName || "Tenant"} — {peso(p.amount)}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" sx={{ wordBreak: "break-word" }}>
-                      {p.propertyName || "Property"} (Room {p.roomNumber || "—"})
-                      {paymentDateOf(p) ? ` · ${paymentDateOf(p).toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
-                    </Typography>
-                  </Box>
-                  <Chip
-                    label={p.status || "Paid"}
-                    color={String(p.status || "Paid").toLowerCase() === "paid" ? "success" : ["rejected", "overdue"].includes(String(p.status).toLowerCase()) ? "error" : "warning"}
-                    size="small"
-                    sx={{ flexShrink: 0 }}
-                  />
-                </Box>
-              ))
-            )}
-          </Stack>
-        </Paper>
-
-        {/* Right Panel */}
-        <Paper elevation={0} sx={{ bgcolor: "background.default", p: { xs: 2, sm: 3 }, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1.5, mb: 2 }}>
-            <Typography variant="h6" fontWeight="700" sx={{ fontFamily: '"Inter", sans-serif' }}>
-              Tenants & Caretakers
-            </Typography>
-            <Tooltip title={isPending ? "Account pending approval. Tenant registration is locked." : ""}>
-              <span>
-                <Button
-                  size="small"
-                  variant="contained"
-                  startIcon={isPending ? <LockIcon /> : <PersonAddIcon />}
-                  onClick={() => navigate("/owner/tenants/register")}
-                  disabled={isPending}
-                >
-                  Register Tenant
-                </Button>
-              </span>
-            </Tooltip>
-          </Box>
-
-          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 1.5 }}>
-            <Box sx={{ p: 2, borderRadius: 2, bgcolor: "rgba(46, 125, 50, 0.08)" }}>
-              <Typography variant="caption" color="text.secondary" fontWeight="600">Active Tenants</Typography>
-              <Typography variant="h5" fontWeight="800" color="success.main">{stats.activeTenants}</Typography>
-            </Box>
-            <Box sx={{ p: 2, borderRadius: 2, bgcolor: "rgba(237, 108, 2, 0.08)" }}>
-              <Typography variant="caption" color="text.secondary" fontWeight="600">Pending Registration</Typography>
-              <Typography variant="h5" fontWeight="800" color="warning.main">{stats.pendingTenants}</Typography>
-            </Box>
-          </Box>
-
-          <Box
-            sx={{
-              mt: 2.5,
-              pt: 2,
-              borderTop: "1px solid",
-              borderColor: "divider",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              flexWrap: "wrap",
-              gap: 1.5,
-            }}
-          >
-            <Typography variant="body2" fontWeight="600">Active Caretakers: {stats.totalCaretakers}</Typography>
-            <Stack direction="row" spacing={1}>
-              <Button size="small" startIcon={<FormatListNumberedIcon />} onClick={() => navigate("/owner/caretakers")}>
-                List
+        {/* Recent payments */}
+        <Panel
+          title="Recent rent collections"
+          action={
+            !isPending && (
+              <Button size="small" endIcon={<ChevronRightIcon />} onClick={() => navigate("/owner/payments")} sx={{ fontWeight: 700, flexShrink: 0 }}>
+                All payments
               </Button>
-              <Tooltip title={isPending ? "Account pending approval. Caretaker invitations are locked." : ""}>
-                <span>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={isPending ? <LockIcon /> : <GroupAddIcon />}
-                    onClick={() => navigate("/owner/caretakers/invite")}
-                    disabled={isPending}
+            )
+          }
+        >
+          {recentPayments.length === 0 ? (
+            <Box sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", py: 4, borderRadius: R.md, bgcolor: (t) => alpha(t.palette.background.paper, 0.35) }}>
+              <ReceiptLongIcon sx={{ fontSize: 32, color: "text.disabled", mb: 0.5 }} />
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>No payments yet</Typography>
+              <Typography variant="caption" color="text.secondary">Rent your tenants pay will show up here.</Typography>
+            </Box>
+          ) : (
+            // minmax(0, 1fr): without it the grid column grows to fit the longest
+            // single-line name and pushes the panel past the screen edge on phones
+            <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 1 }}>
+              {recentPayments.map((p) => {
+                const date = paymentDateOf(p);
+                return (
+                  <Box
+                    key={p.id}
+                    component={isPending ? "div" : ButtonBase}
+                    onClick={linkTo("/owner/payments")}
+                    sx={{
+                      width: "100%",
+                      minWidth: 0,
+                      display: "flex",
+                      alignItems: "center",
+                      gap: { xs: 1.25, sm: 1.5 },
+                      p: 1.25,
+                      textAlign: "left",
+                      borderRadius: R.md,
+                      border: "1px solid",
+                      borderColor: "divider",
+                      transition: "border-color .15s, background-color .15s",
+                      ...(!isPending && { "&:hover": { borderColor: "primary.main", bgcolor: (t) => alpha(t.palette.background.paper, 0.3) } }),
+                      "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
+                    }}
                   >
-                    Invite
-                  </Button>
+                    <Avatar sx={{ width: 38, height: 38, flexShrink: 0, bgcolor: "background.paper", color: "text.primary", fontFamily: HEAD, fontWeight: 800, fontSize: 14 }}>
+                      {initialsOf(p.tenantName)}
+                    </Avatar>
+                    <Box sx={{ minWidth: 0, flex: 1 }}>
+                      <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>
+                        {p.tenantName || "Tenant"}
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block" }} noWrap>
+                        {p.propertyName || "Property"} · Room {p.roomNumber || "—"}
+                        {date ? ` · ${date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
+                      </Typography>
+                    </Box>
+                    <Box sx={{ textAlign: "right", flexShrink: 0 }}>
+                      <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: 14.5 }}>{peso(p.amount)}</Typography>
+                      <Chip label={p.status || "Paid"} color={statusColor(p.status)} size="small" variant="outlined" sx={{ height: 20, fontSize: 11, fontWeight: 700, mt: 0.25 }} />
+                    </Box>
+                  </Box>
+                );
+              })}
+            </Box>
+          )}
+        </Panel>
+
+        {/* People + quick actions */}
+        <Panel title="Tenants & caretakers">
+          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(88px, 1fr))", gap: 1, mb: 2 }}>
+            {[
+              { label: "Active tenants", value: stats.activeTenants, color: "success.main", tint: "rgba(46, 125, 50, 0.08)" },
+              { label: "Registering", value: stats.pendingTenants, color: "warning.main", tint: "rgba(237, 108, 2, 0.08)" },
+              { label: "Caretakers", value: stats.totalCaretakers, color: "text.primary", tint: "rgba(202, 220, 246, 0.35)" },
+            ].map((s) => (
+              <Box key={s.label} sx={{ p: { xs: 1.25, sm: 1.5 }, borderRadius: R.md, bgcolor: s.tint, minWidth: 0 }}>
+                <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: { xs: "1.35rem", sm: "1.5rem" }, lineHeight: 1.1, color: s.color }}>{s.value}</Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block", lineHeight: 1.3, overflowWrap: "anywhere" }}>
+                  {s.label}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
+
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", display: "block", mb: 1 }}>
+            Quick actions
+          </Typography>
+          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 1 }}>
+            {quickActions.map((a) => (
+              <Tooltip key={a.label} title={isPending ? LOCKED_TIP : ""}>
+                <span style={{ display: "flex", minWidth: 0 }}>
+                  <ButtonBase
+                    onClick={() => navigate(a.to)}
+                    disabled={isPending}
+                    sx={{
+                      flex: 1,
+                      justifyContent: "flex-start",
+                      gap: 1.25,
+                      p: 1.25,
+                      minHeight: 52,
+                      borderRadius: R.md,
+                      border: "1px solid",
+                      borderColor: "divider",
+                      textAlign: "left",
+                      fontFamily: HEAD,
+                      fontWeight: 700,
+                      fontSize: { xs: 13, sm: 13.5 },
+                      color: "text.primary",
+                      transition: "border-color .15s, background-color .15s",
+                      "&:hover": { borderColor: "primary.main", bgcolor: "rgba(255,69,0,.04)" },
+                      "&.Mui-disabled": { color: "text.disabled" },
+                      "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
+                    }}
+                  >
+                    <Box sx={{ width: 30, height: 30, flexShrink: 0, borderRadius: "8px", display: "grid", placeItems: "center", bgcolor: isPending ? "action.hover" : "rgba(255,69,0,.1)", color: isPending ? "text.disabled" : "primary.main", "& svg": { fontSize: 18 } }}>
+                      {isPending ? <LockIcon /> : a.icon}
+                    </Box>
+                    <Box component="span" sx={{ minWidth: 0, lineHeight: 1.25 }}>
+                      {a.label}
+                    </Box>
+                  </ButtonBase>
                 </span>
               </Tooltip>
-            </Stack>
+            ))}
           </Box>
-        </Paper>
+        </Panel>
       </Box>
     </Container>
   );

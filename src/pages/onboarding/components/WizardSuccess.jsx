@@ -5,6 +5,7 @@ import CheckIcon from "@mui/icons-material/Check";
 import HomeWorkOutlinedIcon from "@mui/icons-material/HomeWorkOutlined";
 import PersonAddAltOutlinedIcon from "@mui/icons-material/PersonAddAltOutlined";
 import SupervisorAccountOutlinedIcon from "@mui/icons-material/SupervisorAccountOutlined";
+import ApartmentOutlinedIcon from "@mui/icons-material/ApartmentOutlined";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 
 // The same facade motif from the login page (window size, gap, and lit
@@ -106,6 +107,7 @@ export default function WizardSuccess() {
   const propertyName = state?.propertyName?.trim() || state?.summary?.propertyName?.trim();
   const totalRooms = state?.totalRooms ?? state?.summary?.totalRooms ?? 0;
   const totalBeds = state?.totalBeds ?? state?.summary?.totalBeds ?? 0;
+  const totalFloors = state?.totalFloors ?? Object.keys(state?.summary?.perFloorBreakdown || {}).length;
   const coverPhotoUrl = state?.coverPhotoUrl || state?.summary?.coverPhotoUrl;
   const warningMessage = state?.warning;
 
@@ -216,14 +218,13 @@ export default function WizardSuccess() {
             {propertyName ? `${propertyName} is ready` : "Your property is ready"}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 3 }}>
-            Your rooms and beds have been set up. Here's what you built.
+            Your rooms and beds are set up. Here's what you built. You can change any of it later in Properties.
           </Typography>
 
-          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 1, mb: 3 }}>
+          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1, mb: 3 }}>
+            <Stat value={totalFloors || "—"} label={totalFloors === 1 ? "Floor" : "Floors"} />
             <Stat value={totalRooms} label="Rooms" />
             <Stat value={totalBeds} label="Beds" />
-            <Stat value="0%" label="Occupied" />
-            <Stat value={0} label="Tenants" />
           </Box>
 
           <Typography
@@ -234,6 +235,13 @@ export default function WizardSuccess() {
             Next up
           </Typography>
           <Box sx={{ mb: 3 }}>
+            {propertyId && (
+              <NextUpRow
+                icon={ApartmentOutlinedIcon}
+                label="Review rooms, rates and photos"
+                onClick={() => navigate(`/owner/properties/${propertyId}`)}
+              />
+            )}
             <NextUpRow
               icon={PersonAddAltOutlinedIcon}
               label="Add your first tenant"
@@ -250,10 +258,10 @@ export default function WizardSuccess() {
           <Button
             variant="contained"
             fullWidth
-            sx={{ py: 1.5, fontWeight: 600 }}
-            onClick={() => navigate("/owner/dashboard")}
+            sx={{ py: 1.5, fontWeight: 700, borderRadius: "10px" }}
+            onClick={() => navigate("/owner", { replace: true })}
           >
-            Go to owner dashboard
+            Go to my dashboard
           </Button>
         </Box>
       </Box>

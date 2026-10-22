@@ -1,120 +1,105 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Box, Button, Typography, Alert, IconButton } from '@mui/material';
+import { Box, Typography, Alert, IconButton, Button } from '@mui/material';
+import { alpha } from '@mui/material/styles';
 import CloseIcon from '@mui/icons-material/Close';
-import HomeOutlinedIcon from '@mui/icons-material/HomeOutlined';
-import RuleOutlinedIcon from '@mui/icons-material/RuleOutlined';
-import GridViewOutlinedIcon from '@mui/icons-material/GridViewOutlined';
+import CheckIcon from '@mui/icons-material/Check';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
 
 import Step1Basics from './components/Step1Basics';
 import Step2Rules from './components/Step2Policies';
 import Step3Rooms from './components/Step3Rooms';
+import { WizardFooter } from './components/wizardUi';
+import { collection, getCountFromServer, query, where } from 'firebase/firestore';
+import { onAuthStateChanged } from 'firebase/auth';
+import { auth, db } from '../../config/firebase';
+import { loadPlatformSettings } from '../../utils/platformSettings';
 
-const STEPS = ['Basic Details', 'Rules & Amenities', 'Rooms & Layout'];
-const STEP_ICONS = [HomeOutlinedIcon, RuleOutlinedIcon, GridViewOutlinedIcon];
-
-const FACADE_ROWS = 5;
-const FACADE_COLS = 5;
-const LIT_PATTERN = [
-  1, 0, 0, 1, 0,
-  0, 0, 1, 0, 0,
-  1, 0, 0, 0, 1,
-  0, 1, 0, 0, 0,
-  0, 0, 1, 0, 1,
+const HEAD = '"Inter", sans-serif';
+// Cream page, white cards (same as the owner pages)
+const PAGE_BG = (t) => alpha(t.palette.background.paper, 0.35);
+const STEPS = [
+  { title: 'Basic details', desc: 'Name, address and contact' },
+  { title: 'Rules & amenities', desc: 'Floors, curfew and what’s included' },
+  { title: 'Rooms & beds', desc: 'Layout, capacity and rates' },
 ];
 
-function DormFacade() {
-  const windows = useMemo(() => {
-    const w = [];
-    const gap = 16;
-    const size = 30;
-    for (let row = 0; row < FACADE_ROWS; row++) {
-      for (let col = 0; col < FACADE_COLS; col++) {
-        const idx = row * FACADE_COLS + col;
-        w.push({ x: col * (size + gap), y: row * (size + gap), lit: LIT_PATTERN[idx] === 1, size });
-      }
-    }
-    return w;
-  }, []);
+// The building lights up as the owner moves through the steps
+const COLS = 5;
+const ROWS = 6;
+const LIGHT_ORDER = [12, 7, 17, 2, 21, 9, 26, 14, 0, 19, 24, 5, 28, 11, 16, 3, 22, 8, 27, 13, 1, 18, 23, 6, 29, 10, 15, 4, 20, 25];
 
-  const width = FACADE_COLS * (30 + 16) - 16;
-  const height = FACADE_ROWS * (30 + 16) - 16;
-
+function SetupBuilding({ progress }) {
+  const litCount = Math.round(progress * LIGHT_ORDER.length);
+  const lit = new Set(LIGHT_ORDER.slice(0, litCount));
   return (
-    <svg
-      viewBox={`0 0 ${width} ${height}`}
-      width="100%"
-      style={{ maxWidth: 220, display: 'block' }}
-      role="img"
-      aria-label="Illustration of a dormitory building at night, with illuminated windows"
-    >
-      {windows.map((win, i) => (
-        <rect
+    <Box aria-hidden sx={{ display: 'grid', gridTemplateColumns: `repeat(${COLS}, 1fr)`, gap: '10px', maxWidth: 200 }}>
+      {Array.from({ length: COLS * ROWS }).map((_, i) => (
+        <Box
           key={i}
-          x={win.x}
-          y={win.y}
-          width={win.size}
-          height={win.size}
-          rx={4}
-          fill={win.lit ? '#ff4500' : 'rgba(202, 220, 246, 0.16)'}
-          opacity={win.lit ? 0.92 : 1}
+          sx={{
+            aspectRatio: '1',
+            borderRadius: '5px',
+            bgcolor: lit.has(i) ? '#ff4500' : 'rgba(202,220,246,.14)',
+            transition: 'background-color .5s ease',
+            transitionDelay: lit.has(i) ? `${(LIGHT_ORDER.indexOf(i) % 10) * 40}ms` : '0ms',
+          }}
         />
       ))}
-    </svg>
+    </Box>
   );
 }
 
 function StepList({ activeStep }) {
   return (
-    <Box sx={{ display: 'flex', flexDirection: 'column' }}>
-      {STEPS.map((label, i) => {
-        const IconComponent = STEP_ICONS[i];
-        const isActive = i === activeStep;
-        const isDone = i < activeStep;
-        const isFilled = isActive || isDone;
+    <Box component="ol" sx={{ listStyle: 'none', m: 0, p: 0 }}>
+      {STEPS.map((s, i) => {
+        const done = i < activeStep;
+        const active = i === activeStep;
         return (
-          <Box key={label} sx={{ display: 'flex', alignItems: 'flex-start', gap: 1.5 }}>
-            <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <Box
-                sx={{
-                  width: 34,
-                  height: 34,
-                  borderRadius: '50%',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  flexShrink: 0,
-                  bgcolor: isFilled ? 'primary.main' : 'rgba(202, 220, 246, 0.16)',
-                  color: isFilled ? '#ffffff' : '#cadcf6',
-                  transition: 'background-color 0.2s ease, color 0.2s ease',
-                }}
-              >
-                <IconComponent sx={{ fontSize: 18 }} />
-              </Box>
-              {i < STEPS.length - 1 && (
-                <Box
-                  sx={{
-                    width: '2px',
-                    flex: 1,
-                    minHeight: 28,
-                    bgcolor: isDone ? 'primary.main' : 'rgba(202, 220, 246, 0.16)',
-                    my: 0.5,
-                    transition: 'background-color 0.2s ease',
-                  }}
-                />
-              )}
-            </Box>
-            <Typography
-              variant="body2"
+          <Box
+            component="li"
+            key={s.title}
+            aria-current={active ? 'step' : undefined}
+            sx={{
+              position: 'relative',
+              display: 'flex',
+              gap: 1.75,
+              pb: i === STEPS.length - 1 ? 0 : 3,
+              '&::before': i === STEPS.length - 1 ? undefined : {
+                content: '""',
+                position: 'absolute',
+                left: 15,
+                top: 36,
+                bottom: 4,
+                width: 2,
+                borderRadius: 2,
+                bgcolor: done ? '#ff4500' : 'rgba(202,220,246,.18)',
+              },
+            }}
+          >
+            <Box
               sx={{
-                pt: 0.9,
-                pb: i < STEPS.length - 1 ? 3.5 : 0,
-                fontWeight: isActive ? 700 : 400,
-                color: isActive ? '#ffffff' : '#cadcf6',
+                width: 32,
+                height: 32,
+                flexShrink: 0,
+                borderRadius: '10px',
+                display: 'grid',
+                placeItems: 'center',
+                fontWeight: 800,
+                fontSize: 14,
+                bgcolor: done || active ? '#ff4500' : 'transparent',
+                border: '2px solid',
+                borderColor: done || active ? '#ff4500' : 'rgba(202,220,246,.28)',
+                color: done || active ? '#fff' : '#cadcf6',
               }}
             >
-              {label}
-            </Typography>
+              {done ? <CheckIcon sx={{ fontSize: 18 }} /> : i + 1}
+            </Box>
+            <Box sx={{ pt: 0.25, minWidth: 0 }}>
+              <Typography sx={{ fontWeight: active ? 800 : 600, color: active || done ? '#fff' : '#cadcf6', fontSize: '0.98rem' }}>{s.title}</Typography>
+              <Typography sx={{ color: 'rgba(202,220,246,.75)', fontSize: '0.82rem', lineHeight: 1.45 }}>{s.desc}</Typography>
+            </Box>
           </Box>
         );
       })}
@@ -122,8 +107,32 @@ function StepList({ activeStep }) {
   );
 }
 
+const PHONE_DIGITS = /^\d{7,13}$/;
+
 export default function PropertyWizard() {
   const navigate = useNavigate();
+  // Admin → Settings caps how many properties one owner can add
+  const [limit, setLimit] = useState({ blocked: false, max: 0, count: 0 });
+  useEffect(() => {
+    let active = true;
+    const unsub = onAuthStateChanged(auth, async (user) => {
+      if (!user) return;
+      try {
+        const [settings, countSnap] = await Promise.all([
+          loadPlatformSettings({ fresh: true }),
+          getCountFromServer(query(collection(db, 'properties'), where('ownerUid', '==', user.uid))),
+        ]);
+        const count = countSnap.data().count;
+        if (active) setLimit({ blocked: count >= settings.maxPropertiesPerOwner, max: settings.maxPropertiesPerOwner, count });
+      } catch (err) {
+        console.warn('Could not check the property limit:', err?.code || err);
+      }
+    });
+    return () => {
+      active = false;
+      unsub();
+    };
+  }, []);
   const [activeStep, setActiveStep] = useState(0);
   const [errors, setErrors] = useState({});
 
@@ -147,8 +156,11 @@ export default function PropertyWizard() {
     amenities: [],
     curfewEnabled: false,
     curfewTime: '10:00 PM',
-    estimatedRooms: '',
+    rulesText: '',
+    rules: [],
     namingPattern: 'floor',
+    // Step 3 keeps its layout here when you go back, so nothing is lost
+    roomLayout: null,
   });
 
   useEffect(() => {
@@ -176,13 +188,14 @@ export default function PropertyWizard() {
     setWizardData((prev) => {
       const updated = { ...prev, ...newData };
       if (newData.totalFloors !== undefined) {
-        updated.totalFloors = Math.max(1, Number(newData.totalFloors) || 1);
+        updated.totalFloors = Math.min(50, Math.max(1, Number(newData.totalFloors) || 1));
       }
       return updated;
     });
 
     const updatedFields = Object.keys(newData);
     setErrors((prevErrors) => {
+      if (!updatedFields.some((f) => prevErrors[f])) return prevErrors;
       const newErrors = { ...prevErrors };
       updatedFields.forEach((field) => delete newErrors[field]);
       return newErrors;
@@ -190,46 +203,44 @@ export default function PropertyWizard() {
   };
 
   const validateStep1 = () => {
-    const newErrors = {};
-    if (!wizardData.propertyName?.trim()) newErrors.propertyName = 'Property Name is required.';
-    if (!wizardData.propertyType) newErrors.propertyType = 'Property Type is required.';
-    if (!wizardData.street?.trim()) newErrors.street = 'Street address is required.';
-    if (!wizardData.regionCode) newErrors.regionCode = 'Please select a region.';
-    if (!wizardData.provinceCode) newErrors.provinceCode = 'Please select a province.';
-    if (!wizardData.cityCode) newErrors.cityCode = 'Please select a city/municipality.';
-    if (!wizardData.barangay) newErrors.barangay = 'Please select a barangay.';
+    const e = {};
+    if (!wizardData.propertyName?.trim()) e.propertyName = 'Give your property a name.';
+    if (!wizardData.propertyType) e.propertyType = 'Pick a property type.';
+    if (!wizardData.regionCode) e.regionCode = 'Select a region.';
+    if (!wizardData.provinceCode) e.provinceCode = 'Select a province.';
+    if (!wizardData.cityCode) e.cityCode = 'Select a city or municipality.';
+    if (!wizardData.barangay) e.barangay = 'Select a barangay.';
+    if (!wizardData.street?.trim()) e.street = 'Add the house / building number and street.';
     const phoneDigits = String(wizardData.emergencyPhone || '').replace(/\D/g, '');
-    if (!wizardData.emergencyPhone?.trim()) newErrors.emergencyPhone = 'Emergency phone is required.';
-    else if (phoneDigits.length < 7 || phoneDigits.length > 13) newErrors.emergencyPhone = 'Enter a valid phone number.';
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    if (!phoneDigits) e.emergencyPhone = 'Add a number tenants can call in an emergency.';
+    else if (!PHONE_DIGITS.test(phoneDigits)) e.emergencyPhone = 'Enter a valid phone number (7 to 13 digits).';
+    return e;
   };
 
   const validateStep2 = () => {
-    const newErrors = {};
+    const e = {};
     const floorsNum = Number(wizardData.totalFloors);
-    if (!floorsNum || floorsNum < 1) {
-      newErrors.totalFloors = 'Total floors must be at least 1.';
-    }
-    const estimatedRooms = Number(wizardData.estimatedRooms);
-    if (!Number.isInteger(estimatedRooms) || estimatedRooms < 1) {
-      newErrors.estimatedRooms = 'Enter an estimated total of at least 1 room.';
-    }
-    if (wizardData.curfewEnabled && !wizardData.curfewTime) {
-      newErrors.curfewTime = 'Please specify a curfew time when curfew is enabled.';
-    }
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    if (!floorsNum || floorsNum < 1) e.totalFloors = 'A property has at least 1 floor.';
+    if (wizardData.curfewEnabled && !wizardData.curfewTime) e.curfewTime = 'Pick the curfew time.';
+    return e;
   };
 
   const handleNext = () => {
-    const ok = activeStep === 0 ? validateStep1() : activeStep === 1 ? validateStep2() : true;
-    if (!ok) {
-      window.scrollTo({ top: 0, behavior: 'smooth' });
+    const e = activeStep === 0 ? validateStep1() : activeStep === 1 ? validateStep2() : {};
+    setErrors(e);
+    if (Object.keys(e).length > 0) {
+      // Bring the first problem into view
+      setTimeout(() => {
+        const first = document.querySelector('[aria-invalid="true"], [data-error="true"]');
+        if (first) {
+          first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (typeof first.focus === 'function') first.focus({ preventScroll: true });
+        } else {
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+      }, 0);
       return;
     }
-
     setActiveStep((prev) => Math.min(prev + 1, STEPS.length - 1));
   };
 
@@ -242,138 +253,121 @@ export default function PropertyWizard() {
     setActiveStep((prev) => Math.max(prev - 1, 0));
   };
 
+  const errorCount = Object.keys(errors).length;
+
+  if (limit.blocked) {
+    return (
+      <Box sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', px: 2, bgcolor: PAGE_BG }}>
+        <Box sx={{ maxWidth: 440, textAlign: 'center', bgcolor: 'background.default', border: '1px solid', borderColor: 'divider', borderRadius: '22px', p: { xs: 3, sm: 4 } }}>
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 900, fontSize: '1.4rem' }}>You&apos;ve reached the property limit</Typography>
+          <Typography color="text.secondary" sx={{ mt: 1 }}>
+            Your account can have up to {limit.max} {limit.max === 1 ? 'property' : 'properties'}, and you already have {limit.count}. Contact KwartoKeeper support if you need more.
+          </Typography>
+          <Button variant="contained" disableElevation onClick={() => navigate('/owner/properties', { replace: true })} sx={{ mt: 3, fontWeight: 700, borderRadius: '10px', minHeight: 44 }}>
+            Back to my properties
+          </Button>
+        </Box>
+      </Box>
+    );
+  }
+
+
   return (
-    <Box sx={{ minHeight: '100dvh', display: 'flex', flexDirection: { xs: 'column', md: 'row' } }}>
-      {/* Sidebar */}
+    <Box sx={{ minHeight: '100dvh', display: 'flex', flexDirection: { xs: 'column', md: 'row' }, bgcolor: PAGE_BG }}>
+      {/* ───── Desktop: dark side panel ───── */}
       <Box
+        component="aside"
         sx={{
-          flex: { xs: '0 0 auto', md: '0 0 300px' },
+          display: { xs: 'none', md: 'flex' },
+          flex: '0 0 320px',
           bgcolor: '#202020',
-          color: '#ffffff',
-          display: 'flex',
+          color: '#fff',
           flexDirection: 'column',
-          gap: 4,
-          px: { xs: 3, md: 4 },
-          py: { xs: 3, md: 5 },
-          position: { md: 'sticky' },
-          top: { md: 0 },
-          height: { md: '100vh' },
-          alignSelf: { md: 'flex-start' },
-          overflowY: { md: 'auto' },
+          gap: 5,
+          px: 4,
+          py: 4.5,
+          position: 'sticky',
+          top: 0,
+          height: '100dvh',
+          overflowY: 'auto',
         }}
       >
-        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5 }}>
-          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt="KwartoKeeper" sx={{ height: 28 }} />
-          <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 700, fontSize: '1rem', flex: 1 }}>
-            Property setup
-          </Typography>
-          <IconButton aria-label="Leave property setup" onClick={leave} size="small" sx={{ color: '#cadcf6', display: { md: 'none' } }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt="KwartoKeeper" sx={{ height: 30 }} />
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: '1rem', flex: 1 }}>Property setup</Typography>
+          <IconButton aria-label="Leave property setup" onClick={leave} size="small" sx={{ color: '#cadcf6', '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,.08)' } }}>
             <CloseIcon fontSize="small" />
           </IconButton>
         </Box>
 
-        {/* Mobile Step Indicator */}
-        <Box sx={{ display: { xs: 'block', md: 'none' } }}>
-          <Typography variant="body2" sx={{ color: '#cadcf6', mb: 1 }}>
-            Step {activeStep + 1} of {STEPS.length} — {STEPS[activeStep]}
+        <StepList activeStep={activeStep} />
+
+        <Box sx={{ mt: 'auto' }}>
+          <SetupBuilding progress={(activeStep + 1) / STEPS.length} />
+          <Typography sx={{ color: 'rgba(202,220,246,.75)', fontSize: '0.82rem', mt: 2, lineHeight: 1.5 }}>
+            Nothing is saved until the last step. You can change all of this later in Properties.
           </Typography>
-          <Box sx={{ display: 'flex', gap: 0.75 }}>
-            {STEPS.map((label, i) => (
-              <Box
-                key={label}
-                sx={{
-                  flex: 1,
-                  height: 4,
-                  borderRadius: 2,
-                  bgcolor: i <= activeStep ? 'primary.main' : 'rgba(202, 220, 246, 0.2)',
-                  transition: 'background-color 0.2s ease',
-                }}
-              />
-            ))}
-          </Box>
-        </Box>
-
-        {/* Desktop Step Indicator */}
-        <Box sx={{ display: { xs: 'none', md: 'block' } }}>
-          <StepList activeStep={activeStep} />
-        </Box>
-
-        <Box sx={{ display: { xs: 'none', md: 'block' }, mt: 'auto' }}>
-          <DormFacade />
         </Box>
       </Box>
 
-      {/* Main Content Area */}
-      <Box sx={{ flex: 1, minWidth: 0, bgcolor: 'background.default', display: 'flex', justifyContent: 'center', px: { xs: 3, md: 6 }, pt: { xs: 4, md: 6 }, pb: 0 }}>
-        <Box sx={{ width: '100%', maxWidth: 760, display: 'flex', flexDirection: 'column' }}>
-          {activeStep < 2 && Object.keys(errors).length > 0 && (
-            <Alert severity="error" sx={{ mb: 3 }}>
-              Please fix the highlighted fields.
+      {/* ───── Phones: light top bar with progress ───── */}
+      <Box
+        component="header"
+        sx={{
+          display: { xs: 'block', md: 'none' },
+          position: 'sticky',
+          top: 0,
+          zIndex: 10,
+          px: 2,
+          pt: 'calc(10px + env(safe-area-inset-top, 0px))',
+          pb: 1.25,
+          bgcolor: '#faf7f3',
+          borderBottom: '1px solid',
+          borderColor: 'divider',
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
+          <Box component="img" src="/KwartoKeeper-Icon.png" alt="KwartoKeeper" sx={{ height: 26, width: 26, objectFit: 'contain' }} />
+          <Box sx={{ flex: 1, minWidth: 0 }}>
+            <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: '0.95rem', lineHeight: 1.2 }}>Property setup</Typography>
+            <Typography variant="caption" color="text.secondary" noWrap component="div">
+              Step {activeStep + 1} of {STEPS.length} · {STEPS[activeStep].title}
+            </Typography>
+          </Box>
+          <IconButton aria-label="Leave property setup" onClick={leave} size="small" sx={{ bgcolor: 'action.hover' }}>
+            <CloseIcon fontSize="small" />
+          </IconButton>
+        </Box>
+        <Box sx={{ display: 'flex', gap: 0.75, mt: 1.25 }}>
+          {STEPS.map((s, i) => (
+            <Box key={s.title} sx={{ flex: 1, height: 4, borderRadius: 2, bgcolor: i <= activeStep ? 'primary.main' : 'divider', transition: 'background-color .3s' }} />
+          ))}
+        </Box>
+      </Box>
+
+      {/* ───── Step content ───── */}
+      <Box component="main" sx={{ flex: 1, minWidth: 0, bgcolor: PAGE_BG, display: 'flex', justifyContent: 'center', px: { xs: 2, sm: 4, md: 6 }, pt: { xs: 3, md: 6 } }}>
+        <Box sx={{ width: '100%', maxWidth: 760, display: 'flex', flexDirection: 'column', minHeight: { md: '100%' } }}>
+          {activeStep < 2 && errorCount > 0 && (
+            <Alert severity="error" sx={{ mb: 2.5, borderRadius: '14px' }}>
+              {errorCount === 1 ? 'One thing needs fixing' : `${errorCount} things need fixing`} before you continue. They're marked below.
             </Alert>
           )}
-          <Box sx={{ mb: 4, flex: 1 }}>
-            {activeStep === 0 && (
-              <Step1Basics
-                wizardData={wizardData}
-                updateWizardData={updateWizardData}
-                errors={errors}
-              />
-            )}
 
-            {activeStep === 1 && (
-              <Step2Rules
-                wizardData={wizardData}
-                updateWizardData={updateWizardData}
-                errors={errors}
-              />
-            )}
-
-            {activeStep === 2 && (
-              <Step3Rooms
-                wizardData={wizardData}
-                updateWizardData={updateWizardData}
-                onBack={handleBack}
-              />
-            )}
+          <Box sx={{ flex: 1 }}>
+            {activeStep === 0 && <Step1Basics wizardData={wizardData} updateWizardData={updateWizardData} errors={errors} />}
+            {activeStep === 1 && <Step2Rules wizardData={wizardData} updateWizardData={updateWizardData} errors={errors} />}
+            {activeStep === 2 && <Step3Rooms wizardData={wizardData} updateWizardData={updateWizardData} onBack={handleBack} />}
           </Box>
 
           {activeStep < 2 && (
-            <Box
-              sx={{
-                position: 'sticky',
-                bottom: 0,
-                zIndex: 2,
-                bgcolor: 'background.default',
-                display: 'flex',
-                justifyContent: 'space-between',
-                gap: 2,
-                pt: 2,
-                pb: 'calc(16px + env(safe-area-inset-bottom, 0px))',
-                borderTop: '1px solid',
-                borderColor: 'divider',
-              }}
-            >
-              <Button
-                variant="outlined"
-                onClick={handleBack}
-                sx={{ py: 1.5, px: 3, fontWeight: 600 }}
-              >
-                Back
-              </Button>
-              <Button
-                variant="contained"
-                onClick={handleNext}
-                sx={{
-                  py: 1.5,
-                  px: 3,
-                  fontWeight: 600,
-                  bgcolor: 'primary.main',
-                  '&:hover': { bgcolor: 'primary.dark' },
-                }}
-              >
-                Next step
-              </Button>
-            </Box>
+            <WizardFooter
+              onBack={handleBack}
+              backLabel={activeStep === 0 ? 'Cancel' : 'Back'}
+              primaryLabel={`Next: ${STEPS[activeStep + 1].title}`}
+              primaryIcon={<ArrowForwardIcon />}
+              onPrimary={handleNext}
+            />
           )}
         </Box>
       </Box>

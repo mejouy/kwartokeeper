@@ -130,3 +130,7 @@ exports.processLeaseReminders = onSchedule(
 
 exports.sendPushOnNotification =
   require("./pushNotifications").sendPushOnNotification;
+
+exports.cleanUpPropertyMedia = require("./mediaCleanup").cleanUpPropertyMedia;
+
+exports.resetCaretakerPassword = require("./caretakerPassword").resetCaretakerPassword;

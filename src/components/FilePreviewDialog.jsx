@@ -5,7 +5,7 @@
 // document viewer, which works on phones (a plain <iframe> on a PDF does not).
 // The file must be publicly reachable by URL (Cloudinary uploads are).
 
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, IconButton, Typography, useMediaQuery } from "@mui/material";
 import { useTheme } from "@mui/material/styles";
 import CloseIcon from "@mui/icons-material/Close";
@@ -16,16 +16,18 @@ const isImage = (f) => /^image\//i.test(f?.type || "") || /\.(png|jpe?g|gif|webp
 export default function FilePreviewDialog({ file, onClose }) {
   const theme = useTheme();
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
-  const [loaded, setLoaded] = useState(false);
-  const [slow, setSlow] = useState(false);
+  // Remember WHICH file finished loading / is slow, so opening another file starts fresh
+  const fileKey = file?.url || "";
+  const [loadedKey, setLoadedKey] = useState("");
+  const [slowKey, setSlowKey] = useState("");
+  const loaded = Boolean(fileKey) && loadedKey === fileKey;
+  const slow = Boolean(fileKey) && slowKey === fileKey;
 
   useEffect(() => {
-    setLoaded(false);
-    setSlow(false);
-    if (!file) return undefined;
-    const t = setTimeout(() => setSlow(true), 8000);
+    if (!fileKey) return undefined;
+    const t = setTimeout(() => setSlowKey(fileKey), 8000);
     return () => clearTimeout(t);
-  }, [file]);
+  }, [fileKey]);
 
   if (!file) return null;
   const image = isImage(file);
@@ -61,9 +63,9 @@ export default function FilePreviewDialog({ file, onClose }) {
           </Box>
         )}
         {image ? (
-          <Box component="img" src={src} alt={file.name || "Document"} onLoad={() => setLoaded(true)} sx={{ display: "block", width: "100%", height: "auto", position: "relative" }} />
+          <Box component="img" src={src} alt={file.name || "Document"} onLoad={() => setLoadedKey(fileKey)} sx={{ display: "block", width: "100%", height: "auto", position: "relative" }} />
         ) : (
-          <Box component="iframe" title={file.name || "Document preview"} src={src} onLoad={() => setLoaded(true)} sx={{ border: 0, width: "100%", height: "100%", minHeight: fullScreen ? "calc(100dvh - 140px)" : 320, position: "relative" }} />
+          <Box component="iframe" title={file.name || "Document preview"} src={src} onLoad={() => setLoadedKey(fileKey)} sx={{ border: 0, width: "100%", height: "100%", minHeight: fullScreen ? "calc(100dvh - 140px)" : 320, position: "relative" }} />
         )}
       </DialogContent>
       <DialogActions sx={{ px: 2, py: 1.25 }}>

@@ -1,6 +1,6 @@
 // src/pages/admin/OwnerDetails.jsx
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Alert,
@@ -10,7 +10,6 @@ import {
   Chip,
   CircularProgress,
   Dialog,
-  GlobalStyles,
   IconButton,
   DialogActions,
   DialogContent,
@@ -36,7 +35,6 @@ import OpenInNewIcon from "@mui/icons-material/OpenInNew";
 import ContentCopyOutlinedIcon from "@mui/icons-material/ContentCopyOutlined";
 import HomeWorkOutlinedIcon from "@mui/icons-material/HomeWorkOutlined";
 import BadgeOutlinedIcon from "@mui/icons-material/BadgeOutlined";
-import MeetingRoomOutlinedIcon from "@mui/icons-material/MeetingRoomOutlined";
 import BedOutlinedIcon from "@mui/icons-material/BedOutlined";
 import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
 import MailOutlinedIcon from "@mui/icons-material/MailOutlined";
@@ -44,7 +42,6 @@ import PhoneOutlinedIcon from "@mui/icons-material/PhoneOutlined";
 import CalendarTodayOutlinedIcon from "@mui/icons-material/CalendarTodayOutlined";
 import PersonOutlinedIcon from "@mui/icons-material/PersonOutlined";
 import FolderSharedOutlinedIcon from "@mui/icons-material/FolderSharedOutlined";
-import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import ListAltOutlinedIcon from "@mui/icons-material/ListAltOutlined";
 import RadioButtonUncheckedIcon from "@mui/icons-material/RadioButtonUnchecked";
 import ChecklistOutlinedIcon from "@mui/icons-material/ChecklistOutlined";
@@ -61,6 +58,10 @@ import {
 import { db } from "../../config/firebase";
 import FilePreviewDialog from "../../components/FilePreviewDialog";
 import { ownerRefCode } from "../../utils/ownerRef";
+import { ownerAccessOf } from "../../utils/ownerAccess";
+import { occupancyOf, bedsInProperty, holdsBed } from "../../utils/occupancy";
+import { HeaderCard, Pill as AdminPill } from "./adminUi";
+import { withoutRemoved, isRemovedAccount, removedLabel } from "../../utils/accountState";
 
 const row = { display: "flex", alignItems: "center" };
 const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
@@ -324,48 +325,6 @@ function DocTile({ title, url, onPreview }) {
   );
 }
 
-// Windows light up once on load; switched off for "reduce motion" users.
-const AnimationStyles = (
-  <GlobalStyles
-    styles={{
-      "@keyframes kkPop": { from: { opacity: 0, transform: "scale(0.6)" }, to: { opacity: 1, transform: "scale(1)" } },
-      "@media (prefers-reduced-motion: reduce)": {
-        "*, *::before, *::after": { animationDuration: "0.001ms !important", transitionDuration: "0.001ms !important" },
-      },
-    }}
-  />
-);
-
-// Same dorm-facade windows as the owner dashboard: lit = occupied beds.
-const WINDOW_COUNT = 30;
-const LIGHT_ORDER = [3, 17, 8, 24, 1, 12, 27, 5, 20, 14, 9, 29, 2, 22, 11, 6, 25, 16, 0, 19, 28, 7, 13, 23, 4, 21, 10, 26, 15, 18];
-const WINDOW_RANK = LIGHT_ORDER.reduce((acc, cell, rank) => ({ ...acc, [cell]: rank }), {});
-
-function OccupancyWindows({ occupied, total }) {
-  const rate = total > 0 ? occupied / total : 0;
-  const lit = occupied > 0 ? Math.max(1, Math.round(rate * WINDOW_COUNT)) : 0;
-  return (
-    <Box>
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(10, 1fr)", gap: { xs: 0.75, md: 1 }, width: "100%", maxWidth: 320 }}>
-        {Array.from({ length: WINDOW_COUNT }).map((_, i) => (
-          <Box
-            key={i}
-            sx={{
-              aspectRatio: "1",
-              borderRadius: "4px",
-              bgcolor: WINDOW_RANK[i] < lit ? "primary.main" : "rgba(202, 220, 246, 0.14)",
-              animation: `kkPop 0.4s ease-out ${i * 18}ms both`,
-            }}
-          />
-        ))}
-      </Box>
-      <Typography variant="caption" sx={{ color: "#cadcf6", display: "block", mt: 1.25 }}>
-        {total > 0 ? `${occupied} of ${total} beds occupied` : "No beds set up yet"}
-      </Typography>
-    </Box>
-  );
-}
-
 // What an admin should be able to tick off before approving
 function ReviewChecklist({ items }) {
   return (
@@ -387,27 +346,6 @@ function ReviewChecklist({ items }) {
   );
 }
 
-function MetricBox({ title, value, subtitle, icon }) {
-  return (
-    <Paper elevation={0} sx={{ ...cardSx, p: { xs: 1.75, sm: 2.25 }, height: "100%" }}>
-      <Box sx={{ ...row, justifyContent: "space-between", alignItems: "flex-start", gap: 1, mb: 1 }}>
-        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, lineHeight: 1.3 }}>
-          {title}
-        </Typography>
-        <Box sx={{ p: 0.9, borderRadius: 2, bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main", display: "flex", flexShrink: 0 }}>
-          {icon}
-        </Box>
-      </Box>
-      <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: { xs: "1.5rem", sm: "1.9rem" }, lineHeight: 1.15 }}>
-        {value}
-      </Typography>
-      <Typography variant="caption" color="text.secondary">
-        {subtitle}
-      </Typography>
-    </Paper>
-  );
-}
-
 /* ---------------------------------------------------------------------------
    Page
 --------------------------------------------------------------------------- */
@@ -416,7 +354,9 @@ export default function OwnerDetails() {
   const targetId = ownerId || id;
   const navigate = useNavigate();
 
-  const [loading, setLoading] = useState(true);
+  // Loading until the profile for THIS id has answered (switching owners shows the skeleton again)
+  const [loadedId, setLoadedId] = useState(null);
+  const loading = Boolean(targetId) && loadedId !== targetId;
   const [owner, setOwner] = useState(null);
   const [properties, setProperties] = useState([]);
   const [tenants, setTenants] = useState([]);
@@ -429,22 +369,18 @@ export default function OwnerDetails() {
   const [previewFile, setPreviewFile] = useState(null);
 
   useEffect(() => {
-    if (!targetId) {
-      setLoading(false);
-      return undefined;
-    }
-    setLoading(true);
+    if (!targetId) return undefined;
 
     // 1. Owner profile
     const unsubOwner = onSnapshot(
       doc(db, "users", targetId),
       (docSnap) => {
         setOwner(docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null);
-        setLoading(false);
+        setLoadedId(targetId);
       },
       (error) => {
         console.error("Error fetching owner:", error);
-        setLoading(false);
+        setLoadedId(targetId);
       }
     );
 
@@ -454,14 +390,35 @@ export default function OwnerDetails() {
       (snap) => setProperties(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
       (e) => console.error("Properties:", e)
     );
+    // Tenants can be saved in "tenants", in "users", or both (same id)
+    const tenantSources = { tenants: [], users: [] };
+    const publishTenants = () => {
+      const merged = new Map();
+      [...tenantSources.tenants, ...tenantSources.users].forEach((t) => {
+        const tid = t.uid || t.id;
+        merged.set(tid, { ...(merged.get(tid) || {}), ...t });
+      });
+      setTenants(withoutRemoved([...merged.values()]));
+    };
     const unsubTenants = onSnapshot(
       query(collection(db, "tenants"), where("ownerUid", "==", targetId)),
-      (snap) => setTenants(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (snap) => {
+        tenantSources.tenants = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        publishTenants();
+      },
       (e) => console.error("Tenants:", e)
+    );
+    const unsubTenantUsers = onSnapshot(
+      query(collection(db, "users"), where("ownerUid", "==", targetId), where("role", "==", "tenant")),
+      (snap) => {
+        tenantSources.users = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        publishTenants();
+      },
+      (e) => console.warn("Tenant profiles:", e?.code || e)
     );
     const unsubCaretakers = onSnapshot(
       query(collection(db, "caretakers"), where("ownerUid", "==", targetId)),
-      (snap) => setCaretakers(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (snap) => setCaretakers(withoutRemoved(snap.docs.map((d) => ({ id: d.id, ...d.data() })))),
       (e) => console.error("Caretakers:", e)
     );
 
@@ -469,25 +426,27 @@ export default function OwnerDetails() {
       unsubOwner();
       unsubProps();
       unsubTenants();
+      unsubTenantUsers();
       unsubCaretakers();
     };
   }, [targetId]);
 
-  // Standard suspension toggle
-  const handleToggleStatus = async () => {
+  // Suspend or activate. Takes the action that was clicked: flipping the stored
+  // status turned "Activate" on a declined owner (status "rejected") into a suspension.
+  const handleToggleStatus = async (newStatus) => {
     if (!owner) return;
     setUpdatingStatus(true);
     setActionError("");
 
-    const currentStatus = owner.status || "active";
-    const newStatus = currentStatus === "suspended" ? "active" : "suspended";
-
     try {
+      const now = new Date().toISOString();
       await updateDoc(doc(db, "users", targetId), {
         status: newStatus,
+        // Marks a deliberate suspension, so it's never mistaken for a declined application
+        suspendedAt: newStatus === "suspended" ? now : deleteField(),
         // If an admin manually activates a previously rejected account, update the approval status too
-        ...(newStatus === "active" && owner.approvalStatus === "rejected" ? { approvalStatus: "approved" } : {}),
-        updatedAt: new Date().toISOString(),
+        ...(newStatus === "active" && owner.approvalStatus === "rejected" ? { approvalStatus: "approved", rejectionReason: deleteField() } : {}),
+        updatedAt: now,
       });
       setToast({ open: true, message: newStatus === "active" ? "Account activated." : "Account suspended." });
     } catch (err) {
@@ -525,7 +484,10 @@ export default function OwnerDetails() {
       const batch = writeBatch(db);
       batch.update(doc(db, "users", targetId), {
         approvalStatus: newApprovalStatus,
-        status: newApprovalStatus === "approved" ? "active" : "suspended",
+        // A declined owner keeps access to their dashboard and Account page to re-submit
+        // documents; only the admin's Suspend button locks an account
+        status: newApprovalStatus === "approved" ? "active" : "rejected",
+        suspendedAt: deleteField(),
         ...(newApprovalStatus === "rejected" ? { rejectionReason } : { rejectionReason: deleteField() }),
         reviewedAt: timestamp,
         updatedAt: timestamp,
@@ -557,25 +519,26 @@ export default function OwnerDetails() {
     setReason("");
     if (action === "approve") await handleApproval("approved");
     else if (action === "reject") await handleApproval("rejected", why);
-    else if (action === "suspend" || action === "activate") await handleToggleStatus();
+    else if (action === "suspend") await handleToggleStatus("suspended");
+    else if (action === "activate") await handleToggleStatus("active");
   };
 
   // ---- derived ----
+  // Same occupancy rule as the owner pages: beds from the rooms, occupied = current tenants
+  const occ = useMemo(() => occupancyOf(properties.map((p) => ({ id: p.id, beds: bedsInProperty(p) })), tenants), [properties, tenants]);
+  const currentTenants = useMemo(() => tenants.filter(holdsBed), [tenants]);
   const perProperty = useMemo(() => {
     const map = {};
-    tenants.forEach((t) => {
-      const pid = t.propertyId || t.assignedPropertyId;
-      if (pid) map[pid] = (map[pid] || 0) + 1;
+    properties.forEach((p) => {
+      map[p.id] = occ.byProperty.get(p.id)?.occupied || 0;
     });
     return map;
-  }, [tenants]);
+  }, [properties, occ]);
 
   const portfolio = useMemo(() => {
-    const rooms = properties.reduce((s, p) => s + (Number(p.totalRooms) || 0), 0);
-    const beds = properties.reduce((s, p) => s + (Number(p.totalBeds) || 0), 0);
-    const occupied = properties.reduce((s, p) => s + (Number(p.occupiedBeds) || 0), 0);
-    return { rooms, beds, occupied };
-  }, [properties]);
+    const rooms = properties.reduce((s, p) => s + (Array.isArray(p.rooms) ? p.rooms.length : Number(p.totalRooms) || 0), 0);
+    return { rooms, beds: occ.beds, occupied: occ.occupied };
+  }, [properties, occ]);
 
   const propName = (pid) => {
     const p = properties.find((x) => x.id === pid);
@@ -612,10 +575,11 @@ export default function OwnerDetails() {
     owner.fullName || owner.name || (owner.firstName && owner.lastName ? `${owner.firstName} ${owner.lastName}` : "Unnamed owner");
   const phone = owner.phoneNumber || owner.phone || owner.mobile || "";
 
-  const isPending = owner.status === "pending" || owner.approvalStatus === "pending";
-  const isRejected = owner.approvalStatus === "rejected";
-  const isSuspended = owner.status === "suspended" && !isRejected;
-  const viewKey = isPending ? "pending" : isRejected ? "rejected" : isSuspended ? "suspended" : "active";
+  // Same rule as the route guard, so this page shows what the owner can actually do
+  const viewKey = ownerAccessOf(owner);
+  const isPending = viewKey === "pending";
+  const isRejected = viewKey === "rejected";
+  const isSuspended = viewKey === "suspended";
   const view = STATUS_VIEW[viewKey];
 
   const docs = owner.verificationDocs;
@@ -630,28 +594,6 @@ export default function OwnerDetails() {
   ];
   const occPct = portfolio.beds > 0 ? Math.round((portfolio.occupied / portfolio.beds) * 100) : 0;
 
-  const heroTone = {
-    pending: { bg: "rgba(255, 167, 38, 0.18)", fg: "#ffcc80" },
-    rejected: { bg: "rgba(244, 67, 54, 0.18)", fg: "#ef9a9a" },
-    suspended: { bg: "rgba(244, 67, 54, 0.18)", fg: "#ef9a9a" },
-    active: { bg: "rgba(76, 175, 80, 0.18)", fg: "#a5d6a7" },
-  }[viewKey];
-
-  const heroLinkSx = {
-    ...row,
-    gap: 0.75,
-    px: 1.5,
-    py: 0.75,
-    borderRadius: 5,
-    fontSize: 13,
-    fontWeight: 600,
-    color: "#e8eef9",
-    textDecoration: "none",
-    bgcolor: "rgba(255,255,255,0.08)",
-    maxWidth: "100%",
-    "&:hover": { bgcolor: "rgba(255,255,255,0.14)" },
-  };
-
   const CONFIRM_COPY = {
     approve: { title: "Approve this owner?", body: `${ownerName} will get full access to their dashboard and receive an in-app notification.`, cta: "Approve", color: "success" },
     reject: { title: "Reject this application?", body: `${ownerName} will be notified that verification was declined. You can add a reason below.`, cta: "Reject", color: "error" },
@@ -662,7 +604,6 @@ export default function OwnerDetails() {
 
   return (
     <Box sx={{ pb: isPending ? { xs: 9, md: 0 } : 0 }}>
-      {AnimationStyles}
       <Button
         startIcon={<ArrowBackIcon />}
         onClick={() => navigate("/admin/owners")}
@@ -672,168 +613,97 @@ export default function OwnerDetails() {
         Back to owners
       </Button>
 
+      {isRemovedAccount(owner) && (
+        <Alert severity="error" sx={{ mb: 2, borderRadius: "14px" }}>
+          <strong>{removedLabel(owner)}</strong> They no longer appear in lists, counts or announcements. Their records are kept for your history.
+        </Alert>
+      )}
+
       {actionError && (
         <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }} onClose={() => setActionError("")}>
           {actionError}
         </Alert>
       )}
 
-      {/* Hero: dark brand surface, same as the owner dashboard */}
-      <Box
-        sx={{
-          position: "relative",
-          overflow: "hidden",
-          bgcolor: "#202020",
-          color: "#ffffff",
-          borderRadius: 4,
-          p: { xs: 2.5, sm: 4 },
-          mb: { xs: 2, sm: 3 },
-          display: "grid",
-          gridTemplateColumns: { xs: "1fr", md: "1.25fr 0.75fr" },
-          gap: { xs: 3, md: 4 },
-          alignItems: "center",
-        }}
-      >
-        <Box
-          sx={{
-            position: "absolute",
-            top: -140,
-            right: -100,
-            width: 380,
-            height: 380,
-            borderRadius: "50%",
-            background: "radial-gradient(circle, rgba(255, 69, 0, 0.22), transparent 70%)",
-            pointerEvents: "none",
-          }}
-        />
-
-        <Box sx={{ position: "relative", minWidth: 0 }}>
-          <Chip size="small" label={view.label} sx={{ bgcolor: heroTone.bg, color: heroTone.fg, fontWeight: 700, mb: 1.5 }} />
-
-          <Box sx={{ ...row, gap: 2 }}>
-            <Avatar sx={{ width: 60, height: 60, fontSize: "1.3rem", fontWeight: 800, bgcolor: "primary.main", color: "#fff", flexShrink: 0 }}>
+      <HeaderCard
+        eyebrow={
+          <Box sx={{ mb: 1 }}>
+            <AdminPill label={view.label} tone={view.tone} />
+          </Box>
+        }
+        title={
+          <Box component="span" sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
+            <Avatar sx={{ width: { xs: 48, sm: 60 }, height: { xs: 48, sm: 60 }, fontSize: { xs: "1.05rem", sm: "1.3rem" }, fontWeight: 800, bgcolor: "primary.main", color: "#fff", flexShrink: 0 }}>
               {initials(ownerName)}
             </Avatar>
-            <Box sx={{ minWidth: 0 }}>
-              <Typography
-                component="h1"
-                sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, color: "#fff", fontSize: { xs: "1.5rem", sm: "2rem" }, lineHeight: 1.15, overflowWrap: "anywhere" }}
-              >
-                {ownerName}
-              </Typography>
-              <Typography variant="body2" sx={{ color: "#cadcf6", mt: 0.25 }}>
-                Platform property owner
-              </Typography>
-            </Box>
+            <Box component="span" sx={{ minWidth: 0 }}>{ownerName}</Box>
           </Box>
-
-          {/* contact chips */}
-          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 2.25 }}>
+        }
+        action={
+          isPending ? (
+            <>
+              <Button variant="outlined" color="error" startIcon={<CancelOutlinedIcon />} onClick={() => setConfirm("reject")} disabled={updatingStatus} sx={{ display: { xs: "none", md: "inline-flex" }, fontWeight: 700, borderRadius: "10px", minHeight: 44 }}>
+                Reject
+              </Button>
+              <Button variant="contained" color="success" disableElevation startIcon={<CheckCircleOutlinedIcon />} onClick={() => setConfirm("approve")} disabled={updatingStatus || !docsComplete} sx={{ display: { xs: "none", md: "inline-flex" }, fontWeight: 700, borderRadius: "10px", minHeight: 44 }}>
+                Approve
+              </Button>
+            </>
+          ) : isSuspended || isRejected ? (
+            <Button variant="contained" color="success" disableElevation startIcon={<LockOpenOutlinedIcon />} onClick={() => setConfirm("activate")} disabled={updatingStatus} sx={{ fontWeight: 700, borderRadius: "10px", minHeight: 44 }}>
+              Activate account
+            </Button>
+          ) : (
+            <Button variant="outlined" color="error" startIcon={<BlockOutlinedIcon />} onClick={() => setConfirm("suspend")} disabled={updatingStatus} sx={{ fontWeight: 700, borderRadius: "10px", minHeight: 44 }}>
+              Suspend account
+            </Button>
+          )
+        }
+        tiles={[
+          { label: "Properties", value: properties.length, sub: `${portfolio.rooms} rooms`, icon: <HomeWorkOutlinedIcon /> },
+          { label: "Beds filled", value: `${portfolio.occupied}/${portfolio.beds}`, sub: portfolio.beds > 0 ? `${occPct}% occupied` : "No beds yet", icon: <BedOutlinedIcon /> },
+          { label: "Tenants", value: currentTenants.length, sub: "Current", icon: <GroupsOutlinedIcon /> },
+          { label: "Caretakers", value: caretakers.length, sub: "Staff accounts", icon: <BadgeOutlinedIcon /> },
+        ]}
+      >
+        {/* contact + what to do next */}
+        <Box sx={{ position: "relative", mb: { xs: 2, sm: 2.5 } }}>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
             {owner.email && (
-              <Box component="a" href={`mailto:${owner.email}`} sx={heroLinkSx}>
-                <MailOutlinedIcon sx={{ fontSize: 16 }} /> <span style={{ overflowWrap: "anywhere" }}>{owner.email}</span>
-              </Box>
+              <Button size="small" color="inherit" href={`mailto:${owner.email}`} startIcon={<MailOutlinedIcon />} sx={{ borderRadius: 99, px: 1.5, bgcolor: (t) => alpha(t.palette.text.primary, 0.05), fontWeight: 600, textTransform: "none", maxWidth: "100%", "& .MuiButton-startIcon": { mr: 0.75 } }}>
+                <Box component="span" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{owner.email}</Box>
+              </Button>
             )}
             {phone && (
-              <Box component="a" href={`tel:${phone}`} sx={heroLinkSx}>
-                <PhoneOutlinedIcon sx={{ fontSize: 16 }} /> {phone}
-              </Box>
+              <Button size="small" color="inherit" href={`tel:${phone}`} startIcon={<PhoneOutlinedIcon />} sx={{ borderRadius: 99, px: 1.5, bgcolor: (t) => alpha(t.palette.text.primary, 0.05), fontWeight: 600, textTransform: "none", "& .MuiButton-startIcon": { mr: 0.75 } }}>
+                {phone}
+              </Button>
             )}
-            <Box sx={{ ...heroLinkSx, cursor: "default", "&:hover": undefined }}>
+            <Box sx={{ ...row, gap: 0.75, px: 1.5, height: 30, borderRadius: 99, fontSize: 13, fontWeight: 600, color: "text.secondary", bgcolor: (t) => alpha(t.palette.text.primary, 0.05) }}>
               <CalendarTodayOutlinedIcon sx={{ fontSize: 16 }} /> Joined {formatDate(owner.createdAt)}
             </Box>
           </Box>
-
           {isRejected && owner.rejectionReason && (
-            <Typography variant="body2" sx={{ color: "#ef9a9a", mt: 1.5 }}>
-              Rejected: {owner.rejectionReason}
-            </Typography>
+            <Alert severity="error" sx={{ mt: 1.5, borderRadius: "12px" }}>
+              Declined: {owner.rejectionReason}
+            </Alert>
           )}
           {resubmitted && (
-            <Typography variant="body2" sx={{ color: "#cadcf6", mt: 1.5, fontWeight: 600 }}>
-              Resubmitted their documents on {formatDate(docs.submittedAt, true)}, after being rejected.
-            </Typography>
+            <Alert severity="info" sx={{ mt: 1.5, borderRadius: "12px" }}>
+              They re-submitted their documents on {formatDate(docs.submittedAt, true)}, after being declined.
+            </Alert>
           )}
           {isPending && (
-            <Typography variant="body2" sx={{ color: "#ffcc80", mt: 1.5 }}>
+            <Alert severity={docsComplete ? "warning" : "error"} sx={{ mt: 1.5, borderRadius: "12px" }}>
               {docsComplete
                 ? "Check the verification documents below, then approve or reject."
                 : docs
-                ? "Some documents are missing. Reject with a reason so the owner can resubmit."
+                ? "Some documents are missing. Reject with a reason so the owner can re-submit."
                 : "No verification documents uploaded yet. Reject with a reason so the owner can submit them."}
-            </Typography>
+            </Alert>
           )}
-
-          {/* actions */}
-          <Box sx={{ display: isPending ? { xs: "none", md: "flex" } : "flex", flexWrap: "wrap", gap: 1.25, mt: 2.5 }}>
-            {isPending ? (
-              <>
-                <Button
-                  variant="contained"
-                  color="success"
-                  startIcon={<CheckCircleOutlinedIcon />}
-                  onClick={() => setConfirm("approve")}
-                  disabled={updatingStatus || !docsComplete}
-                  sx={{ fontWeight: 700, borderRadius: 2.5, flex: { xs: 1, sm: "none" } }}
-                >
-                  Approve
-                </Button>
-                <Button
-                  variant="outlined"
-                  startIcon={<CancelOutlinedIcon />}
-                  onClick={() => setConfirm("reject")}
-                  disabled={updatingStatus}
-                  sx={{ fontWeight: 700, borderRadius: 2.5, flex: { xs: 1, sm: "none" }, color: "#ef9a9a", borderColor: "rgba(239,154,154,0.5)", "&:hover": { borderColor: "#ef9a9a", bgcolor: "rgba(239,154,154,0.08)" } }}
-                >
-                  Reject
-                </Button>
-              </>
-            ) : isSuspended || isRejected ? (
-              <Button
-                variant="contained"
-                color="success"
-                startIcon={<LockOpenOutlinedIcon />}
-                onClick={() => setConfirm("activate")}
-                disabled={updatingStatus}
-                sx={{ fontWeight: 700, borderRadius: 2.5, width: { xs: "100%", sm: "auto" } }}
-              >
-                Activate account
-              </Button>
-            ) : (
-              <Button
-                variant="outlined"
-                startIcon={<BlockOutlinedIcon />}
-                onClick={() => setConfirm("suspend")}
-                disabled={updatingStatus}
-                sx={{ fontWeight: 700, borderRadius: 2.5, width: { xs: "100%", sm: "auto" }, color: "#ef9a9a", borderColor: "rgba(239,154,154,0.5)", "&:hover": { borderColor: "#ef9a9a", bgcolor: "rgba(239,154,154,0.08)" } }}
-              >
-                Suspend account
-              </Button>
-            )}
-          </Box>
         </Box>
-
-        <Box sx={{ position: "relative" }}>
-          <OccupancyWindows occupied={portfolio.occupied} total={portfolio.beds} />
-        </Box>
-      </Box>
-
-      {/* Portfolio metrics */}
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(5, minmax(0, 1fr))" },
-          gap: { xs: 1.5, md: 2 },
-          mb: { xs: 2, sm: 3 },
-          "& > :last-child": { gridColumn: { xs: "span 2", md: "auto" } },
-        }}
-      >
-        <MetricBox title="Properties" value={properties.length} subtitle="Registered dorms/apts" icon={<HomeWorkOutlinedIcon fontSize="small" />} />
-        <MetricBox title="Rooms" value={portfolio.rooms} subtitle="Across all properties" icon={<MeetingRoomOutlinedIcon fontSize="small" />} />
-        <MetricBox title="Beds" value={`${portfolio.occupied}/${portfolio.beds}`} subtitle={portfolio.beds > 0 ? `${occPct}% occupied` : "No beds yet"} icon={<BedOutlinedIcon fontSize="small" />} />
-        <MetricBox title="Tenants" value={tenants.length} subtitle="On the platform" icon={<GroupsOutlinedIcon fontSize="small" />} />
-        <MetricBox title="Caretakers" value={caretakers.length} subtitle="Staff accounts" icon={<BadgeOutlinedIcon fontSize="small" />} />
-      </Box>
+      </HeaderCard>
 
       <Box
         sx={{
@@ -863,9 +733,10 @@ export default function OwnerDetails() {
             ) : (
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
                 {properties.map((prop) => {
-                  const beds = Number(prop.totalBeds) || 0;
-                  const occ = Number(prop.occupiedBeds) || 0;
-                  const pct = beds > 0 ? Math.min(100, Math.round((occ / beds) * 100)) : 0;
+                  const o = occ.byProperty.get(prop.id) || { beds: bedsInProperty(prop), occupied: 0, rate: 0 };
+                  const beds = o.beds;
+                  const filled = o.occupied;
+                  const pct = o.rate;
                   return (
                     <Box key={prop.id} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 3, overflow: "hidden", bgcolor: "background.paper" }}>
                       <Box
@@ -877,10 +748,10 @@ export default function OwnerDetails() {
                           bgcolor: (t) => alpha(t.palette.background.paper, 0.7),
                           background: prop.coverPhotoUrl
                             ? `url(${prop.coverPhotoUrl}) center / cover`
-                            : "linear-gradient(135deg, #2b2b2b 0%, #202020 60%, rgba(255,69,0,0.35) 140%)",
+                            : "linear-gradient(135deg, #f2e9dd 0%, #faf7f3 60%, rgba(255,69,0,0.18) 140%)",
                         }}
                       >
-                        {!prop.coverPhotoUrl && <HomeWorkOutlinedIcon sx={{ fontSize: 34, color: "rgba(255,255,255,0.35)" }} />}
+                        {!prop.coverPhotoUrl && <HomeWorkOutlinedIcon sx={{ fontSize: 34, color: "rgba(255,69,0,0.45)" }} />}
                         <Box sx={{ position: "absolute", top: 10, right: 10 }}>
                           <Chip size="small" label={prop.propertyType || "N/A"} sx={{ fontWeight: 700, bgcolor: "rgba(255,255,255,0.92)", color: "#202020" }} />
                         </Box>
@@ -896,7 +767,7 @@ export default function OwnerDetails() {
                         <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 1, mt: 1.5 }}>
                           {[
                             { k: "Floors", v: prop.totalFloors || 1 },
-                            { k: "Rooms", v: prop.totalRooms || 0 },
+                            { k: "Rooms", v: Array.isArray(prop.rooms) ? prop.rooms.length : prop.totalRooms || 0 },
                             { k: "Tenants", v: perProperty[prop.id] || 0 },
                           ].map((m) => (
                             <Box key={m.k} sx={{ textAlign: "center", py: 0.75, borderRadius: 2, bgcolor: (t) => alpha(t.palette.text.primary, 0.04) }}>
@@ -909,7 +780,7 @@ export default function OwnerDetails() {
                         <Box sx={{ mt: 1.75 }}>
                           <Box sx={{ ...row, justifyContent: "space-between", mb: 0.5 }}>
                             <Typography variant="caption" sx={{ fontWeight: 700 }}>
-                              {occ} / {beds} beds occupied
+                              {filled} / {beds} beds occupied
                             </Typography>
                             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
                               {beds > 0 ? `${pct}%` : "—"}
@@ -1028,7 +899,7 @@ export default function OwnerDetails() {
             position: "fixed",
             left: 0,
             right: 0,
-            bottom: "calc(64px + env(safe-area-inset-bottom, 0px))",
+            bottom: "calc(66px + env(safe-area-inset-bottom, 0px))",
             zIndex: (t) => t.zIndex.appBar - 1,
             gap: 1.25,
             px: 2,
@@ -1064,7 +935,7 @@ export default function OwnerDetails() {
       <FilePreviewDialog file={previewFile} onClose={() => setPreviewFile(null)} />
 
       {/* Confirm dialog */}
-      <Dialog open={!!confirm} onClose={() => setConfirm(null)} fullWidth maxWidth="xs" slotProps={{ paper: { sx: { borderRadius: 3 } } }}>
+      <Dialog open={!!confirm} onClose={() => setConfirm(null)} fullWidth maxWidth="xs" slotProps={{ paper: { sx: { borderRadius: "22px" } } }}>
         {copy && (
           <>
             <DialogTitle sx={{ fontWeight: 800 }}>{copy.title}</DialogTitle>

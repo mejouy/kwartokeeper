@@ -64,18 +64,34 @@ service cloud.firestore {
         get(/databases/$(database)/documents/properties/$(propertyId)).data.get('ownerUid', '') == request.auth.uid;
     }
 
+    // Rules functions can't use if-statements: one boolean expression per function
+    // Pending (the normal sign-up), or approved only while auto-approve is on
+    function isAllowedOwnerSignup(data) {
+      return (
+        data.get('approvalStatus', 'pending') == 'pending' &&
+        data.get('status', 'pending') == 'pending'
+      ) || (
+        data.get('approvalStatus', '') == 'approved' &&
+        data.get('status', '') == 'active' &&
+        exists(/databases/$(database)/documents/settings/global) &&
+        get(/databases/$(database)/documents/settings/global).data.get('autoApproveOwners', false) == true
+      );
+    }
+
     function isOwnedRecipient(userId) {
-      if (userId == null || userId == '') return false;
-      if (!exists(/databases/$(database)/documents/users/$(userId))) return false;
+      return userId != null && userId != '' &&
+        exists(/databases/$(database)/documents/users/$(userId)) &&
+        isOwnedRecipientData(get(/databases/$(database)/documents/users/$(userId)).data);
+    }
 
-      let recipient = get(/databases/$(database)/documents/users/$(userId)).data;
-      let role = recipient.get('role', '');
-      if (role != 'tenant' && role != 'caretaker') return false;
-
-      return recipient.get('ownerUid', '') == request.auth.uid ||
+    // A tenant or caretaker who belongs to the signed-in owner
+    function isOwnedRecipientData(recipient) {
+      return (recipient.get('role', '') == 'tenant' || recipient.get('role', '') == 'caretaker') && (
+        recipient.get('ownerUid', '') == request.auth.uid ||
         recipient.get('invitedBy', '') == request.auth.uid ||
         isOwnedProperty(recipient.get('propertyId', '')) ||
-        isOwnedProperty(recipient.get('assignedPropertyId', ''));
+        isOwnedProperty(recipient.get('assignedPropertyId', ''))
+      );
     }
 
     // ===============================================================
@@ -88,7 +104,10 @@ service cloud.firestore {
         isAdmin() || 
         (
           request.auth.uid == userId &&
-          request.resource.data.role != 'admin'
+          request.resource.data.role != 'admin' &&
+          // A new owner signs up waiting for review; they may only start approved
+          // when an admin has turned on auto-approve (Admin → Settings)
+          (request.resource.data.role != 'owner' || isAllowedOwnerSignup(request.resource.data))
         ) ||
         (
           isOwner() && 
@@ -98,7 +117,25 @@ service cloud.firestore {
 
       allow update: if isAdmin() || (
         request.auth.uid == userId &&
-        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'approvalStatus', 'status'])
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'suspendedAt']) &&
+        // An owner may only send themselves back for review (re-submitting documents), never approve
+        // themselves, and a suspended account can't use this to get out of the suspension
+        (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['approvalStatus']) ||
+          (
+            request.resource.data.approvalStatus == 'pending' &&
+            (resource.data.get('status', '') != 'suspended' || resource.data.get('approvalStatus', '') == 'rejected')
+          )
+        ) &&
+        // status: only a declined owner re-submitting, back to 'pending' (never after an admin suspension)
+        (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status']) ||
+          (
+            resource.data.get('approvalStatus', '') == 'rejected' &&
+            resource.data.get('suspendedAt', null) == null &&
+            request.resource.data.status == 'pending'
+          )
+        )
       ) || (
         isOwner() && 
         isDocOwner(resource.data) &&
@@ -204,7 +241,12 @@ service cloud.firestore {
         resource.data.get('userId', '') == request.auth.uid
       );
       allow create: if isAdmin() || (isOwner() && isDocOwner(request.resource.data));
-      allow update: if isAdmin() || (isOwner() && isDocOwner(resource.data));
+      allow update: if isAdmin() || (isOwner() && isDocOwner(resource.data)) || (
+        // A caretaker marks their own record once they've replaced the temporary password
+        caretakerId == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['mustChangePassword', 'passwordChangedAt']) &&
+        request.resource.data.mustChangePassword == false
+      );
       // ✅ Enforce Soft Deletion: Use status = 'Inactive' instead of hard deleting
       allow delete: if false;
     }
@@ -220,6 +262,14 @@ service cloud.firestore {
       allow create: if isAdmin() || (isOwner() && isDocOwner(request.resource.data)) || (
         caretakerHasPermission('viewFinancials') && 
         request.resource.data.get('paymentMethod', '') == 'Cash'
+      ) || (
+        // A tenant submits their own payment for the owner to verify. It always starts
+        // as Pending and can't carry a receipt number or a verification.
+        isTenant() &&
+        request.resource.data.get('tenantId', '') == request.auth.uid &&
+        request.resource.data.get('status', '') == 'Pending' &&
+        request.resource.data.get('verificationStatus', '') == 'Pending' &&
+        !request.resource.data.keys().hasAny(['receiptNo', 'receiptSeq', 'receiptIssuer', 'receiptIssuedAt', 'verifiedAt', 'verifiedBy'])
       );
       allow update: if isAdmin() || (isOwner() && isDocOwner(resource.data));
       // ✅ Financial records must never be hard deleted

@@ -1,153 +1,94 @@
 // src/pages/owner/caretakers/CaretakerList.jsx
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
   Typography,
   Paper,
-  Chip,
   Avatar,
   Button,
   Alert,
-  Divider,
   Skeleton,
   InputBase,
   IconButton,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+  Tooltip,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import PersonAddAltOutlinedIcon from "@mui/icons-material/PersonAddAltOutlined";
 import SearchIcon from "@mui/icons-material/Search";
 import CloseIcon from "@mui/icons-material/Close";
 import ApartmentOutlinedIcon from "@mui/icons-material/ApartmentOutlined";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import SupervisorAccountOutlinedIcon from "@mui/icons-material/SupervisorAccountOutlined";
-import {
-  collection,
-  query,
-  where,
-  getDocs,
-  doc,
-  getDoc,
-} from "firebase/firestore";
+import HowToRegOutlinedIcon from "@mui/icons-material/HowToRegOutlined";
+import MarkEmailUnreadOutlinedIcon from "@mui/icons-material/MarkEmailUnreadOutlined";
+import DomainDisabledOutlinedIcon from "@mui/icons-material/DomainDisabledOutlined";
+import PhoneOutlinedIcon from "@mui/icons-material/PhoneOutlined";
+import PeopleAltOutlinedIcon from "@mui/icons-material/PeopleAltOutlined";
+import NightsStayOutlinedIcon from "@mui/icons-material/NightsStayOutlined";
+import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
+import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
+import MeetingRoomOutlinedIcon from "@mui/icons-material/MeetingRoomOutlined";
+import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../../config/firebase";
 import { useAuth } from "../../../context/AuthContext";
+import { withoutRemoved } from "../../../utils/accountState";
 
+const HEAD = '"Inter", sans-serif';
+const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
 const row = { display: "flex", alignItems: "center" };
-const MAX_VISIBLE_PERMISSIONS = 2;
-const COLS = "minmax(0, 1.6fr) minmax(0, 1.2fr) minmax(0, 1.5fr) 128px";
+const panelSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: R.lg };
 
-const PERMISSION_LABELS = {
-  manageTenants: "Manage Tenants",
-  logOccupancy: "Log Occupancy",
-  handleReports: "Handle Reports",
-  viewFinancials: "View Financials",
-  modifyLayout: "Modify Layout",
-};
+// Every permission, in the order the invite form shows them
+const PERMISSIONS = [
+  { key: "manageTenants", label: "Manage tenants", icon: PeopleAltOutlinedIcon },
+  { key: "logOccupancy", label: "Log occupancy & curfew", icon: NightsStayOutlinedIcon },
+  { key: "handleReports", label: "Handle repair reports", icon: BuildOutlinedIcon },
+  { key: "viewFinancials", label: "View financials", icon: PaymentsOutlinedIcon },
+  { key: "modifyLayout", label: "Modify rooms & rates", icon: MeetingRoomOutlinedIcon },
+];
 
 const FILTERS = [
   { value: "all", label: "All" },
   { value: "active", label: "Active" },
-  { value: "pending", label: "Pending" },
+  { value: "pending", label: "Not logged in yet" },
 ];
 
+// A caretaker is "pending" until they log in and replace their temporary password
 const isPending = (c) => Boolean(c.mustChangePassword);
+const grantedCount = (c) => PERMISSIONS.filter((p) => c.permissions?.[p.key]).length;
+const initialsOf = (name) =>
+  String(name || "?").split(" ").filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
 
-const grantedLabels = (c) =>
-  Object.entries(c.permissions || {})
-    .filter(([, granted]) => granted)
-    .map(([key]) => PERMISSION_LABELS[key] || key);
-
-const groupShellSx = {
-  bgcolor: "background.default",
-  border: "1px solid",
-  borderColor: "divider",
-  borderRadius: "12px !important",
-  overflow: "hidden",
-  "&:before": { display: "none" },
-};
-
-// Soft tinted pill, same as the tenant list
 function StatusPill({ pending }) {
   const tone = pending ? "warning" : "success";
   return (
-    <Chip
-      size="small"
-      label={pending ? "Pending" : "Active"}
+    <Box
+      component="span"
       sx={{
+        ...row,
+        px: 1,
+        height: 24,
+        borderRadius: 99,
+        fontSize: 12.5,
         fontWeight: 700,
-        border: "none",
+        whiteSpace: "nowrap",
+        flexShrink: 0,
         bgcolor: (t) => alpha(t.palette[tone].main, 0.12),
         color: (t) => t.palette[tone].dark,
       }}
-    />
-  );
-}
-
-function SummaryStrip({ items }) {
-  return (
-    <Paper
-      elevation={0}
-      sx={{
-        bgcolor: "background.default",
-        border: "1px solid",
-        borderColor: "divider",
-        borderRadius: 3,
-        overflow: "hidden",
-        display: "grid",
-        gridTemplateColumns: `repeat(${items.length}, 1fr)`,
-        mb: { xs: 2, sm: 2.5 },
-      }}
     >
-      {items.map((item, i) => (
-        <Box
-          key={item.label}
-          sx={{
-            px: { xs: 1.75, sm: 2.5 },
-            py: { xs: 1.25, sm: 1.75 },
-            minWidth: 0,
-            borderLeft: i === 0 ? "none" : "1px solid",
-            borderColor: "divider",
-          }}
-        >
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }} noWrap component="div">
-            {item.label}
-          </Typography>
-          <Typography noWrap sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: { xs: "1.2rem", sm: "1.45rem" }, lineHeight: 1.25, color: item.color }}>
-            {item.value}
-          </Typography>
-        </Box>
-      ))}
-    </Paper>
-  );
-}
-
-function PermissionChips({ caretaker }) {
-  const permissions = grantedLabels(caretaker);
-  if (permissions.length === 0) {
-    return <Typography variant="body2" color="text.secondary">None granted</Typography>;
-  }
-  const visible = permissions.slice(0, MAX_VISIBLE_PERMISSIONS);
-  const extra = permissions.length - visible.length;
-  return (
-    <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.5 }}>
-      {visible.map((label) => (
-        <Chip key={label} size="small" label={label} sx={{ bgcolor: (t) => alpha(t.palette.text.primary, 0.06), fontWeight: 500 }} />
-      ))}
-      {extra > 0 && (
-        <Chip size="small" label={`+${extra}`} sx={{ bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main", fontWeight: 700 }} />
-      )}
+      {pending ? "Not logged in yet" : "Active"}
     </Box>
   );
 }
 
-function CaretakerRow({ caretaker, onOpen }) {
-  const name = caretaker.name || "Unnamed Caretaker";
-  const permissionCount = grantedLabels(caretaker).length;
+/** One caretaker: who, where, how to reach them, and what they can do. */
+function CaretakerCard({ caretaker, onOpen }) {
+  const name = caretaker.name || caretaker.fullName || "Unnamed caretaker";
+  const pending = isPending(caretaker);
+  const count = grantedCount(caretaker);
 
   return (
     <Box
@@ -156,243 +97,277 @@ function CaretakerRow({ caretaker, onOpen }) {
       onClick={onOpen}
       aria-label={`Manage ${name}`}
       sx={{
-        display: "grid",
-        gridTemplateColumns: { xs: "minmax(0, 1fr) auto", md: COLS },
-        alignItems: "center",
-        columnGap: 2,
-        rowGap: 1,
+        ...panelSx,
+        display: "flex",
+        flexDirection: "column",
+        gap: 1.5,
+        p: 2,
         width: "100%",
+        height: "100%",
         textAlign: "left",
         font: "inherit",
         color: "inherit",
-        bgcolor: "transparent",
-        border: 0,
         cursor: "pointer",
-        px: { xs: 2, sm: 3 },
-        py: { xs: 1.5, md: 1.75 },
-        transition: "background-color .15s ease",
-        "&:hover, &:focus-visible": { bgcolor: "action.hover", outline: "none" },
+        transition: "border-color .15s, box-shadow .15s, transform .15s",
+        "&:hover, &:focus-visible": { borderColor: "primary.main", boxShadow: "0 14px 30px -22px rgba(32,32,32,.5)", outline: "none" },
+        "@media (hover: hover)": { "&:hover": { transform: "translateY(-2px)" } },
         "&:hover .kk-chev, &:focus-visible .kk-chev": { color: "primary.main", transform: "translateX(2px)" },
       }}
     >
-      {/* Identity */}
-      <Box sx={{ ...row, gap: 1.5, minWidth: 0 }}>
-        <Avatar sx={{ width: 40, height: 40, fontSize: "0.95rem", fontWeight: 700, bgcolor: "rgba(255, 69, 0, 0.12)", color: "primary.main" }}>
-          {name.charAt(0).toUpperCase()}
+      {/* Who */}
+      <Box sx={{ ...row, gap: 1.5, width: "100%", minWidth: 0 }}>
+        <Avatar sx={{ width: 44, height: 44, fontFamily: HEAD, fontWeight: 800, fontSize: "0.95rem", bgcolor: pending ? "warning.main" : "primary.main", color: "#fff" }}>
+          {initialsOf(name)}
         </Avatar>
-        <Box sx={{ minWidth: 0 }}>
-          <Typography variant="subtitle2" sx={{ fontWeight: 700 }} noWrap>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1rem", lineHeight: 1.25 }} noWrap>
             {name}
           </Typography>
           <Typography variant="caption" color="text.secondary" noWrap component="div">
             {caretaker.email || "No email"}
           </Typography>
         </Box>
+        <ChevronRightIcon className="kk-chev" sx={{ color: "text.disabled", transition: "all .15s ease", flexShrink: 0 }} />
       </Box>
 
-      {/* Phones: status + chevron */}
-      <Box sx={{ display: { xs: "flex", md: "none" }, alignItems: "center", gap: 0.5 }}>
-        <StatusPill pending={isPending(caretaker)} />
-        <ChevronRightIcon className="kk-chev" sx={{ color: "text.disabled", transition: "all .15s ease" }} />
+      {/* Where + status */}
+      <Box sx={{ ...row, justifyContent: "space-between", gap: 1, width: "100%", flexWrap: "wrap" }}>
+        <Box sx={{ ...row, gap: 0.75, minWidth: 0, color: caretaker.assignedPropertyId ? "text.primary" : "warning.dark" }}>
+          <ApartmentOutlinedIcon sx={{ fontSize: 17, color: caretaker.assignedPropertyId ? "text.secondary" : "warning.main" }} />
+          <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
+            {caretaker.assignedPropertyId ? caretaker.propertyName || "Unknown property" : "No property assigned"}
+          </Typography>
+        </Box>
+        <StatusPill pending={pending} />
       </Box>
 
-      {/* Phones: phone + permissions on one quiet line */}
-      <Box sx={{ display: { xs: "flex", md: "none" }, gridColumn: "1 / -1", alignItems: "center", gap: 1, flexWrap: "wrap", pl: "52px" }}>
-        <Typography variant="body2" sx={{ fontWeight: 600 }}>{caretaker.phone || "No phone"}</Typography>
-        <Typography variant="body2" color="text.secondary">
-          · {permissionCount === 0 ? "No permissions" : `${permissionCount} ${permissionCount === 1 ? "permission" : "permissions"}`}
+      {/* Phone */}
+      <Box sx={{ ...row, gap: 0.75, color: "text.secondary" }}>
+        <PhoneOutlinedIcon sx={{ fontSize: 16 }} />
+        <Typography variant="body2" color={caretaker.phone ? "text.primary" : "text.secondary"}>
+          {caretaker.phone || "No phone number"}
         </Typography>
       </Box>
 
-      {/* Laptops: phone */}
-      <Box sx={{ display: { xs: "none", md: "block" }, minWidth: 0 }}>
-        <Typography variant="body2" color={caretaker.phone ? "text.primary" : "text.secondary"} noWrap>
-          {caretaker.phone || "—"}
-        </Typography>
-      </Box>
-
-      {/* Laptops: permissions */}
-      <Box sx={{ display: { xs: "none", md: "block" }, minWidth: 0 }}>
-        <PermissionChips caretaker={caretaker} />
-      </Box>
-
-      {/* Laptops: status + chevron */}
-      <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 0.5, justifyContent: "flex-end" }}>
-        <StatusPill pending={isPending(caretaker)} />
-        <ChevronRightIcon className="kk-chev" sx={{ color: "text.disabled", transition: "all .15s ease" }} />
+      {/* What they can do: every permission, on or off */}
+      <Box sx={{ mt: "auto", pt: 1.25, width: "100%", borderTop: "1px solid", borderColor: "divider" }}>
+        <Box sx={{ ...row, justifyContent: "space-between", mb: 0.75 }}>
+          <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary", letterSpacing: ".06em", textTransform: "uppercase" }}>
+            Can do
+          </Typography>
+          <Typography variant="caption" sx={{ fontWeight: 700, color: count ? "text.secondary" : "warning.dark" }}>
+            {count === 0 ? "No permissions yet" : `${count} of ${PERMISSIONS.length}`}
+          </Typography>
+        </Box>
+        <Box sx={{ display: "flex", gap: 0.5 }}>
+          {PERMISSIONS.map((p) => {
+            const on = Boolean(caretaker.permissions?.[p.key]);
+            const Icon = p.icon;
+            return (
+              <Tooltip key={p.key} title={`${p.label}: ${on ? "allowed" : "not allowed"}`}>
+                <Box
+                  aria-label={`${p.label}: ${on ? "allowed" : "not allowed"}`}
+                  sx={{
+                    width: 32,
+                    height: 32,
+                    borderRadius: "9px",
+                    display: "grid",
+                    placeItems: "center",
+                    bgcolor: (t) => (on ? alpha(t.palette.primary.main, 0.12) : alpha(t.palette.text.primary, 0.04)),
+                    color: on ? "primary.main" : "text.disabled",
+                    border: "1px solid",
+                    borderColor: on ? "transparent" : "divider",
+                  }}
+                >
+                  <Icon sx={{ fontSize: 17 }} />
+                </Box>
+              </Tooltip>
+            );
+          })}
+        </Box>
       </Box>
     </Box>
   );
 }
-
-const columnHeader = (
-  <Box
-    sx={{
-      display: { xs: "none", md: "grid" },
-      gridTemplateColumns: COLS,
-      columnGap: 2,
-      px: 3,
-      py: 1,
-      bgcolor: (t) => alpha(t.palette.background.paper, 0.35),
-      borderBottom: "1px solid",
-      borderColor: "divider",
-      "& > *": { fontWeight: 700, color: "text.secondary", fontSize: "0.75rem", letterSpacing: 0.3 },
-    }}
-  >
-    <Box>CARETAKER</Box>
-    <Box>PHONE</Box>
-    <Box>PERMISSIONS</Box>
-    <Box sx={{ textAlign: "right", pr: 3 }}>STATUS</Box>
-  </Box>
-);
 
 export default function CaretakerList() {
   const navigate = useNavigate();
   const { currentUser } = useAuth() || {};
 
   const [caretakers, setCaretakers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [properties, setProperties] = useState([]);
+  // Nothing to load when signed out, so start "done" in that case
+  const [loading, setLoading] = useState(() => Boolean(currentUser?.uid));
   const [error, setError] = useState(null);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState("all");
 
   useEffect(() => {
-    async function fetchCaretakers() {
-      if (!currentUser?.uid) {
-        setLoading(false);
-        return;
-      }
+    if (!currentUser?.uid) return undefined;
+    let cancelled = false;
+
+    (async () => {
       try {
-        const q = query(
-          collection(db, "users"),
-          where("role", "==", "caretaker"),
-          where("invitedBy", "==", currentUser.uid)
-        );
-        const snap = await getDocs(q);
-        const rawCaretakers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const uid = currentUser.uid;
+        // Caretaker accounts carry both ownerUid and invitedBy; read both so
+        // older records with only one of them are not missed.
+        const [byInvite, byOwner, props] = await Promise.all([
+          getDocs(query(collection(db, "users"), where("role", "==", "caretaker"), where("invitedBy", "==", uid))),
+          getDocs(query(collection(db, "users"), where("role", "==", "caretaker"), where("ownerUid", "==", uid))).catch(() => null),
+          // The owner's properties, read once (names + which have no caretaker)
+          getDocs(query(collection(db, "properties"), where("ownerUid", "==", uid))),
+        ]);
+        if (cancelled) return;
 
-        // Resolve each caretaker's assignedPropertyId into a readable name.
-        const propertyCache = new Map();
-        const withPropertyNames = await Promise.all(
-          rawCaretakers.map(async (c) => {
-            if (!c.assignedPropertyId) return { ...c, propertyName: null };
-            if (propertyCache.has(c.assignedPropertyId)) {
-              return {
-                ...c,
-                propertyName: propertyCache.get(c.assignedPropertyId),
-              };
-            }
-            try {
-              const propSnap = await getDoc(
-                doc(db, "properties", c.assignedPropertyId)
-              );
-              let name = null;
-              if (propSnap.exists()) {
-                const propData = propSnap.data();
-                name = propData.name || propData.propertyName || null;
-              }
-              propertyCache.set(c.assignedPropertyId, name);
-              return { ...c, propertyName: name };
-            } catch {
-              return { ...c, propertyName: null };
-            }
-          })
-        );
+        const propertyList = props.docs.map((d) => ({ id: d.id, ...d.data() }));
+        const nameOf = new Map(propertyList.map((p) => [p.id, p.propertyName || p.name || "Unnamed property"]));
 
-        setCaretakers(withPropertyNames);
+        const byId = new Map();
+        [...byInvite.docs, ...(byOwner?.docs || [])].forEach((d) => byId.set(d.id, { id: d.id, ...d.data() }));
+        setCaretakers(withoutRemoved([...byId.values()]).map((c) => ({ ...c, propertyName: c.assignedPropertyId ? nameOf.get(c.assignedPropertyId) || null : null })));
+        setProperties(propertyList);
+        setError(null);
       } catch (err) {
         console.error("Error loading caretakers:", err);
-        setError("Failed to load caretakers. Please refresh and try again.");
+        if (!cancelled) setError("Failed to load caretakers. Please refresh and try again.");
       } finally {
-        setLoading(false);
+        if (!cancelled) setLoading(false);
       }
-    }
-    fetchCaretakers();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, [currentUser?.uid]);
 
   const counts = useMemo(() => {
     const pending = caretakers.filter(isPending).length;
-    return { total: caretakers.length, pending, active: caretakers.length - pending };
+    return { all: caretakers.length, pending, active: caretakers.length - pending };
   }, [caretakers]);
+
+  // Active properties nobody is looking after
+  const uncovered = useMemo(() => {
+    const covered = new Set(caretakers.map((c) => c.assignedPropertyId).filter(Boolean));
+    return properties.filter(
+      (p) => !covered.has(p.id) && !["inactive", "archived", "deactivated"].includes(String(p.status || "Active").trim().toLowerCase())
+    );
+  }, [caretakers, properties]);
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return caretakers.filter((c) => {
-      if (filter === "active" && isPending(c)) return false;
-      if (filter === "pending" && !isPending(c)) return false;
-      if (!term) return true;
-      return [c.name, c.email, c.phone, c.propertyName].some((v) => String(v || "").toLowerCase().includes(term));
-    });
+    return caretakers
+      .filter((c) => {
+        if (filter === "active" && isPending(c)) return false;
+        if (filter === "pending" && !isPending(c)) return false;
+        if (!term) return true;
+        return [c.name, c.fullName, c.email, c.phone, c.propertyName].some((v) => String(v || "").toLowerCase().includes(term));
+      })
+      // by property, unassigned last, then by name
+      .sort(
+        (a, b) =>
+          Number(!a.assignedPropertyId) - Number(!b.assignedPropertyId) ||
+          String(a.propertyName || "").localeCompare(String(b.propertyName || "")) ||
+          String(a.name || "").localeCompare(String(b.name || ""))
+      );
   }, [caretakers, search, filter]);
 
   const isFiltering = Boolean(search.trim()) || filter !== "all";
-
-  // Group by assigned property
-  const groups = useMemo(() => {
-    const map = new Map();
-    visible.forEach((c) => {
-      const key = c.assignedPropertyId || "__none";
-      if (!map.has(key)) {
-        map.set(key, { key, name: c.assignedPropertyId ? c.propertyName || "Unknown property" : "No property assigned", unassigned: !c.assignedPropertyId, items: [] });
-      }
-      map.get(key).items.push(c);
-    });
-    // unassigned group last
-    return [...map.values()].sort((a, b) => Number(a.unassigned) - Number(b.unassigned) || a.name.localeCompare(b.name));
-  }, [visible]);
+  const clearFilters = () => {
+    setSearch("");
+    setFilter("all");
+  };
 
   const goInvite = () => navigate("/owner/caretakers/invite");
   const open = (c) => navigate(`/owner/caretakers/${c.id}`);
 
+  const tiles = [
+    { label: "Caretakers", icon: <SupervisorAccountOutlinedIcon />, value: counts.all },
+    { label: "Active", icon: <HowToRegOutlinedIcon />, value: counts.active, accent: counts.active > 0 ? "success.dark" : undefined },
+    { label: "Not logged in yet", icon: <MarkEmailUnreadOutlinedIcon />, value: counts.pending, accent: counts.pending > 0 ? "warning.dark" : undefined },
+    { label: "Properties without one", icon: <DomainDisabledOutlinedIcon />, value: uncovered.length, accent: uncovered.length > 0 ? "warning.dark" : undefined },
+  ];
+
   return (
     <Box sx={{ minWidth: 0 }}>
-      {/* The top bar already says "Caretakers", so the page only adds a one-line
-          description and the primary action. */}
-      <Box sx={{ ...row, justifyContent: "space-between", gap: 2, mb: { xs: 2, sm: 2.5 } }}>
-        <Typography color="text.secondary" sx={{ minWidth: 0 }}>
-          Manage access and permissions for the people helping run your properties
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<PersonAddAltOutlinedIcon />}
-          onClick={goInvite}
-          sx={{ flexShrink: 0, fontWeight: 700, borderRadius: 2.5, display: { xs: "none", sm: "inline-flex" } }}
-        >
-          Invite caretaker
-        </Button>
-      </Box>
+      {/* HEADER: same pattern as the other owner pages */}
+      <Paper elevation={0} component="section" sx={{ ...panelSx, borderRadius: R.xl, position: "relative", overflow: "hidden", p: { xs: 2, sm: 3 }, mb: { xs: 2, sm: 2.5 } }}>
+        <Box aria-hidden sx={{ position: "absolute", top: -180, right: -120, width: 380, height: 380, borderRadius: "50%", background: "rgba(255,69,0,.10)", filter: "blur(70px)", pointerEvents: "none" }} />
+        <Box sx={{ position: "relative", display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: { xs: "stretch", sm: "center" }, justifyContent: "space-between", gap: { xs: 1.5, sm: 2 }, mb: { xs: 2, sm: 2.5 } }}>
+          <Typography color="text.secondary" sx={{ minWidth: 0, fontSize: { xs: 14, sm: 15 } }}>
+            The people helping run your properties, and what each one can do
+          </Typography>
+          <Button
+            variant="contained"
+            startIcon={<PersonAddAltOutlinedIcon />}
+            onClick={goInvite}
+            sx={{ flexShrink: 0, fontWeight: 700, borderRadius: R.sm, minHeight: 44, boxShadow: "0 10px 22px -14px rgba(255,69,0,.9)" }}
+          >
+            Invite caretaker
+          </Button>
+        </Box>
+        <Box sx={{ position: "relative", display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: { xs: 1, sm: 1.5 } }}>
+          {tiles.map((t) => (
+            <Box key={t.label} sx={{ minWidth: 0, display: "flex", alignItems: "center", gap: 1.25, p: { xs: 1.25, sm: 1.75 }, borderRadius: R.md, bgcolor: (th) => alpha(th.palette.background.paper, 0.55) }}>
+              <Box sx={{ width: { xs: 32, sm: 38 }, height: { xs: 32, sm: 38 }, flexShrink: 0, borderRadius: R.sm, display: "grid", placeItems: "center", bgcolor: "#fff", color: "primary.main", "& svg": { fontSize: { xs: 18, sm: 20 } } }}>
+                {t.icon}
+              </Box>
+              <Box sx={{ minWidth: 0 }}>
+                <Typography variant="caption" color="text.secondary" noWrap sx={{ fontWeight: 600, display: "block" }}>
+                  {t.label}
+                </Typography>
+                <Typography sx={{ fontFamily: HEAD, fontWeight: 800, letterSpacing: "-0.02em", fontSize: { xs: "1.2rem", sm: "1.45rem" }, lineHeight: 1.2, color: t.accent || "text.primary" }}>
+                  {loading ? "–" : t.value}
+                </Typography>
+              </Box>
+            </Box>
+          ))}
+        </Box>
+      </Paper>
 
       {error && (
-        <Alert severity="error" sx={{ mb: 2 }}>
+        <Alert severity="error" sx={{ mb: 2, borderRadius: R.md }}>
           {error}
         </Alert>
       )}
 
-      {!loading && !error && caretakers.length > 0 && (
-        <SummaryStrip
-          items={[
-            { label: "Caretakers", value: counts.total },
-            { label: "Active", value: counts.active, color: "success.main" },
-            { label: "Pending login", value: counts.pending, color: counts.pending > 0 ? "warning.main" : undefined },
-          ]}
-        />
+      {/* Properties nobody is looking after */}
+      {!loading && !error && uncovered.length > 0 && caretakers.length > 0 && (
+        <Alert
+          severity="warning"
+          icon={<DomainDisabledOutlinedIcon />}
+          sx={{ mb: { xs: 2, sm: 2.5 }, borderRadius: R.md, alignItems: "center" }}
+          action={
+            <Button color="inherit" size="small" onClick={goInvite} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>
+              Invite
+            </Button>
+          }
+        >
+          {uncovered.length === 1
+            ? `${uncovered[0].propertyName || uncovered[0].name || "One property"} has no caretaker yet.`
+            : `${uncovered.length} properties have no caretaker yet: ${uncovered.map((p) => p.propertyName || p.name || "Unnamed").join(", ")}.`}
+        </Alert>
       )}
 
-      {/* Search + status filter */}
+      {/* TOOLBAR: search + status */}
       {!loading && !error && caretakers.length > 0 && (
-        <Box sx={{ mb: { xs: 2, sm: 2.5 } }}>
+        <Box sx={{ display: "flex", flexDirection: { xs: "column", md: "row" }, alignItems: { md: "center" }, gap: 1.25, mb: { xs: 2, sm: 2.5 } }}>
           <Paper
             elevation={0}
-            sx={{ ...row, gap: 1, px: 1.5, bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3, height: 46 }}
+            sx={{
+              ...panelSx,
+              ...row,
+              gap: 1,
+              px: 1.5,
+              height: 44,
+              borderRadius: R.sm,
+              flex: { md: "0 1 340px" },
+              minWidth: 0,
+              transition: "border-color .15s, box-shadow .15s",
+              "&:focus-within": { borderColor: "primary.main", boxShadow: "0 0 0 3px rgba(255,69,0,.12)" },
+            }}
           >
             <SearchIcon sx={{ color: "text.secondary" }} />
-            <InputBase
-              fullWidth
-              placeholder="Search name, email or property"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              inputProps={{ "aria-label": "Search caretakers" }}
-            />
+            <InputBase fullWidth placeholder="Search name, email, phone or property" value={search} onChange={(e) => setSearch(e.target.value)} inputProps={{ "aria-label": "Search caretakers" }} />
             {search && (
               <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
                 <CloseIcon fontSize="small" />
@@ -400,135 +375,94 @@ export default function CaretakerList() {
             )}
           </Paper>
 
-          <Box
-            sx={{
-              display: "flex",
-              gap: 1,
-              mt: 1.5,
-              overflowX: "auto",
-              mx: { xs: -2, sm: 0 },
-              px: { xs: 2, sm: 0 },
-              scrollbarWidth: "none",
-              "&::-webkit-scrollbar": { display: "none" },
-            }}
-          >
-            {FILTERS.map((f) => (
-              <Chip
-                key={f.value}
-                label={f.label}
-                clickable
-                onClick={() => setFilter(f.value)}
-                color={filter === f.value ? "primary" : "default"}
-                variant={filter === f.value ? "filled" : "outlined"}
-                sx={{ fontWeight: 700, flexShrink: 0, height: 34, borderRadius: 17 }}
-              />
-            ))}
+          <Box role="group" aria-label="Filter by status" sx={{ display: "flex", gap: 0.5, p: 0.5, ...panelSx, borderRadius: R.md, overflowX: "auto", scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
+            {FILTERS.map((f) => {
+              const on = filter === f.value;
+              return (
+                <Box
+                  key={f.value}
+                  component="button"
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => setFilter(f.value)}
+                  sx={{
+                    ...row,
+                    gap: 0.6,
+                    px: 1.4,
+                    height: 34,
+                    border: 0,
+                    borderRadius: R.sm,
+                    cursor: "pointer",
+                    flex: { xs: 1, md: "none" },
+                    justifyContent: "center",
+                    fontFamily: HEAD,
+                    fontWeight: 700,
+                    fontSize: 13.5,
+                    whiteSpace: "nowrap",
+                    color: on ? "primary.main" : "text.secondary",
+                    bgcolor: on ? "rgba(255,69,0,.1)" : "transparent",
+                    "&:hover": { color: on ? "primary.main" : "text.primary" },
+                    "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 1 },
+                  }}
+                >
+                  {f.label}
+                  <Box component="span" sx={{ fontSize: 12, opacity: 0.7 }}>{counts[f.value]}</Box>
+                </Box>
+              );
+            })}
           </Box>
         </Box>
       )}
 
       {/* CONTENT */}
       {loading ? (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {[0, 1].map((i) => (
-            <Paper key={i} elevation={0} sx={{ ...groupShellSx, p: 2 }}>
-              <Skeleton width="40%" height={28} />
-              <Skeleton variant="rounded" height={56} sx={{ mt: 1.5 }} />
-              <Skeleton variant="rounded" height={56} sx={{ mt: 1 }} />
-            </Paper>
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(3, minmax(0, 1fr))" }, gap: 2 }}>
+          {[0, 1, 2].map((i) => (
+            <Skeleton key={i} variant="rounded" height={220} sx={{ borderRadius: R.lg }} />
           ))}
         </Box>
       ) : error ? null : caretakers.length === 0 ? (
-        <Paper elevation={0} sx={{ ...groupShellSx, borderStyle: "dashed", py: 7, px: 3, textAlign: "center" }}>
-          <Box sx={{ width: 64, height: 64, borderRadius: "50%", mx: "auto", mb: 2, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
+        <Paper elevation={0} sx={{ ...panelSx, borderStyle: "dashed", py: 7, px: 3, textAlign: "center" }}>
+          <Box sx={{ width: 64, height: 64, borderRadius: R.md, mx: "auto", mb: 2, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
             <SupervisorAccountOutlinedIcon sx={{ fontSize: 32, color: "primary.main" }} />
           </Box>
-          <Typography sx={{ fontWeight: 700, mb: 0.5 }}>No caretakers yet</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-            Invite someone to help manage a property. You choose what they can see and do.
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 0.5 }}>No caretakers yet</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5, maxWidth: 420, mx: "auto" }}>
+            Invite someone to help run a property: curfew checks, repairs, cash payments. You choose exactly what they can see and do.
           </Typography>
-          <Button variant="contained" startIcon={<PersonAddAltOutlinedIcon />} onClick={goInvite} sx={{ fontWeight: 700, borderRadius: 2.5 }}>
+          <Button variant="contained" startIcon={<PersonAddAltOutlinedIcon />} onClick={goInvite} sx={{ fontWeight: 700, borderRadius: R.sm }}>
             Invite caretaker
           </Button>
         </Paper>
       ) : visible.length === 0 ? (
-        <Paper elevation={0} sx={{ ...groupShellSx, py: 5, textAlign: "center" }}>
+        <Paper elevation={0} sx={{ ...panelSx, py: 5, px: 2, textAlign: "center" }}>
           <Typography sx={{ fontWeight: 700 }}>No caretakers match</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
             Try a different search or filter.
           </Typography>
-          <Button size="small" onClick={() => { setSearch(""); setFilter("all"); }} sx={{ mt: 1 }}>
+          <Button size="small" onClick={clearFilters} sx={{ mt: 1, fontWeight: 700 }}>
             Clear filters
           </Button>
         </Paper>
       ) : (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {groups.map((group, index) => (
-            <Accordion
-              key={`${group.key}-${isFiltering}`}
-              defaultExpanded={index === 0 || isFiltering}
-              disableGutters
-              elevation={0}
-              sx={groupShellSx}
-            >
-              <AccordionSummary
-                expandIcon={<ExpandMoreIcon />}
-                sx={{ "& .MuiAccordionSummary-content": { alignItems: "center", my: 1.5, minWidth: 0 } }}
-              >
-                <Box sx={{ ...row, gap: 1.5, minWidth: 0, flex: 1 }}>
-                  <Box
-                    sx={{
-                      width: 36, height: 36, borderRadius: 2, flexShrink: 0, ...row, justifyContent: "center",
-                      bgcolor: (t) => group.unassigned ? alpha(t.palette.warning.main, 0.14) : "rgba(255, 69, 0, 0.10)",
-                    }}
-                  >
-                    <ApartmentOutlinedIcon color={group.unassigned ? undefined : "primary"} sx={group.unassigned ? { color: "warning.dark" } : undefined} fontSize="small" />
-                  </Box>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.25 }} noWrap>
-                      {group.name}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" noWrap component="div">
-                      {group.items.length} {group.items.length === 1 ? "caretaker" : "caretakers"}
-                    </Typography>
-                  </Box>
-                </Box>
-              </AccordionSummary>
-
-              <AccordionDetails sx={{ p: 0, borderTop: "1px solid", borderColor: "divider" }}>
-                {columnHeader}
-                {group.items.map((c, i) => (
-                  <React.Fragment key={c.id}>
-                    {i > 0 && <Divider />}
-                    <CaretakerRow caretaker={c} onOpen={() => open(c)} />
-                  </React.Fragment>
-                ))}
-              </AccordionDetails>
-            </Accordion>
-          ))}
-        </Box>
+        <>
+          {isFiltering && (
+            <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 1.25 }}>
+              <Typography variant="body2" color="text.secondary">
+                Showing {visible.length} of {caretakers.length} caretakers
+              </Typography>
+              <Button size="small" onClick={clearFilters} sx={{ fontWeight: 700 }}>
+                Clear filters
+              </Button>
+            </Box>
+          )}
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(3, minmax(0, 1fr))" }, gap: 2 }}>
+            {visible.map((c) => (
+              <CaretakerCard key={c.id} caretaker={c} onOpen={() => open(c)} />
+            ))}
+          </Box>
+        </>
       )}
-
-      {/* Phone: floating invite button so the primary action stays reachable */}
-      <Button
-        variant="contained"
-        onClick={goInvite}
-        startIcon={<PersonAddAltOutlinedIcon />}
-        sx={{
-          display: { xs: "inline-flex", sm: "none" },
-          position: "fixed",
-          right: 16,
-          bottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
-          zIndex: (t) => t.zIndex.appBar - 1,
-          borderRadius: 6,
-          px: 2.5,
-          py: 1.2,
-          fontWeight: 700,
-          boxShadow: 6,
-        }}
-      >
-        Invite
-      </Button>
     </Box>
   );
 }

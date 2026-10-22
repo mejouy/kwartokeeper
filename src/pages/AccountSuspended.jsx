@@ -1,4 +1,3 @@
-import React from "react";
 import { Box, Typography, Button, Paper, Container } from "@mui/material";
 import BlockIcon from "@mui/icons-material/Block";
 import { signOut } from "firebase/auth";
@@ -31,7 +30,7 @@ export default function AccountSuspended() {
           }}
         >
           <BlockIcon sx={{ fontSize: 60, color: "error.main", mb: 2 }} />
-          <Typography variant="h5" fontWeight="bold" gutterBottom>
+          <Typography variant="h5" sx={{ fontWeight: "bold" }} gutterBottom>
             Account Suspended
           </Typography>
           <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>

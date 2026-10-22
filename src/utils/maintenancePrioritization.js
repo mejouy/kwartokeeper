@@ -147,5 +147,9 @@ export function rankMaintenanceRequests(reports, now = new Date()) {
       if (!a._createdDate || !b._createdDate) return 0;
       return a._createdDate - b._createdDate;
     })
-    .map(({ _createdDate, ...rest }) => rest); // strip internal helper field
+    .map((t) => {
+      const rest = { ...t };
+      delete rest._createdDate; // strip internal helper field
+      return rest;
+    });
 }

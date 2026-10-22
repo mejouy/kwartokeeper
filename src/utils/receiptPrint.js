@@ -28,6 +28,7 @@ export function buildReceiptHtml(r) {
     .row{display:flex;justify-content:space-between;gap:20px;padding:12px 0;border-bottom:1px solid #eee}
     .label{color:#666}.amount{font-size:24px;font-weight:bold;text-align:center;margin:24px 0}
     .footer{text-align:center;color:#666;font-size:12px;margin-top:28px}
+    .part{text-align:center;font-size:12px;font-weight:bold;letter-spacing:.04em;color:#8a4b00;margin:-14px 0 18px}
     @media print{body{padding:0}.receipt{border:0}}
   </style></head><body><div class="receipt">
   <h1>${esc(issuer.name || "KwartoKeeper")}</h1>
@@ -37,10 +38,11 @@ export function buildReceiptHtml(r) {
   <div class="row"><span class="label">Received from</span><span>${esc(r.tenant)}</span></div>
   <div class="row"><span class="label">Property</span><span>${esc(r.property)}</span></div>
   <div class="row"><span class="label">Room</span><span>${esc(r.room)}</span></div>
-  <div class="row"><span class="label">In payment of</span><span>Rent for ${esc(r.period)}</span></div>
+  <div class="row"><span class="label">In payment of</span><span>${r.partial ? "Partial rent" : "Rent"} for ${esc(r.period)}</span></div>
   <div class="row"><span class="label">Date received</span><span>${esc(r.dateText)}</span></div>
   <div class="row"><span class="label">Payment method</span><span>${esc(r.method)}</span></div>
   <div class="amount">${esc(r.amountText)}</div>
+  ${r.partial ? `<div class="part">PARTIAL PAYMENT</div>` : ""}
   ${r.remarks ? `<div class="row"><span class="label">Remarks</span><span>${esc(r.remarks)}</span></div>` : ""}
   <div class="footer">Thank you. Keep this receipt for your records.</div>
   </div></body></html>`;

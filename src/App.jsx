@@ -17,6 +17,7 @@ import NotFound from "./pages/NotFound";
 // --- Auth & Onboarding ---
 import LandingWelcome from "./pages/LandingWelcome";
 import Login from "./pages/auth/Login";
+import SetPassword from "./pages/auth/SetPassword";
 import OwnerRegister from "./pages/auth/OwnerRegister";
 import OwnerWelcome from "./pages/onboarding/OwnerWelcome";
 import PropertyWizard from "./pages/onboarding/PropertyWizard";
@@ -102,6 +103,15 @@ function App() {
         />
         <Route path="/signup" element={<OwnerRegister />} />
         <Route path="/suspended" element={<AccountSuspended />} />
+        {/* First sign-in with a temporary password: any role, but must be signed in */}
+        <Route
+          path="/set-password"
+          element={
+            <ProtectedRoute>
+              <SetPassword />
+            </ProtectedRoute>
+          }
+        />
 
         {/* --- External Registration Alias --- */}
         <Route path="/register-sub-user" element={<RegisterTenant />} />

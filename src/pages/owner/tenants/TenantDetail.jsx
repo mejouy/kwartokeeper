@@ -1,13 +1,11 @@
 // src/pages/owner/tenants/TenantDetail.jsx
 
-import React, { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Box,
   Container,
   Typography,
-  Grid,
-  Stack,
   Chip,
   Button,
   Avatar,
@@ -22,7 +20,6 @@ import {
   Alert,
   Snackbar,
   Dialog,
-  DialogTitle,
   DialogContent,
   DialogActions,
   TextField,
@@ -31,6 +28,9 @@ import {
   InputAdornment,
   LinearProgress,
   useMediaQuery,
+  Skeleton,
+  ToggleButton,
+  ToggleButtonGroup,
 } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
@@ -44,15 +44,16 @@ import BadgeOutlinedIcon from "@mui/icons-material/BadgeOutlined";
 import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";
 import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
-import EmailOutlinedIcon from "@mui/icons-material/EmailOutlined";
-import PhoneOutlinedIcon from "@mui/icons-material/PhoneOutlined";
 import NightsStayOutlinedIcon from "@mui/icons-material/NightsStayOutlined";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
+import StickyNote2OutlinedIcon from "@mui/icons-material/StickyNote2Outlined";
+import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined";
 
 import {
   doc,
   getDoc,
   getDocs,
-  updateDoc,
   collection,
   query,
   where,
@@ -64,7 +65,10 @@ import { normalizePayment } from "../../../utils/normalizePayment";
 import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
 import { addMonthsClamped } from "../../../utils/addMonthsClamped";
 import { reconcilePropertyOccupancy } from "../../../utils/reconcilePropertyOccupancy";
+import { isRoomUnderMaintenance, MAINTENANCE_ROOM_MESSAGE } from "../../../utils/roomStatus";
 import { useAuth } from "../../../context/AuthContext";
+import { normalizeStatus, rentStatusOf, paymentPeriodOf, dueDayOf, STATUS_TONE } from "../../../utils/tenantRent";
+import { isRemovedAccount, removedLabel } from "../../../utils/accountState";
 
 // ---------------------------------------------------------------------------
 // Constants — lease codes deliberately match what RegisterTenant stores in
@@ -87,12 +91,6 @@ const ID_TYPE_LABELS = {
   other: "Other valid ID",
 };
 
-const STATUS_CHIP_STYLES = {
-  Active: { bg: "rgba(46, 125, 50, 0.12)", color: "success.dark" },
-  "Pending Onboarding": { bg: "rgba(237, 108, 2, 0.14)", color: "warning.dark" },
-  Inactive: { bg: "rgba(0, 0, 0, 0.07)", color: "text.secondary" },
-};
-
 // Lease status colors, tuned for the dark lease card
 const LEASE_TONES = {
   active: { bg: "rgba(76, 175, 80, 0.18)", color: "#81c784" },
@@ -103,12 +101,22 @@ const LEASE_TONES = {
 
 const HEADING_FONT = '"Inter", sans-serif';
 
+// Payment status colours (same as the Payments page)
+const PAYMENT_TONE = { paid: "success", pending: "info", partial: "warning", overdue: "error", rejected: "error", cancelled: "default" };
+
+// 1 -> "1st", 22 -> "22nd", 13 -> "13th"
+const ordinal = (n) => {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return `${n}${s[(v - 20) % 10] || s[v] || s[0]}`;
+};
+
 // White card on the cream page, matching the other owner pages
 const panelSx = {
   bgcolor: "background.default",
   border: "1px solid",
   borderColor: "divider",
-  borderRadius: 3,
+  borderRadius: "18px",
   minWidth: 0,
 };
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
@@ -199,8 +207,8 @@ function getLeaseInfo(tenant) {
   }
 
   let tone = "neutral";
-  let statusLabel = "";
-  let headline = "";
+  let statusLabel;
+  let headline;
 
   if (!start && !end) {
     statusLabel = "Not set";
@@ -282,64 +290,50 @@ function DetailRow({ label, children }) {
   );
 }
 
-function OverviewItem({ icon: Icon, label, value, sub, valueColor = "text.primary" }) {
+// One block of the edit form: icon, title and a short explanation on the
+// left, the fields on the right (stacked on phones), thin lines between blocks.
+function FormSection({ icon: Icon, title, description, children, first }) {
   return (
     <Box
       sx={{
-        display: "flex",
-        alignItems: "flex-start",
-        gap: 1.75,
-        py: { xs: 2, md: 0 },
-        px: { md: 3 },
-        minWidth: 0,
-        "&:first-of-type": { pl: { md: 0 }, pt: { xs: 0 } },
-        "&:last-of-type": { pr: { md: 0 }, pb: { xs: 0 } },
-        "&:not(:first-of-type)": {
-          borderTop: { xs: "1px solid", md: "none" },
-          borderLeft: { xs: "none", md: "1px solid" },
-          borderColor: "divider",
-        },
+        display: "grid",
+        gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "220px minmax(0, 1fr)" },
+        gap: { xs: 1.75, md: 3 },
+        py: { xs: 2.5, md: 3 },
+        borderTop: first ? "none" : "1px solid",
+        borderColor: "divider",
       }}
     >
-      <Box
-        sx={{
-          width: 40,
-          height: 40,
-          borderRadius: "50%",
-          bgcolor: "rgba(255, 69, 0, 0.1)",
-          color: "primary.main",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          flexShrink: 0,
-        }}
-      >
-        <Icon sx={{ fontSize: 20 }} />
+      <Box sx={{ display: "flex", alignItems: "flex-start", gap: 1.25, minWidth: 0 }}>
+        <Box sx={{ width: 34, height: 34, flexShrink: 0, borderRadius: "10px", display: "grid", placeItems: "center", bgcolor: "rgba(255,69,0,.1)", color: "primary.main" }}>
+          <Icon sx={{ fontSize: 19 }} />
+        </Box>
+        <Box sx={{ minWidth: 0 }}>
+          <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 800, fontSize: "0.98rem", lineHeight: 1.3 }}>{title}</Typography>
+          {description && (
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, lineHeight: 1.5 }}>
+              {description}
+            </Typography>
+          )}
+        </Box>
       </Box>
-      <Box sx={{ minWidth: 0 }}>
-        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-          {label}
-        </Typography>
-        <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 700, color: valueColor, lineHeight: 1.3, wordBreak: "break-word" }}>
-          {value}
-        </Typography>
-        {sub && (
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, wordBreak: "break-word" }}>
-            {sub}
-          </Typography>
-        )}
-      </Box>
+      <Box sx={{ minWidth: 0 }}>{children}</Box>
     </Box>
   );
 }
 
-function FormSectionTitle({ children }) {
-  return (
-    <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 700, fontSize: "0.95rem", mb: 2 }} color="text.primary">
-      {children}
-    </Typography>
-  );
-}
+const formStack = { display: "flex", flexDirection: "column", gap: 2 };
+const formPair = { display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2 };
+
+// Segmented control look for the status buttons
+const segmentedSx = {
+  p: 0.5,
+  gap: 0.5,
+  borderRadius: "12px",
+  bgcolor: (t) => alpha(t.palette.background.paper, 0.6),
+  "& .MuiToggleButton-root": { textTransform: "none", fontWeight: 700, py: 0.85, border: "none", borderRadius: "9px !important", color: "text.secondary", lineHeight: 1.25 },
+  "& .MuiToggleButton-root.Mui-selected": { bgcolor: "#fff", color: "primary.main", boxShadow: "0 2px 8px rgba(0,0,0,.08)", "&:hover": { bgcolor: "#fff" } },
+};
 
 
 // ---------------------------------------------------------------------------
@@ -485,6 +479,8 @@ export default function TenantDetail() {
   const [payments, setPayments] = useState([]);
   const [curfewNights, setCurfewNights] = useState([]);
   const [showAllNights, setShowAllNights] = useState(false);
+  // "Today" for this month's rent status, fixed when the page opens
+  const [today] = useState(() => new Date());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -495,7 +491,7 @@ export default function TenantDetail() {
   const [formErrors, setFormErrors] = useState({});
   const [snackbar, setSnackbar] = useState(false);
   const [ownerProperties, setOwnerProperties] = useState([]);
-  const [propertyTenants, setPropertyTenants] = useState([]);
+  const [propertyTenants, setPropertyTenants] = useState({ propertyId: "", list: [] });
   const [occupancyLoading, setOccupancyLoading] = useState(false);
   const [formData, setFormData] = useState({
     fullName: "",
@@ -520,31 +516,31 @@ export default function TenantDetail() {
   // LOAD TENANT & PROPERTY DETAILS
   // =========================================================
   useEffect(() => {
-    if (!tenantId) {
-      setError("No tenant ID provided in URL.");
-      setLoading(false);
-      return;
-    }
-    // On a hard refresh Firebase restores the session asynchronously — wait
-    // for it, otherwise the owner's properties silently fail to load.
-    if (authLoading) return;
+    // No id in the URL is handled when rendering. On a hard refresh Firebase
+    // restores the session asynchronously — wait for it, otherwise the
+    // owner's properties silently fail to load.
+    if (!tenantId || authLoading) return;
 
     const fetchTenantData = async () => {
       try {
-        const tenantSnap = await getDoc(doc(db, "tenants", tenantId));
+        // A tenant can have a `tenants` record, a `users` account, or both
+        // (the Tenants list shows all of them), so read both.
+        const [tenantSnap, userSnap] = await Promise.all([
+          getDoc(doc(db, "tenants", tenantId)),
+          getDoc(doc(db, "users", tenantId)).catch(() => null),
+        ]);
+        const userData = userSnap?.exists() ? userSnap.data() : null;
 
-        if (!tenantSnap.exists()) {
-          setError("Tenant not found in database.");
+        if (!tenantSnap.exists() && !(userData && userData.role === "tenant")) {
+          setError("We couldn't find this tenant. They may have been removed.");
           setLoading(false);
           return;
         }
 
-        const userSnap = await getDoc(doc(db, "users", tenantId));
-        const userData = userSnap.exists() ? userSnap.data() : {};
         const tenantData = {
-          ...userData,
-          id: tenantSnap.id,
-          ...tenantSnap.data(),
+          ...(userData || {}),
+          id: tenantId,
+          ...(tenantSnap.exists() ? tenantSnap.data() : {}),
         };
         setTenant(tenantData);
 
@@ -640,27 +636,27 @@ export default function TenantDetail() {
   // so the room/bed pickers can't double-book a bed.
   // =========================================================
   useEffect(() => {
-    if (!openEdit || !formData.propertyId) {
-      setPropertyTenants([]);
-      return;
-    }
+    if (!openEdit || !formData.propertyId) return undefined;
 
     let cancelled = false;
-    setOccupancyLoading(true);
+    const propertyId = formData.propertyId;
 
     (async () => {
+      setOccupancyLoading(true);
       try {
-        const snap = await getDocs(
-          query(collection(db, "tenants"), where("propertyId", "==", formData.propertyId))
-        );
+        const snap = await getDocs(query(collection(db, "tenants"), where("propertyId", "==", propertyId)));
         if (!cancelled) {
-          setPropertyTenants(
-            snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((t) => t.id !== tenantId)
-          );
+          setPropertyTenants({
+            propertyId,
+            // Former tenants don't hold a bed
+            list: snap.docs
+              .map((d) => ({ id: d.id, ...d.data() }))
+              .filter((t) => t.id !== tenantId && normalizeStatus(t.status) !== "Inactive"),
+          });
         }
       } catch (err) {
         console.warn("Could not load property occupancy:", err);
-        if (!cancelled) setPropertyTenants([]);
+        if (!cancelled) setPropertyTenants({ propertyId, list: [] });
       } finally {
         if (!cancelled) setOccupancyLoading(false);
       }
@@ -681,9 +677,15 @@ export default function TenantDetail() {
     [payments]
   );
 
+  // Only counts while the dialog is open on the property they were loaded for
+  const activePropertyTenants = useMemo(
+    () => (openEdit && propertyTenants.propertyId === formData.propertyId ? propertyTenants.list : []),
+    [openEdit, propertyTenants, formData.propertyId]
+  );
+
   const roomOccupancy = useMemo(() => {
     const map = new Map();
-    propertyTenants.forEach((t) => {
+    activePropertyTenants.forEach((t) => {
       const room = String(t.roomId || "");
       if (!room) return;
       if (!map.has(room)) map.set(room, { count: 0, beds: new Set() });
@@ -692,7 +694,7 @@ export default function TenantDetail() {
       if (t.bedId) entry.beds.add(String(t.bedId));
     });
     return map;
-  }, [propertyTenants]);
+  }, [activePropertyTenants]);
 
   // Derived values for the edit dialog's property → room → bed selects
   const selectedFormProperty = ownerProperties.find((p) => p.id === formData.propertyId);
@@ -704,6 +706,14 @@ export default function TenantDetail() {
       r.roomNumber === formData.roomId
   );
   const roomCapacity = Number(selectedFormRoom?.capacity || 0);
+  // The room this tenant already lives in. They can stay in it even while it
+  // is under maintenance; nobody can be moved INTO a room under maintenance.
+  const isTenantsCurrentRoom = (propertyId, roomName) =>
+    Boolean(tenant) &&
+    String(propertyId) === String(tenant.propertyId || "") &&
+    String(roomName) === String(tenant.roomId || tenant.roomNumber || tenant.room || "");
+  const blockedForMaintenance = (room, propertyId = formData.propertyId) =>
+    isRoomUnderMaintenance(room) && !isTenantsCurrentRoom(propertyId, room?.roomName || room?.roomNumber || room?.id);
   const takenBeds = roomOccupancy.get(String(formData.roomId))?.beds || new Set();
   const availableBeds =
     roomCapacity > 0
@@ -755,7 +765,8 @@ export default function TenantDetail() {
       fullName: tenant.fullName || tenant.name || "",
       email: tenant.email || "",
       phone: tenant.phone || tenant.contactNumber || "",
-      status: tenant.status || "Active",
+      // the dropdown only knows these three spellings
+      status: { Active: "Active", Pending: "Pending Onboarding", Inactive: "Inactive" }[normalizeStatus(tenant.status)],
       propertyId: tenant.propertyId || property?.id || "",
       roomId: tenant.roomId || "",
       bedId: tenant.bedId || "",
@@ -838,6 +849,9 @@ export default function TenantDetail() {
     });
   };
 
+  // For button-style inputs (status, duration): same path as typing in a field
+  const setField = (name, value) => handleChange({ target: { name, value } });
+
   const validateForm = () => {
     const e = {};
     if (!formData.fullName.trim()) e.fullName = "Full name is required.";
@@ -847,6 +861,7 @@ export default function TenantDetail() {
     if (!formData.phone.trim()) e.phone = "Phone number is required.";
     if (!formData.propertyId) e.propertyId = "Select a property.";
     if (!formData.roomId) e.roomId = "Select a room.";
+    else if (selectedFormRoom && blockedForMaintenance(selectedFormRoom)) e.roomId = MAINTENANCE_ROOM_MESSAGE;
     if (formData.roomId && availableBeds.length > 0 && !formData.bedId) e.bedId = "Select a bed.";
     const rent = Number(formData.monthlyRent);
     if (formData.monthlyRent === "" || Number.isNaN(rent) || rent <= 0) {
@@ -918,7 +933,8 @@ export default function TenantDetail() {
       };
 
       await Promise.all([
-        updateDoc(tenantRef, updatedPayload),
+        // merge: also creates the record for tenants who only had a user account
+        setDoc(tenantRef, updatedPayload, { merge: true }),
         setDoc(doc(db, "users", tenantId), updatedPayload, { merge: true }),
       ]);
 
@@ -947,25 +963,30 @@ export default function TenantDetail() {
   // =========================================================
   // LOADING / ERROR STATES
   // =========================================================
-  if (loading) {
+  if (!tenantId || error || (!loading && !tenant)) {
     return (
-      <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", py: 12, flexDirection: "column", gap: 2 }}>
-        <CircularProgress />
-        <Typography variant="body2" color="text.secondary">
-          Loading tenant profile…
+      <Box sx={{ maxWidth: 520, mx: "auto", mt: { xs: 4, md: 8 }, textAlign: "center", px: 2 }}>
+        <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 800, fontSize: "1.2rem", mb: 0.5 }}>Can't open this tenant</Typography>
+        <Typography color="text.secondary" sx={{ mb: 3 }}>
+          {!tenantId ? "This link is missing the tenant." : error || "Tenant details are unavailable."}
         </Typography>
+        <Button variant="contained" startIcon={<ArrowBackIcon />} onClick={() => navigate("/owner/tenants")} sx={{ fontWeight: 700, borderRadius: "10px" }}>
+          Back to tenants
+        </Button>
       </Box>
     );
   }
 
-  if (error || !tenant) {
+  if (loading) {
     return (
-      <Container maxWidth="lg" sx={{ py: 4 }}>
-        <Alert severity="error" sx={{ mb: 2 }}>{error || "Tenant details unavailable."}</Alert>
-        <Button variant="outlined" startIcon={<ArrowBackIcon />} onClick={() => navigate("/owner/tenants")}>
-          Back to tenants
-        </Button>
-      </Container>
+      <Box sx={{ maxWidth: 1200, mx: "auto" }}>
+        <Skeleton width={90} height={32} sx={{ mb: 1 }} />
+        <Skeleton variant="rounded" height={150} sx={{ borderRadius: "22px", mb: 2.5 }} />
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "repeat(2, 1fr)" }, gap: 2.5 }}>
+          <Skeleton variant="rounded" height={200} sx={{ borderRadius: "18px" }} />
+          <Skeleton variant="rounded" height={200} sx={{ borderRadius: "18px" }} />
+        </Box>
+      </Box>
     );
   }
 
@@ -973,9 +994,10 @@ export default function TenantDetail() {
   // DERIVED DISPLAY VALUES
   // =========================================================
   const displayName = tenant.fullName || tenant.name || "Unnamed tenant";
+  const initials = displayName.split(" ").filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
   const phone = tenant.phone || tenant.contactNumber;
   const emergencyPhone = tenant.emergencyContact?.phone || tenant.emergencyPhone;
-  const statusStyle = STATUS_CHIP_STYLES[tenant.status || "Active"] || STATUS_CHIP_STYLES.Inactive;
+  const status = normalizeStatus(tenant.status);
 
   const assignedRoom = property?.rooms?.find(
     (room) =>
@@ -985,217 +1007,243 @@ export default function TenantDetail() {
   );
   const monthlyRentValue =
     tenant.monthlyRent ?? tenant.rentAmount ?? tenant.roomMonthlyRate ?? tenant.monthlyRate ?? tenant.rent ?? assignedRoom?.monthlyRatePerBed ?? 0;
-  const roomSub =
-    [tenant.bedId, assignedRoom?.floor ? `Floor ${assignedRoom.floor}` : null].filter(Boolean).join(" · ") ||
-    "No bed assigned";
+  const bedText = tenant.bedId ? (String(tenant.bedId).startsWith("Bed") ? tenant.bedId : `Bed ${tenant.bedId}`) : null;
+  const roomSub = [bedText, assignedRoom?.floor ? `Floor ${assignedRoom.floor}` : null].filter(Boolean).join(" · ") || "No bed assigned";
+  const propertyAddress = property ? formatPropertyAddress(property) : "";
 
   const lease = getLeaseInfo(tenant);
   const leaseTone = LEASE_TONES[lease.tone];
-  const totalPaid = payments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+
+  const statusOfPayment = (p) => String(p.status || "").toLowerCase();
+  const paidPayments = sortedPayments.filter((p) => statusOfPayment(p) === "paid");
+  const totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
+  const underReview = sortedPayments.filter((p) => statusOfPayment(p) === "pending").length;
+  const rent = rentStatusOf({ ...tenant, monthlyRent: monthlyRentValue }, payments, today);
+  const tenantSince = formatDate(tenant.leaseStartDate || tenant.leaseStart || tenant.createdAt);
+
+  const toneSx = (tone) => ({
+    bgcolor: (t) => (tone === "default" || tone === "none" ? alpha(t.palette.text.primary, 0.07) : alpha(t.palette[tone].main, 0.12)),
+    color: (t) => (tone === "default" || tone === "none" ? t.palette.text.secondary : t.palette[tone].dark),
+  });
+  const pillSx = (tone) => ({ display: "inline-flex", alignItems: "center", px: 1, height: 24, borderRadius: 99, fontSize: 12.5, fontWeight: 700, whiteSpace: "nowrap", ...toneSx(tone) });
+
+  const tiles = [
+    {
+      icon: HomeWorkOutlinedIcon,
+      label: "Property",
+      value: property?.propertyName || property?.name || tenant.propertyName || "Not assigned",
+      sub: propertyAddress && propertyAddress !== "No address specified" ? propertyAddress : null,
+      onClick: property?.id ? () => navigate(`/owner/properties/${property.id}`) : null,
+    },
+    { icon: MeetingRoomOutlinedIcon, label: "Room & bed", value: tenant.roomId ? `Room ${tenant.roomId}` : "No room", sub: roomSub, warn: !tenant.roomId && status !== "Inactive" },
+    { icon: PaymentsOutlinedIcon, label: "Monthly rent", value: formatAmount(monthlyRentValue), sub: `Due every ${ordinal(dueDayOf(tenant))} of the month` },
+    { icon: ReceiptLongOutlinedIcon, label: `Rent for ${today.toLocaleDateString("en-US", { month: "long" })}`, pill: rent },
+  ];
+
+  const tileBox = (t) => {
+    const Icon = t.icon;
+    const inner = (
+      <>
+        <Box sx={{ width: 38, height: 38, flexShrink: 0, borderRadius: "10px", display: "grid", placeItems: "center", bgcolor: "#fff", color: t.warn ? "warning.main" : "primary.main" }}>
+          <Icon sx={{ fontSize: 20 }} />
+        </Box>
+        <Box sx={{ minWidth: 0, flex: 1 }}>
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ fontWeight: 600, display: "block" }}>
+            {t.label}
+          </Typography>
+          {t.pill ? (
+            t.pill.tone === "none" ? (
+              <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 800 }}>—</Typography>
+            ) : (
+              <Box component="span" sx={{ ...pillSx(t.pill.tone), mt: 0.5, height: 26, fontSize: 13 }}>{t.pill.label}</Box>
+            )
+          ) : (
+            <Typography noWrap sx={{ fontFamily: HEADING_FONT, fontWeight: 800, fontSize: "1.05rem", lineHeight: 1.3, color: t.warn ? "warning.dark" : "text.primary" }}>
+              {t.value}
+            </Typography>
+          )}
+          {t.sub && (
+            <Typography variant="caption" color="text.secondary" noWrap component="div">
+              {t.sub}
+            </Typography>
+          )}
+        </Box>
+        {t.onClick && <ChevronRightIcon sx={{ color: "text.disabled", alignSelf: "center" }} />}
+      </>
+    );
+    const sx = {
+      minWidth: 0,
+      display: "flex",
+      alignItems: "flex-start",
+      gap: 1.25,
+      p: 1.75,
+      borderRadius: "14px",
+      textAlign: "left",
+      bgcolor: (th) => alpha(th.palette.background.paper, 0.55),
+      border: 0,
+      font: "inherit",
+      color: "inherit",
+    };
+    return t.onClick ? (
+      <Box key={t.label} component="button" type="button" onClick={t.onClick} sx={{ ...sx, cursor: "pointer", "&:hover": { bgcolor: (th) => alpha(th.palette.background.paper, 0.85) } }}>
+        {inner}
+      </Box>
+    ) : (
+      <Box key={t.label} sx={sx}>
+        {inner}
+      </Box>
+    );
+  };
 
   return (
     <Container maxWidth="lg" disableGutters sx={{ py: 0 }}>
       <Button
         startIcon={<ArrowBackIcon />}
         onClick={() => navigate("/owner/tenants")}
-        sx={{ mb: 1.5, ml: -1, color: "text.secondary", fontWeight: 600 }}
+        sx={{ mb: 1.25, ml: -1, color: "text.secondary", fontWeight: 600 }}
       >
         Tenants
       </Button>
 
-      {/* ───── Header ───── */}
-      <Box
-        sx={{
-          display: "flex",
-          flexDirection: { xs: "column", sm: "row" },
-          alignItems: { xs: "stretch", sm: "center" },
-          justifyContent: "space-between",
-          gap: { xs: 2, sm: 3 },
-          mb: 3,
-        }}
-      >
-        <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 2, sm: 2.5 }, minWidth: 0 }}>
-          <Avatar
-            alt={displayName}
-            sx={{
-              width: { xs: 60, sm: 76 },
-              height: { xs: 60, sm: 76 },
-              bgcolor: "rgba(255, 69, 0, 0.12)",
-              color: "primary.main",
-              fontFamily: HEADING_FONT,
-              fontWeight: 800,
-              fontSize: { xs: "1.5rem", sm: "1.9rem" },
-              flexShrink: 0,
-            }}
-          >
-            {displayName.charAt(0).toUpperCase()}
-          </Avatar>
+      {isRemovedAccount(tenant) && (
+        <Alert severity="error" sx={{ mb: 2, borderRadius: "14px" }}>
+          <strong>{removedLabel(tenant)}</strong> They no longer appear in lists, counts or announcements. Their records are kept for your history.
+        </Alert>
+      )}
 
-          <Box sx={{ minWidth: 0 }}>
-            <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", columnGap: 1.5, rowGap: 0.5 }}>
-              <Typography
-                component="h1"
-                sx={{ fontFamily: HEADING_FONT, fontWeight: 900, fontSize: { xs: "1.5rem", sm: "2rem" }, wordBreak: "break-word", lineHeight: 1.2 }}
-                color="text.primary"
-              >
-                {displayName}
-              </Typography>
-              <Chip
-                label={tenant.status || "Active"}
-                size="small"
-                sx={{ bgcolor: statusStyle.bg, color: statusStyle.color, fontWeight: 600, border: "none" }}
-              />
-            </Box>
-            <Box sx={{ display: "flex", flexWrap: "wrap", columnGap: 2.5, rowGap: 0.5, mt: 0.75 }}>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, minWidth: 0 }}>
-                <EmailOutlinedIcon sx={{ fontSize: 17, color: "text.secondary" }} />
-                {tenant.email ? (
-                  <Link href={`mailto:${tenant.email}`} underline="hover" color="text.secondary" variant="body2" sx={{ wordBreak: "break-all" }}>
-                    {tenant.email}
-                  </Link>
-                ) : (
-                  <Typography variant="body2" color="text.secondary">No email provided</Typography>
-                )}
-              </Box>
-              <Box sx={{ display: "flex", alignItems: "center", gap: 0.75 }}>
-                <PhoneOutlinedIcon sx={{ fontSize: 17, color: "text.secondary" }} />
-                {phone ? (
-                  <Link href={`tel:${phone}`} underline="hover" color="text.secondary" variant="body2">
-                    {phone}
-                  </Link>
-                ) : (
-                  <Typography variant="body2" color="text.secondary">No phone number</Typography>
-                )}
-              </Box>
-            </Box>
-          </Box>
-        </Box>
+      {/* ───── Header: who, status, how to reach them, and the key facts ───── */}
+      <Box component="section" sx={{ ...panelSx, borderRadius: "22px", position: "relative", overflow: "hidden", p: { xs: 2, sm: 3 }, mb: 2.5 }}>
+        <Box aria-hidden sx={{ position: "absolute", top: -180, right: -120, width: 380, height: 380, borderRadius: "50%", background: "rgba(255,69,0,.10)", filter: "blur(70px)", pointerEvents: "none" }} />
 
-        <Button
-          variant="contained"
-          disableElevation
-          startIcon={<EditOutlinedIcon />}
-          onClick={handleOpenEdit}
-          sx={{ py: 1.1, px: 3, fontWeight: 600, flexShrink: 0, alignSelf: { xs: "stretch", sm: "center" } }}
-        >
-          Edit details
-        </Button>
-      </Box>
-
-      {/* ───── Overview ───── */}
-      <Box
-        sx={{
-          ...panelSx,
-          p: { xs: 2.5, md: 3 },
-          mb: 2.5,
-          display: "grid",
-          gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(3, minmax(0, 1fr))" },
-        }}
-      >
-        <OverviewItem
-          icon={HomeWorkOutlinedIcon}
-          label="Property"
-          value={property?.name || property?.propertyName || tenant.propertyName || "Unassigned"}
-          sub={formatPropertyAddress(property)}
-        />
-        <OverviewItem
-          icon={MeetingRoomOutlinedIcon}
-          label="Room & bed"
-          value={tenant.roomId ? `Room ${tenant.roomId}` : "Unassigned"}
-          sub={roomSub}
-        />
-        <OverviewItem
-          icon={PaymentsOutlinedIcon}
-          label="Monthly rent"
-          value={formatAmount(monthlyRentValue)}
-          valueColor="primary.main"
-          sub="Per bed, per month"
-        />
-      </Box>
-
-      {/* ───── Lease + payment summary ───── */}
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "minmax(0, 1.6fr) minmax(0, 1fr)" },
-          gap: 2.5,
-          mb: 2.5,
-        }}
-      >
-        <Box sx={{ bgcolor: "#202020", color: "#ffffff", borderRadius: 3, p: { xs: 2.5, sm: 3.5 }, minWidth: 0 }}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
-              <CalendarMonthOutlinedIcon sx={{ color: "primary.main" }} />
-              <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 700 }}>Lease</Typography>
-            </Box>
-            <Chip
-              label={lease.statusLabel}
-              size="small"
-              sx={{ bgcolor: leaseTone.bg, color: leaseTone.color, fontWeight: 600, border: "none" }}
-            />
-          </Box>
-
-          <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 900, fontSize: { xs: "1.6rem", sm: "2rem" }, lineHeight: 1.2 }}>
-            {lease.headline}
-          </Typography>
-          <Typography variant="body2" sx={{ color: "#cadcf6", mt: 0.5 }}>
-            {lease.subline}
-          </Typography>
-
-          {lease.progress != null && (
-            <LinearProgress
-              variant="determinate"
-              value={lease.progress}
+        <Box sx={{ position: "relative", display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: { sm: "center" }, justifyContent: "space-between", gap: 2, mb: 2.5 }}>
+          <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 1.75, sm: 2.25 }, minWidth: 0 }}>
+            <Avatar
+              alt=""
               sx={{
-                height: 6,
-                borderRadius: 3,
-                my: 2.5,
-                bgcolor: "rgba(202, 220, 246, 0.18)",
-                "& .MuiLinearProgress-bar": { bgcolor: "primary.main", borderRadius: 3 },
+                width: { xs: 56, sm: 68 },
+                height: { xs: 56, sm: 68 },
+                bgcolor: status === "Inactive" ? "action.selected" : "primary.main",
+                color: "#fff",
+                fontFamily: HEADING_FONT,
+                fontWeight: 800,
+                fontSize: { xs: "1.25rem", sm: "1.5rem" },
+                flexShrink: 0,
               }}
-            />
-          )}
-
-          <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, mt: lease.progress != null ? 0 : 2.5 }}>
-            <Box>
-              <Typography variant="caption" sx={{ color: "#cadcf6", display: "block" }}>Start</Typography>
-              <Typography sx={{ fontWeight: 600 }}>{formatDate(lease.start)}</Typography>
+            >
+              {initials}
+            </Avatar>
+            <Box sx={{ minWidth: 0 }}>
+              <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", columnGap: 1.25, rowGap: 0.5 }}>
+                <Typography component="h1" sx={{ fontFamily: HEADING_FONT, fontWeight: 900, letterSpacing: "-0.02em", fontSize: { xs: "1.35rem", sm: "1.75rem" }, overflowWrap: "anywhere", lineHeight: 1.2 }}>
+                  {displayName}
+                </Typography>
+                <Box component="span" sx={pillSx(STATUS_TONE[status])}>
+                  {status === "Pending" ? "Pending onboarding" : status}
+                </Box>
+              </Box>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, overflowWrap: "anywhere" }}>
+                {[phone, tenant.email].filter(Boolean).join(" · ") || "No contact details"}
+                {tenantSince !== "—" ? ` · Tenant since ${tenantSince}` : ""}
+              </Typography>
             </Box>
-            <Box sx={{ textAlign: "right" }}>
-              <Typography variant="caption" sx={{ color: "#cadcf6", display: "block" }}>End</Typography>
-              <Typography sx={{ fontWeight: 600 }}>{formatDate(lease.end)}</Typography>
+          </Box>
+
+          <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap", flexShrink: 0 }}>
+            <Button
+              variant="contained"
+              disableElevation
+              size="small"
+              startIcon={<EditOutlinedIcon />}
+              onClick={handleOpenEdit}
+              sx={{ fontWeight: 700, borderRadius: "10px", minHeight: 38, px: 2, flex: { xs: 1, sm: "none" } }}
+            >
+              Edit details
+            </Button>
+          </Box>
+        </Box>
+
+        <Box sx={{ position: "relative", display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))", lg: "repeat(4, minmax(0, 1fr))" }, gap: 1.25 }}>
+          {tiles.map(tileBox)}
+        </Box>
+      </Box>
+
+      {/* ───── Lease + payments ───── */}
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "minmax(0, 1.5fr) minmax(0, 1fr)" }, gap: 2.5, mb: 2.5 }}>
+        <Box sx={{ bgcolor: "#202020", color: "#ffffff", borderRadius: "18px", p: { xs: 2.5, sm: 3.5 }, minWidth: 0, position: "relative", overflow: "hidden" }}>
+          <Box aria-hidden sx={{ position: "absolute", top: -160, right: -120, width: 320, height: 320, borderRadius: "50%", background: "rgba(255,69,0,.22)", filter: "blur(80px)", pointerEvents: "none" }} />
+          <Box sx={{ position: "relative" }}>
+            <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
+              <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
+                <CalendarMonthOutlinedIcon sx={{ color: "primary.main" }} />
+                <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 700 }}>Lease</Typography>
+              </Box>
+              <Chip label={lease.statusLabel} size="small" sx={{ bgcolor: leaseTone.bg, color: leaseTone.color, fontWeight: 700, border: "none" }} />
+            </Box>
+
+            <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 900, fontSize: { xs: "1.6rem", sm: "2rem" }, lineHeight: 1.2 }}>
+              {lease.headline}
+            </Typography>
+            <Typography variant="body2" sx={{ color: "#cadcf6", mt: 0.5 }}>
+              {lease.subline}
+            </Typography>
+
+            {lease.progress != null && (
+              <LinearProgress
+                variant="determinate"
+                value={lease.progress}
+                sx={{ height: 6, borderRadius: 3, my: 2.5, bgcolor: "rgba(202, 220, 246, 0.18)", "& .MuiLinearProgress-bar": { bgcolor: "primary.main", borderRadius: 3 } }}
+              />
+            )}
+
+            <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, mt: lease.progress != null ? 0 : 2.5 }}>
+              <Box>
+                <Typography variant="caption" sx={{ color: "#cadcf6", display: "block" }}>Start</Typography>
+                <Typography sx={{ fontWeight: 700 }}>{formatDate(lease.start)}</Typography>
+              </Box>
+              <Box sx={{ textAlign: "right" }}>
+                <Typography variant="caption" sx={{ color: "#cadcf6", display: "block" }}>End</Typography>
+                <Typography sx={{ fontWeight: 700 }}>{formatDate(lease.end)}</Typography>
+              </Box>
             </Box>
           </Box>
         </Box>
 
-        <Box sx={{ ...panelSx, p: { xs: 2.5, sm: 3.5 }, display: "flex", flexDirection: "column", justifyContent: "space-between", gap: 2 }}>
-          <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
-            <ReceiptLongOutlinedIcon sx={{ color: "primary.main" }} />
-            <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 700 }}>Payments</Typography>
-          </Box>
+        <Box sx={{ ...panelSx, p: { xs: 2.5, sm: 3 }, display: "flex", flexDirection: "column", gap: 2 }}>
+          <SectionHeading
+            icon={ReceiptLongOutlinedIcon}
+            action={
+              <Button size="small" endIcon={<ChevronRightIcon />} onClick={() => navigate("/owner/payments")} sx={{ fontWeight: 700 }}>
+                Payments
+              </Button>
+            }
+          >
+            Payments
+          </SectionHeading>
           <Box>
-            <Typography variant="caption" color="text.secondary">Total paid</Typography>
-            <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 900, fontSize: { xs: "1.6rem", sm: "2rem" }, lineHeight: 1.2, color: "primary.main" }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Total paid</Typography>
+            <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 900, fontSize: { xs: "1.6rem", sm: "1.9rem" }, lineHeight: 1.2, color: "primary.main" }}>
               {formatAmount(totalPaid)}
             </Typography>
           </Box>
-          <Typography variant="body2" color="text.secondary">
-            {sortedPayments[0]
-              ? `${pluralize(payments.length, "payment")} · last on ${formatDate(sortedPayments[0].paymentDate || sortedPayments[0].createdAt)}`
-              : "No payments recorded yet."}
-          </Typography>
+          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1, mt: "auto" }}>
+            <Box sx={{ p: 1.25, borderRadius: "10px", bgcolor: (t) => alpha(t.palette.background.paper, 0.5) }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block" }}>Last paid</Typography>
+              <Typography sx={{ fontWeight: 700, fontSize: "0.92rem" }}>
+                {paidPayments[0] ? formatDate(paidPayments[0].paymentDate || paidPayments[0].createdAt) : "—"}
+              </Typography>
+            </Box>
+            <Box sx={{ p: 1.25, borderRadius: "10px", bgcolor: (t) => (underReview ? alpha(t.palette.info.main, 0.1) : alpha(t.palette.background.paper, 0.5)) }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block" }}>Under review</Typography>
+              <Typography sx={{ fontWeight: 700, fontSize: "0.92rem", color: underReview ? "info.dark" : "text.primary" }}>
+                {underReview ? pluralize(underReview, "payment") : "None"}
+              </Typography>
+            </Box>
+          </Box>
         </Box>
       </Box>
 
       {/* ───── Emergency contact + Identification ───── */}
-      <Box
-        sx={{
-          display: "grid",
-          gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" },
-          gap: 2.5,
-          mb: 2.5,
-        }}
-      >
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: 2.5, mb: 2.5 }}>
         <Box sx={{ ...panelSx, p: { xs: 2.5, sm: 3 } }}>
           <SectionHeading icon={ContactEmergencyOutlinedIcon}>Emergency contact</SectionHeading>
           <Box>
@@ -1203,7 +1251,7 @@ export default function TenantDetail() {
             <DetailRow label="Relationship">{tenant.emergencyContact?.relationship || tenant.emergencyRelationship || "—"}</DetailRow>
             <DetailRow label="Phone">
               {emergencyPhone ? (
-                <Link href={`tel:${emergencyPhone}`} underline="hover" color="inherit">
+                <Link href={`tel:${emergencyPhone}`} underline="hover" sx={{ fontWeight: 700 }}>
                   {emergencyPhone}
                 </Link>
               ) : (
@@ -1211,36 +1259,43 @@ export default function TenantDetail() {
               )}
             </DetailRow>
           </Box>
+          {!(tenant.emergencyContact?.name || tenant.emergencyName) && (
+            <Button size="small" onClick={handleOpenEdit} sx={{ mt: 1, fontWeight: 700 }}>
+              Add emergency contact
+            </Button>
+          )}
         </Box>
 
         <Box sx={{ ...panelSx, p: { xs: 2.5, sm: 3 } }}>
           <SectionHeading icon={BadgeOutlinedIcon}>Identification</SectionHeading>
-          <Box>
-            <DetailRow label="ID type">
-              {tenant.idType ? ID_TYPE_LABELS[tenant.idType] || String(tenant.idType).replace(/_/g, " ") : "—"}
-            </DetailRow>
-            <DetailRow label="ID number">{tenant.idNumber || "—"}</DetailRow>
-            <DetailRow label="ID photo">
-              {tenant.idPhotoUrl ? (
-                <Link
-                  href={tenant.idPhotoUrl}
-                  target="_blank"
-                  rel="noopener"
-                  underline="hover"
-                  sx={{ display: "inline-flex", alignItems: "center", gap: 0.5 }}
-                >
-                  View photo <OpenInNewIcon sx={{ fontSize: 15 }} />
-                </Link>
-              ) : (
-                "Not uploaded"
-              )}
-            </DetailRow>
-            <DetailRow label="Registered">{formatDate(tenant.createdAt)}</DetailRow>
-            <DetailRow label="Notes">
-              <Box component="span" sx={{ fontWeight: 400, color: "text.secondary" }}>
-                {tenant.notes || "No notes recorded."}
+          <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start" }}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <DetailRow label="ID type">
+                {tenant.idType ? ID_TYPE_LABELS[tenant.idType] || String(tenant.idType).replace(/_/g, " ") : "—"}
+              </DetailRow>
+              <DetailRow label="ID number">{tenant.idNumber || "—"}</DetailRow>
+              <DetailRow label="Registered">{formatDate(tenant.createdAt)}</DetailRow>
+              <DetailRow label="Notes">
+                <Box component="span" sx={{ fontWeight: 400, color: "text.secondary" }}>
+                  {tenant.notes || "No notes recorded."}
+                </Box>
+              </DetailRow>
+            </Box>
+            {tenant.idPhotoUrl && (
+              <Box
+                component="a"
+                href={tenant.idPhotoUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label="Open the ID photo"
+                sx={{ position: "relative", width: { xs: 96, sm: 120 }, aspectRatio: "4 / 3", flexShrink: 0, borderRadius: "10px", overflow: "hidden", border: "1px solid", borderColor: "divider", display: "block", "&:hover .kk-open": { opacity: 1 } }}
+              >
+                <Box component="img" src={tenant.idPhotoUrl} alt="ID photo" sx={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                <Box className="kk-open" sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", bgcolor: "rgba(0,0,0,.45)", color: "#fff", opacity: 0, transition: "opacity .15s" }}>
+                  <OpenInNewIcon fontSize="small" />
+                </Box>
               </Box>
-            </DetailRow>
+            )}
           </Box>
         </Box>
       </Box>
@@ -1248,17 +1303,14 @@ export default function TenantDetail() {
       {/* ───── Curfew record ───── */}
       <CurfewRecord nights={curfewNights} showAll={showAllNights} onToggle={() => setShowAllNights((v) => !v)} />
 
-      {/* ───── Payments ───── */}
+      {/* ───── Payment records ───── */}
       <Box sx={{ ...panelSx, p: { xs: 2.5, sm: 3 } }}>
         <SectionHeading
           icon={ReceiptLongOutlinedIcon}
           action={
             payments.length > 0 && (
               <Typography variant="body2" sx={{ fontWeight: 600, color: "text.secondary", textAlign: "right" }}>
-                Total{" "}
-                <Box component="span" sx={{ color: "primary.main", fontFamily: HEADING_FONT, fontWeight: 700 }}>
-                  {formatAmount(totalPaid)}
-                </Box>
+                {pluralize(payments.length, "record")}
               </Typography>
             )
           }
@@ -1267,7 +1319,7 @@ export default function TenantDetail() {
         </SectionHeading>
 
         {payments.length === 0 ? (
-          <Typography color="text.secondary" variant="body2" sx={{ py: 4, textAlign: "center", border: "1px dashed", borderColor: "divider", borderRadius: 2 }}>
+          <Typography color="text.secondary" variant="body2" sx={{ py: 4, textAlign: "center", border: "1px dashed", borderColor: "divider", borderRadius: "12px" }}>
             No payment records yet.
           </Typography>
         ) : (
@@ -1277,28 +1329,22 @@ export default function TenantDetail() {
                 <Table size="small">
                   <TableHead>
                     <TableRow>
-                      {["Date", "Amount", "Method", "Reference / notes"].map((h) => (
-                        <TableCell key={h} sx={{ fontWeight: 600, color: "text.secondary" }}>{h}</TableCell>
+                      {["For", "Paid on", "Amount", "Method", "Status", "Reference / notes"].map((h) => (
+                        <TableCell key={h} sx={{ fontWeight: 700, color: "text.secondary", fontSize: "0.72rem", letterSpacing: ".06em", textTransform: "uppercase", whiteSpace: "nowrap" }}>{h}</TableCell>
                       ))}
                     </TableRow>
                   </TableHead>
                   <TableBody>
                     {sortedPayments.map((p) => (
                       <TableRow key={p.id} hover sx={{ "&:last-child td": { borderBottom: 0 } }}>
-                        <TableCell>{formatDate(p.paymentDate || p.createdAt)}</TableCell>
+                        <TableCell sx={{ fontWeight: 600, whiteSpace: "nowrap" }}>{paymentPeriodOf(p) || "—"}</TableCell>
+                        <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDate(p.paymentDate || p.createdAt)}</TableCell>
+                        <TableCell sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>{formatAmount(p.amount)}</TableCell>
+                        <TableCell>{p.paymentMethod || "—"}</TableCell>
                         <TableCell>
-                          <Typography sx={{ fontWeight: 700 }} color="primary.main">
-                            {formatAmount(p.amount)}
-                          </Typography>
+                          <Box component="span" sx={pillSx(PAYMENT_TONE[statusOfPayment(p)] || "default")}>{p.status || "—"}</Box>
                         </TableCell>
-                        <TableCell>
-                          <Chip
-                            label={p.paymentMethod || "Not specified"}
-                            size="small"
-                            sx={{ bgcolor: "rgba(202, 220, 246, 0.35)", fontWeight: 500, border: "none" }}
-                          />
-                        </TableCell>
-                        <TableCell>{p.referenceNumber || p.notes || "—"}</TableCell>
+                        <TableCell sx={{ color: "text.secondary", maxWidth: 260, overflowWrap: "anywhere" }}>{p.referenceNumber || p.notes || "—"}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
@@ -1306,23 +1352,24 @@ export default function TenantDetail() {
               </TableContainer>
             </Box>
 
-            {/* Stacked list on phones — a 4-column table doesn't fit */}
+            {/* Stacked list on phones — a 6-column table doesn't fit */}
             <Box sx={{ display: { xs: "block", sm: "none" } }}>
               {sortedPayments.map((p) => (
                 <Box
                   key={p.id}
                   sx={{ py: 1.5, borderBottom: "1px solid", borderColor: "divider", "&:last-of-type": { borderBottom: "none", pb: 0 }, "&:first-of-type": { pt: 0 } }}
                 >
-                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 2 }}>
-                    <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 700 }} color="primary.main">
-                      {formatAmount(p.amount)}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {formatDate(p.paymentDate || p.createdAt)}
-                    </Typography>
+                  <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2 }}>
+                    <Box sx={{ minWidth: 0 }}>
+                      <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 800 }}>{formatAmount(p.amount)}</Typography>
+                      <Typography variant="caption" color="text.secondary">
+                        {[paymentPeriodOf(p) && `For ${paymentPeriodOf(p)}`, formatDate(p.paymentDate || p.createdAt)].filter(Boolean).join(" · ")}
+                      </Typography>
+                    </Box>
+                    <Box component="span" sx={pillSx(PAYMENT_TONE[statusOfPayment(p)] || "default")}>{p.status || "—"}</Box>
                   </Box>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.25, wordBreak: "break-word" }}>
-                    {[p.paymentMethod, p.referenceNumber || p.notes].filter(Boolean).join(" · ") || "—"}
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.25, overflowWrap: "anywhere" }}>
+                    {[p.paymentMethod, p.referenceNumber || p.notes].filter(Boolean).join(" · ")}
                   </Typography>
                 </Box>
               ))}
@@ -1338,54 +1385,79 @@ export default function TenantDetail() {
         maxWidth="md"
         fullWidth
         fullScreen={fullScreen}
-        slotProps={{ paper: { sx: { borderRadius: fullScreen ? 0 : 3 } } }}
+        slotProps={{ paper: { sx: { borderRadius: fullScreen ? 0 : "22px", overflow: "hidden", bgcolor: "#fff" } } }}
       >
-        <DialogTitle sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontFamily: HEADING_FONT, fontWeight: 700 }}>
-          Edit tenant details
-          <IconButton onClick={() => setOpenEdit(false)} size="small" aria-label="Close" disabled={saving}>
-            <CloseIcon />
-          </IconButton>
-        </DialogTitle>
-
-        <DialogContent dividers sx={{ p: { xs: 2, sm: 3 } }}>
-          {saveError && <Alert severity="error" sx={{ mb: 3 }}>{saveError}</Alert>}
-
-          <Stack spacing={4}>
-            {/* Personal */}
-            <Box>
-              <FormSectionTitle>Personal information</FormSectionTitle>
-              <Grid container spacing={2}>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField required label="Full name" name="fullName" value={formData.fullName} onChange={handleChange} fullWidth {...fieldError("fullName")} />
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField label="Email address" name="email" value={formData.email} onChange={handleChange} fullWidth {...fieldError("email")} />
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField required label="Phone number" name="phone" type="tel" value={formData.phone} onChange={handleChange} fullWidth {...fieldError("phone")} />
-                </Grid>
-              </Grid>
+        {/* Header: who is being edited */}
+        <Box sx={{ position: "relative", overflow: "hidden", flexShrink: 0, px: { xs: 2, sm: 3 }, pt: { xs: 2, sm: 2.5 }, pb: 2, borderBottom: "1px solid", borderColor: "divider" }}>
+          <Box aria-hidden sx={{ position: "absolute", top: -140, right: -100, width: 300, height: 300, borderRadius: "50%", background: "rgba(255,69,0,.10)", filter: "blur(60px)", pointerEvents: "none" }} />
+          <Box sx={{ position: "relative", display: "flex", alignItems: "center", gap: 1.5 }}>
+            <Avatar sx={{ width: 44, height: 44, bgcolor: "primary.main", color: "#fff", fontFamily: HEADING_FONT, fontWeight: 800, fontSize: "1rem" }}>
+              {(formData.fullName || "?").split(" ").filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("") || "?"}
+            </Avatar>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block", lineHeight: 1.2 }}>
+                Edit tenant
+              </Typography>
+              <Typography noWrap sx={{ fontFamily: HEADING_FONT, fontWeight: 800, fontSize: "1.2rem", letterSpacing: "-0.01em" }}>
+                {formData.fullName || "Unnamed tenant"}
+              </Typography>
             </Box>
+            <IconButton onClick={() => setOpenEdit(false)} aria-label="Close" disabled={saving} sx={{ bgcolor: "action.hover" }}>
+              <CloseIcon />
+            </IconButton>
+          </Box>
+        </Box>
 
-            {/* Property & bed */}
-            <Box>
-              <FormSectionTitle>Property &amp; bed</FormSectionTitle>
-              <Grid container spacing={2}>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField select required label="Assigned property" name="propertyId" value={formData.propertyId} onChange={handleChange} fullWidth {...fieldError("propertyId")}>
-                    {ownerProperties.map((prop) => (
-                      <MenuItem key={prop.id} value={prop.id}>{prop.name || prop.propertyName}</MenuItem>
-                    ))}
-                  </TextField>
-                </Grid>
-                <Grid size={{ xs: 12, sm: 6 }}>
-                  <TextField select required label="Account status" name="status" value={formData.status} onChange={handleChange} fullWidth>
-                    <MenuItem value="Active">Active</MenuItem>
-                    <MenuItem value="Pending Onboarding">Pending onboarding</MenuItem>
-                    <MenuItem value="Inactive">Inactive</MenuItem>
-                  </TextField>
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
+        <DialogContent sx={{ p: 0, "& .MuiOutlinedInput-root": { borderRadius: "10px" } }}>
+          {saveError && (
+            <Alert severity="error" sx={{ mx: { xs: 2, sm: 3 }, mt: 2.5, borderRadius: "10px" }}>
+              {saveError}
+            </Alert>
+          )}
+
+          <Box sx={{ px: { xs: 2, sm: 3 } }}>
+            {/* Personal */}
+            <FormSection first icon={PersonOutlineOutlinedIcon} title="Personal information" description="How you and the caretaker reach this tenant.">
+              <Box sx={formStack}>
+                <TextField required label="Full name" name="fullName" value={formData.fullName} onChange={handleChange} fullWidth {...fieldError("fullName")} />
+                <Box sx={formPair}>
+                  <TextField required label="Phone number" name="phone" type="tel" value={formData.phone} onChange={handleChange} fullWidth {...fieldError("phone")} />
+                  <TextField label="Email address" name="email" value={formData.email} onChange={handleChange} fullWidth {...fieldError("email")} />
+                </Box>
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>
+                    Status
+                  </Typography>
+                  <ToggleButtonGroup
+                    exclusive
+                    fullWidth
+                    value={formData.status}
+                    onChange={(e, value) => value && setField("status", value)}
+                    aria-label="Tenant status"
+                    sx={segmentedSx}
+                  >
+                    <ToggleButton value="Active">Active</ToggleButton>
+                    <ToggleButton value="Pending Onboarding">Pending onboarding</ToggleButton>
+                    <ToggleButton value="Inactive">Inactive</ToggleButton>
+                  </ToggleButtonGroup>
+                  {formData.status === "Inactive" && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                      Inactive tenants no longer hold their bed and drop out of rent tracking.
+                    </Typography>
+                  )}
+                </Box>
+              </Box>
+            </FormSection>
+
+            {/* Room & rent */}
+            <FormSection icon={MeetingRoomOutlinedIcon} title="Room & rent" description="Where they stay and what they pay each month.">
+              <Box sx={formStack}>
+                <TextField select required label="Property" name="propertyId" value={formData.propertyId} onChange={handleChange} fullWidth {...fieldError("propertyId")}>
+                  {ownerProperties.map((prop) => (
+                    <MenuItem key={prop.id} value={prop.id}>{prop.propertyName || prop.name}</MenuItem>
+                  ))}
+                </TextField>
+                <Box sx={formPair}>
                   <TextField
                     select
                     required
@@ -1404,17 +1476,29 @@ export default function TenantDetail() {
                       const taken = roomOccupancy.get(String(rName))?.count || 0;
                       const free = Math.max(0, cap - taken);
                       const isFull = cap > 0 && free === 0;
+                      const blocked = blockedForMaintenance(room);
                       return (
-                        <MenuItem key={rName} value={rName} disabled={isFull}>
-                          {rName}
-                          {room.floor ? ` · Floor ${room.floor}` : ""}
-                          {cap > 0 ? (isFull ? " · Full" : ` · ${free} of ${cap} free`) : ""}
+                        <MenuItem key={rName} value={rName} disabled={isFull || blocked}>
+                          <Box sx={{ minWidth: 0 }}>
+                            <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                              {rName}
+                              {room.floor ? (
+                                <Box component="span" sx={{ fontWeight: 400, color: "text.secondary" }}> · Floor {room.floor}</Box>
+                              ) : null}
+                            </Typography>
+                            <Typography variant="caption" sx={{ color: isRoomUnderMaintenance(room) ? "warning.main" : isFull ? "error.main" : "text.secondary" }}>
+                              {isRoomUnderMaintenance(room)
+                                ? "Under maintenance"
+                                : cap > 0
+                                ? isFull ? "Full" : `${free} of ${cap} beds free`
+                                : ""}
+                              {room.monthlyRatePerBed ? ` · ${formatAmount(room.monthlyRatePerBed)}/bed` : ""}
+                            </Typography>
+                          </Box>
                         </MenuItem>
                       );
                     })}
                   </TextField>
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
                   <TextField
                     select
                     required
@@ -1427,37 +1511,71 @@ export default function TenantDetail() {
                     {...fieldError("bedId")}
                     helperText={
                       formErrors.bedId ||
-                      (formData.roomId && roomCapacity > 0 && availableBeds.length === 0 && !occupancyLoading
-                        ? "No free beds in this room."
-                        : "")
+                      (formData.roomId && roomCapacity > 0 && availableBeds.length === 0 && !occupancyLoading ? "No free beds in this room." : "")
                     }
                   >
                     {availableBeds.map((bed) => (
                       <MenuItem key={bed} value={bed}>{bed}</MenuItem>
                     ))}
                   </TextField>
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField
-                    required
-                    label="Monthly rent"
-                    name="monthlyRent"
-                    type="number"
-                    value={formData.monthlyRent}
-                    onChange={handleChange}
-                    fullWidth
-                    slotProps={{ input: { startAdornment: <InputAdornment position="start">₱</InputAdornment> } }}
-                    {...fieldError("monthlyRent")}
-                  />
-                </Grid>
-              </Grid>
-            </Box>
+                </Box>
+                <TextField
+                  required
+                  label="Monthly rent"
+                  name="monthlyRent"
+                  type="number"
+                  value={formData.monthlyRent}
+                  onChange={handleChange}
+                  fullWidth
+                  slotProps={{ input: { startAdornment: <InputAdornment position="start">₱</InputAdornment> } }}
+                  {...fieldError("monthlyRent")}
+                  helperText={formErrors.monthlyRent || "Filled in from the room's rate when you pick a room. You can change it."}
+                />
+              </Box>
+            </FormSection>
 
             {/* Lease */}
-            <Box>
-              <FormSectionTitle>Lease</FormSectionTitle>
-              <Grid container spacing={2}>
-                <Grid size={{ xs: 12, md: 4 }}>
+            <FormSection icon={CalendarMonthOutlinedIcon} title="Lease" description="Pick the start and how long. The end date is worked out for you.">
+              <Box sx={formStack}>
+                <Box>
+                  <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>
+                    Duration
+                  </Typography>
+                  <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
+                    {LEASE_DURATIONS.map((opt) => {
+                      const on = formData.leaseDuration === opt.value;
+                      return (
+                        <Chip
+                          key={opt.value}
+                          label={opt.value === "custom" ? "Custom" : opt.label}
+                          clickable
+                          color={on ? "primary" : "default"}
+                          variant={on ? "filled" : "outlined"}
+                          onClick={() => setField("leaseDuration", opt.value)}
+                          sx={{ fontWeight: 700, borderRadius: "8px", height: 34 }}
+                        />
+                      );
+                    })}
+                  </Box>
+                  {formErrors.leaseDuration && (
+                    <Typography variant="caption" color="error" sx={{ display: "block", mt: 0.5 }}>
+                      {formErrors.leaseDuration}
+                    </Typography>
+                  )}
+                </Box>
+                {formData.leaseDuration === "custom" && (
+                  <TextField
+                    required
+                    label="Custom lease term"
+                    name="customLeaseDuration"
+                    placeholder="e.g. Month-to-month, 2 years"
+                    value={formData.customLeaseDuration}
+                    onChange={handleChange}
+                    fullWidth
+                    {...fieldError("customLeaseDuration")}
+                  />
+                )}
+                <Box sx={formPair}>
                   <TextField
                     required
                     label="Start date"
@@ -1469,15 +1587,6 @@ export default function TenantDetail() {
                     fullWidth
                     {...fieldError("leaseStart")}
                   />
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField select required label="Duration" name="leaseDuration" value={formData.leaseDuration} onChange={handleChange} fullWidth {...fieldError("leaseDuration")}>
-                    {LEASE_DURATIONS.map((opt) => (
-                      <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
-                    ))}
-                  </TextField>
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
                   <TextField
                     required={formData.leaseDuration !== "custom"}
                     label="End date"
@@ -1488,63 +1597,65 @@ export default function TenantDetail() {
                     onChange={handleChange}
                     fullWidth
                     {...fieldError("leaseEnd")}
-                    helperText={
-                      formErrors.leaseEnd ||
-                      (formData.leaseDuration === "custom"
-                        ? "Optional for custom terms."
-                        : "Calculated from start date and duration — you can adjust it.")
-                    }
+                    helperText={formErrors.leaseEnd || (formData.leaseDuration === "custom" ? "Optional for custom terms." : "")}
                   />
-                </Grid>
-                {formData.leaseDuration === "custom" && (
-                  <Grid size={{ xs: 12 }}>
-                    <TextField
-                      required
-                      label="Custom lease term"
-                      name="customLeaseDuration"
-                      placeholder="e.g. Month-to-month, 2 years"
-                      value={formData.customLeaseDuration}
-                      onChange={handleChange}
-                      fullWidth
-                      {...fieldError("customLeaseDuration")}
-                    />
-                  </Grid>
+                </Box>
+                {formData.leaseStart && formData.leaseEnd && formData.leaseEnd > formData.leaseStart && (
+                  <Box sx={{ display: "flex", alignItems: "center", gap: 1, p: 1.25, borderRadius: "10px", bgcolor: (t) => alpha(t.palette.background.paper, 0.55) }}>
+                    <CalendarMonthOutlinedIcon sx={{ fontSize: 18, color: "primary.main" }} />
+                    <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                      {formatDate(formData.leaseStart)} → {formatDate(formData.leaseEnd)}
+                      <Box component="span" sx={{ color: "text.secondary", fontWeight: 400 }}>
+                        {" "}· {formData.leaseDuration === "custom"
+                          ? formData.customLeaseDuration || "custom term"
+                          : LEASE_DURATIONS.find((d) => d.value === formData.leaseDuration)?.label || ""}
+                      </Box>
+                    </Typography>
+                  </Box>
                 )}
-              </Grid>
-            </Box>
+              </Box>
+            </FormSection>
 
-            {/* Emergency + notes */}
-            <Box>
-              <FormSectionTitle>Emergency contact &amp; notes</FormSectionTitle>
-              <Grid container spacing={2}>
-                <Grid size={{ xs: 12, md: 4 }}>
+            {/* Emergency contact */}
+            <FormSection icon={ContactEmergencyOutlinedIcon} title="Emergency contact" description="Who to call if something happens to this tenant.">
+              <Box sx={formStack}>
+                <Box sx={formPair}>
                   <TextField label="Contact name" name="emergencyName" value={formData.emergencyName} onChange={handleChange} fullWidth />
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField label="Relationship" name="emergencyRelationship" value={formData.emergencyRelationship} onChange={handleChange} fullWidth />
-                </Grid>
-                <Grid size={{ xs: 12, md: 4 }}>
-                  <TextField label="Emergency phone" name="emergencyPhone" type="tel" value={formData.emergencyPhone} onChange={handleChange} fullWidth />
-                </Grid>
-                <Grid size={{ xs: 12 }}>
-                  <TextField label="Owner notes / requirements" name="notes" multiline rows={3} value={formData.notes} onChange={handleChange} fullWidth />
-                </Grid>
-              </Grid>
-            </Box>
-          </Stack>
+                  <TextField label="Relationship" name="emergencyRelationship" placeholder="e.g. Mother" value={formData.emergencyRelationship} onChange={handleChange} fullWidth />
+                </Box>
+                <TextField label="Contact's phone" name="emergencyPhone" type="tel" value={formData.emergencyPhone} onChange={handleChange} fullWidth />
+              </Box>
+            </FormSection>
+
+            {/* Notes */}
+            <FormSection icon={StickyNote2OutlinedIcon} title="Notes" description="Only you can see these.">
+              <TextField
+                name="notes"
+                multiline
+                minRows={3}
+                placeholder="Requirements, agreements, reminders…"
+                value={formData.notes}
+                onChange={handleChange}
+                fullWidth
+                slotProps={{ htmlInput: { "aria-label": "Owner notes" } }}
+              />
+            </FormSection>
+          </Box>
         </DialogContent>
 
-        <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button onClick={() => setOpenEdit(false)} color="inherit" disabled={saving} sx={{ fontWeight: 600, flex: { xs: 1, sm: "none" } }}>
+        <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 1.75, gap: 1, borderTop: "1px solid", borderColor: "divider", bgcolor: (t) => alpha(t.palette.background.paper, 0.35) }}>
+          <Button onClick={() => setOpenEdit(false)} color="inherit" disabled={saving} sx={{ fontWeight: 700, borderRadius: "10px", flex: { xs: 1, sm: "none" } }}>
             Cancel
           </Button>
           <Button
             variant="contained"
+            disableElevation
             onClick={handleSaveEdit}
             disabled={saving}
-            sx={{ px: 4, py: 1.25, fontWeight: 600, flex: { xs: 1, sm: "none" } }}
+            startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <SaveOutlinedIcon />}
+            sx={{ px: 3, fontWeight: 700, borderRadius: "10px", flex: { xs: 1, sm: "none" } }}
           >
-            {saving ? <CircularProgress size={22} color="inherit" /> : "Save changes"}
+            {saving ? "Saving…" : "Save changes"}
           </Button>
         </DialogActions>
       </Dialog>

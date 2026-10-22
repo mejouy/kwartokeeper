@@ -76,12 +76,13 @@ import { uploadToCloudinary } from "../../utils/cloudinary";
 import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
 import { getPropertyCoverPhotoUrl } from "../../utils/getPropertyCoverPhotoUrl";
 import { normalizePayment } from "../../utils/normalizePayment";
+import { withoutRemoved } from "../../utils/accountState";
 
 /* ---------------------------------------------------------------------------
    Constants + small helpers
 --------------------------------------------------------------------------- */
 const RULES_PREVIEW = 4; // rules shown before "Show all"
-const BOTTOM_NAV_H = 64; // height of the phone bottom navigation in CaretakerLayout
+const BOTTOM_NAV_H = 66; // height of the phone bottom bar in AppShell (CaretakerLayout)
 const row = { display: "flex", alignItems: "center" };
 const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
 
@@ -90,6 +91,7 @@ const NOTICE_DELAY_MS = 6000; // time to undo a mark before the automatic notice
 const CHECK_WORD = { present: "in", late: "late", out: "out" };
 const SMS_URL = typeof import.meta !== "undefined" ? import.meta.env?.VITE_SMS_WORKER_URL || "" : "";
 const HISTORY_NIGHTS = 14;
+const EMPTY_OBJ = Object.freeze({});
 const STATUS_OPTIONS = ["Pending", "In Progress", "Resolved"];
 const STATUS_TONE = { Pending: "warning", "In Progress": "info", Resolved: "success", Cancelled: "default" };
 const TIER_TONE = { High: "error", Medium: "warning", Low: "default" };
@@ -160,10 +162,17 @@ const greeting = () => {
 
 const payKind = (p) => {
   const k = String(p.status || "pending").toLowerCase();
-  return k === "paid" ? "paid" : k === "rejected" ? "rejected" : "pending";
+  if (k === "paid") return "paid";
+  if (k === "partial") return "partial"; // received, but a balance is still owed
+  if (k === "rejected" || k === "cancelled") return "rejected";
+  return "pending";
 };
-const PAY_TONE = { paid: "success", pending: "warning", rejected: "error" };
-const PAY_LABEL = { paid: "Paid", pending: "Pending", rejected: "Rejected" };
+const isReceived = (p) => ["paid", "partial"].includes(payKind(p));
+const PAY_TONE = { paid: "success", partial: "warning", pending: "warning", rejected: "error" };
+const PAY_LABEL = { paid: "Paid", partial: "Partial", pending: "Pending", rejected: "Rejected" };
+const LIST_PAGE = 6; // long lists show this many at a time
+const ROOM_PAGE = 8; // room groups in the tenant directory
+const NIGHT_PAGE = 7; // nights in curfew history
 
 const isInactiveStatus = (s) => /inactive|terminated|moved/i.test(String(s || ""));
 
@@ -549,17 +558,37 @@ const buzz = () => {
 function FilterChips({ options, value, onChange, flush }) {
   return (
     <Box sx={{ display: "flex", gap: 1, overflowX: "auto", mx: flush ? 0 : { xs: -2, sm: 0 }, px: flush ? 0 : { xs: 2, sm: 0 }, mb: flush ? 0 : { xs: 2, sm: 2.5 }, scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
-      {options.map((f) => (
-        <Chip
-          key={f.id}
-          label={`${f.label} · ${f.n}`}
-          clickable
-          onClick={() => onChange(f.id)}
-          color={value === f.id ? "primary" : "default"}
-          variant={value === f.id ? "filled" : "outlined"}
-          sx={{ fontWeight: 700, flexShrink: 0, height: 40, borderRadius: 20 }}
-        />
-      ))}
+      {options.map((f) => {
+        const on = value === f.id;
+        return (
+          <Box
+            key={f.id}
+            component="button"
+            type="button"
+            onClick={() => onChange(f.id)}
+            aria-pressed={on}
+            sx={{
+              ...row,
+              gap: 0.75,
+              flexShrink: 0,
+              height: 38,
+              px: 1.5,
+              borderRadius: 99,
+              font: "inherit",
+              fontSize: 13.5,
+              fontWeight: 700,
+              cursor: "pointer",
+              border: "1px solid",
+              borderColor: on ? "text.primary" : "divider",
+              bgcolor: on ? "text.primary" : "background.default",
+              color: on ? "background.default" : "text.secondary",
+            }}
+          >
+            {f.label}
+            <Box component="span" sx={{ opacity: 0.65, fontWeight: 600 }}>{f.n}</Box>
+          </Box>
+        );
+      })}
     </Box>
   );
 }
@@ -695,6 +724,10 @@ function TenantCard({ t, rentState, showRent, onClick }) {
 function RequestCard({ t, busy, onStatus, compact }) {
   const tier = t.priority?.tier || "Low";
   const status = t.status || "Pending";
+  const [allUpdates, setAllUpdates] = useState(false);
+  const updates = Array.isArray(t.followUps) ? t.followUps : [];
+  // Newest update shows; the rest stay folded so busy requests don't get huge
+  const shownUpdates = allUpdates ? updates : updates.slice(-1);
   return (
     <Paper elevation={0} sx={{ ...cardSx, p: 1.75, minWidth: 0 }}>
       <Box sx={{ ...row, alignItems: "flex-start", justifyContent: "space-between", gap: 1, mb: 0.5 }}>
@@ -721,12 +754,19 @@ function RequestCard({ t, busy, onStatus, compact }) {
         </Box>
       )}
 
-      {!compact && Array.isArray(t.followUps) && t.followUps.length > 0 && (
+      {!compact && updates.length > 0 && (
         <Box sx={{ mt: 1.25, p: 1.25, borderRadius: 2, bgcolor: (th) => alpha(th.palette.info.main, 0.08) }}>
-          <Typography variant="caption" sx={{ fontWeight: 800, color: "info.dark" }}>
-            Updates from the tenant
-          </Typography>
-          {t.followUps.map((f, i) => (
+          <Box sx={{ ...row, justifyContent: "space-between", gap: 1 }}>
+            <Typography variant="caption" sx={{ fontWeight: 800, color: "info.dark" }}>
+              {updates.length === 1 ? "Update from the tenant" : allUpdates ? `${updates.length} updates from the tenant` : "Latest update from the tenant"}
+            </Typography>
+            {updates.length > 1 && (
+              <Button size="small" onClick={() => setAllUpdates((v) => !v)} sx={{ minHeight: 28, py: 0, px: 1, fontWeight: 700, fontSize: 12, textTransform: "none" }}>
+                {allUpdates ? "Latest only" : `See all ${updates.length}`}
+              </Button>
+            )}
+          </Box>
+          {shownUpdates.map((f, i) => (
             <Box key={i} sx={{ mt: 0.5 }}>
               {f.text && (
                 <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
@@ -759,7 +799,7 @@ function RequestCard({ t, busy, onStatus, compact }) {
                 variant={current ? "contained" : "outlined"}
                 color={current ? STATUS_TONE[opt] : "inherit"}
                 onClick={() => onStatus(t, opt)}
-                sx={{ flex: 1, minWidth: 0, minHeight: 40, px: 0.5, fontWeight: 700, borderRadius: 2, textTransform: "none", borderColor: current ? undefined : "divider", color: current ? undefined : "text.secondary" }}
+                sx={{ flex: 1, minWidth: 0, minHeight: 40, px: 0.5, fontWeight: 700, fontSize: { xs: 12.5, sm: 13.5 }, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", borderRadius: 2, textTransform: "none", borderColor: current ? undefined : "divider", color: current ? undefined : "text.secondary" }}
               >
                 {opt}
               </Button>
@@ -814,14 +854,14 @@ function CheckRow({ t, entry, past, onSet, onNotice }) {
               color={current ? o.tone : "inherit"}
               disableElevation
               onClick={() => onSet(t, o.id)}
-              sx={{ minWidth: 0, width: 46, height: 44, px: 0, fontWeight: 800, fontSize: "0.8rem", borderRadius: 2, textTransform: "none", borderColor: current ? undefined : "divider", color: current ? undefined : "text.secondary" }}
+              sx={{ minWidth: 0, width: { xs: 42, sm: 46 }, height: 44, px: 0, fontWeight: 800, fontSize: "0.8rem", borderRadius: 2, textTransform: "none", borderColor: current ? undefined : "divider", color: current ? undefined : "text.secondary" }}
             >
               {o.label}
             </Button>
           );
         })}
       </Box>
-      <IconButton aria-label={`Send a notice to ${t.name}`} onClick={() => onNotice(t)} sx={{ width: 40, height: 40, flexShrink: 0, color: "primary.main" }}>
+      <IconButton aria-label={`Send a notice to ${t.name}`} onClick={() => onNotice(t)} sx={{ width: { xs: 34, sm: 40 }, height: 40, flexShrink: 0, color: "primary.main" }}>
         <NotificationsActiveOutlinedIcon fontSize="small" />
       </IconButton>
     </Box>
@@ -926,9 +966,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const [tickets, setTickets] = useState([]);
   const [payments, setPayments] = useState([]);
   const [coverFailed, setCoverFailed] = useState(false);
-  const [occEntries, setOccEntries] = useState({});
-  const [occMeta, setOccMeta] = useState({});
-  const [occError, setOccError] = useState(false);
+  const [occ, setOcc] = useState({ key: "", entries: {}, meta: {}, error: false });
   const [tenantsView, setTenantsView] = useState("");
   const [checkFilter, setCheckFilter] = useState("todo");
   const [checkSearch, setCheckSearch] = useState("");
@@ -949,7 +987,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const [history, setHistory] = useState({ loading: false, loaded: false, nights: [], error: false });
   const [openNight, setOpenNight] = useState("");
   const [cashProof, setCashProof] = useState(null);
-  const [cashProofPreview, setCashProofPreview] = useState("");
+  const cashPreviewRef = useRef(null);
   const [pickedRoomId, setPickedRoomId] = useState("");
   const [roomDlg, setRoomDlg] = useState({ open: false, id: "", roomName: "", floor: "1", capacity: "1", rate: "0", saving: false, error: "", confirmDelete: false });
   const [search, setSearch] = useState("");
@@ -959,6 +997,12 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [payFilter, setPayFilter] = useState("all");
   const [payLimit, setPayLimit] = useState(20);
+  const [attentionOpen, setAttentionOpen] = useState(false);
+  const [ticketsShown, setTicketsShown] = useState(LIST_PAGE);
+  const [archiveShown, setArchiveShown] = useState(LIST_PAGE);
+  const [unpaidShown, setUnpaidShown] = useState(LIST_PAGE);
+  const [roomsShown, setRoomsShown] = useState(ROOM_PAGE);
+  const [nightsShown, setNightsShown] = useState(NIGHT_PAGE);
 
   // ---- cash payment dialog
   const [cashOpen, setCashOpen] = useState(false);
@@ -997,6 +1041,14 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         const [userSnap, caretakerSnap] = await Promise.all([getDoc(doc(db, "users", user.uid)), getDoc(doc(db, "caretakers", user.uid))]);
         if (cancelled) return;
         const data = { ...(userSnap.exists() ? userSnap.data() : {}), ...(caretakerSnap.exists() ? caretakerSnap.data() : {}) };
+        // Self-heal: the password was already changed (profile says so) but the older
+        // caretaker record still asks for it. Clear it so both records agree.
+        if (userSnap.exists() && caretakerSnap.exists() && userSnap.data().mustChangePassword === false && caretakerSnap.data().mustChangePassword === true) {
+          updateDoc(doc(db, "caretakers", user.uid), {
+            mustChangePassword: false,
+            passwordChangedAt: userSnap.data().passwordChangedAt || new Date().toISOString(),
+          }).catch((err) => console.warn("Couldn't sync the caretaker record:", err?.code || err));
+        }
         const granted = data.permissions || {};
         const propertyId = data.assignedPropertyId || data.propertyId || "";
         setUid(user.uid);
@@ -1098,7 +1150,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       if (!t.id) return;
       map.set(t.id, { ...(map.get(t.id) || {}), ...t });
     });
-    return [...map.values()]
+    return withoutRemoved([...map.values()])
       .map((t) => {
         const roomNumber = String(t.roomNumber || t.roomId || t.room || "");
         const room = rooms.find((r) => r.roomName === roomNumber || r.id === roomNumber);
@@ -1123,9 +1175,10 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const selectedTenant = tenants.find((t) => t.id === selectedTenantId) || null;
 
   const totalRooms = rooms.length;
-  const occupiedRooms = rooms.filter(
-    (r) => r.status === "Occupied" || Number(r.occupiedBeds) > 0 || activeTenants.some((t) => t.roomNumber && (t.roomNumber === r.roomName || t.roomNumber === r.id))
-  ).length;
+  const livingIn = (r) => activeTenants.filter((t) => t.roomNumber && (t.roomNumber === r.roomName || t.roomNumber === r.id)).length;
+  const occupiedRooms = rooms.filter((r) => livingIn(r) > 0).length;
+  const totalBeds = rooms.reduce((n, r) => n + (Number(r.capacity) || 0), 0);
+  const bedsUsed = rooms.reduce((n, r) => n + Math.min(livingIn(r), Number(r.capacity) || 0), 0);
 
   const filteredTenants = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1138,8 +1191,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   }, [tenants, search, tenantFilter]);
 
   // ---- derived: rent this month
-  const rentState = useMemo(() => {
-    const rank = { paid: 3, pending: 2, rejected: 1 };
+  const rentState = (() => {
+    const rank = { paid: 4, pending: 3, partial: 2, rejected: 1 };
     const m = {};
     payments.forEach((p) => {
       if (normPeriod(p.periodMonth) !== periodKey) return;
@@ -1147,15 +1200,24 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       if (!m[p.tenantId] || rank[k] > rank[m[p.tenantId]]) m[p.tenantId] = k;
     });
     return m;
-  }, [payments, periodKey]);
+  })();
   const unpaidTenants = rentTenants.filter((t) => !["paid", "pending"].includes(rentState[t.id]));
   const pendingCount = rentTenants.filter((t) => rentState[t.id] === "pending").length;
   const paidCount = rentTenants.filter((t) => rentState[t.id] === "paid").length;
-  const collected = useMemo(() => payments.filter((p) => normPeriod(p.periodMonth) === periodKey && payKind(p) === "paid").reduce((s, p) => s + (Number(p.amount) || 0), 0), [payments, periodKey]);
+  // Money received this month: full and partial payments (same rule as the owner's Payments page)
+  const collected = payments.filter((p) => normPeriod(p.periodMonth) === periodKey && isReceived(p)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const receivedFrom = (tenantId, period) =>
+    payments.filter((p) => p.tenantId === tenantId && normPeriod(p.periodMonth) === normPeriod(period) && isReceived(p)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
 
   const sortedPayments = useMemo(() => [...payments].sort((a, b) => getTimestampMillis(b.paymentDate || b.createdAt) - getTimestampMillis(a.paymentDate || a.createdAt)), [payments]);
   const payCounts = useMemo(
-    () => ({ all: payments.length, paid: payments.filter((p) => payKind(p) === "paid").length, pending: payments.filter((p) => payKind(p) === "pending").length, rejected: payments.filter((p) => payKind(p) === "rejected").length }),
+    () => ({
+      all: payments.length,
+      paid: payments.filter((p) => payKind(p) === "paid").length,
+      partial: payments.filter((p) => payKind(p) === "partial").length,
+      pending: payments.filter((p) => payKind(p) === "pending").length,
+      rejected: payments.filter((p) => payKind(p) === "rejected").length,
+    }),
     [payments]
   );
   const shownPayments = payFilter === "all" ? sortedPayments : sortedPayments.filter((p) => payKind(p) === payFilter);
@@ -1188,6 +1250,12 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
     }
   }
   const pastCurfew = curfewPhase === "active";
+  // Tonight's sheet; switching property or night shows it empty until that night's document answers
+  const occKey = property?.id && canOccupancy ? `${property.id}_${nightKey}` : "";
+  const occCurrent = Boolean(occKey) && occ.key === occKey;
+  const occEntries = occCurrent ? occ.entries : EMPTY_OBJ;
+  const occMeta = occCurrent ? occ.meta : EMPTY_OBJ;
+  const occError = occCurrent && occ.error;
   const checkTenants = rentTenants;
   const entryOf = (t) => occEntries[t.id] || null;
   const statusOf = (t) => occEntries[t.id]?.status || "";
@@ -1210,25 +1278,20 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
 
   // Tonight's check: one document per facility per curfew night
   useEffect(() => {
-    setOccEntries({});
-    setOccMeta({});
-    setOccError(false);
-    if (!property?.id || !canOccupancy) return undefined;
+    if (!occKey) return undefined;
     return onSnapshot(
-      doc(db, "occupancy_logs", `${property.id}_${nightKey}`),
+      doc(db, "occupancy_logs", occKey),
       { includeMetadataChanges: true },
       (snap) => {
         const data = snap.exists() ? snap.data({ serverTimestamps: "estimate" }) : {};
-        setOccEntries(data.entries || {});
-        setOccMeta({ reminderSentAt: data.reminderSentAt || null, pending: snap.metadata.hasPendingWrites });
-        setOccError(false);
+        setOcc({ key: occKey, entries: data.entries || {}, meta: { reminderSentAt: data.reminderSentAt || null, pending: snap.metadata.hasPendingWrites }, error: false });
       },
       (err) => {
         console.warn("Occupancy log unavailable:", err?.code || err);
-        setOccError(true);
+        setOcc((o) => ({ ...(o.key === occKey ? o : { entries: {}, meta: {} }), key: occKey, error: true }));
       }
     );
-  }, [property?.id, canOccupancy, nightKey]);
+  }, [occKey]);
 
   const ownerUidValue = property?.ownerUid || profile.ownerUid || "";
 
@@ -1458,6 +1521,11 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const cashExisting = payments.filter((p) => p.tenantId === cash.tenantId && normPeriod(p.periodMonth) === normPeriod(cash.periodMonth));
   const cashPaid = cashExisting.some((p) => payKind(p) === "paid");
   const cashPending = cashExisting.some((p) => payKind(p) === "pending");
+  const cashReceivedBefore = cashExisting.filter(isReceived).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  const cashBalance = cashTenant?.rent ? Math.max(Math.round((cashTenant.rent - cashReceivedBefore) * 100) / 100, 0) : null;
+  const cashAmountNum = Number(cash.amount) || 0;
+  // Less than what's still owed for that month = a partial payment
+  const cashStatus = cashBalance !== null && cashAmountNum > 0 && cashAmountNum < cashBalance ? "Partial" : "Paid";
 
   const openCash = (tenantId = "") => {
     const t = tenants.find((x) => x.id === tenantId);
@@ -1468,12 +1536,9 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
     setCashOpen(true);
   };
   useEffect(() => {
-    if (!cashProof) {
-      setCashProofPreview("");
-      return undefined;
-    }
+    if (!cashProof || !cashPreviewRef.current) return undefined;
     const url = URL.createObjectURL(cashProof);
-    setCashProofPreview(url);
+    cashPreviewRef.current.src = url;
     return () => URL.revokeObjectURL(url);
   }, [cashProof]);
   const pickProof = (e) => {
@@ -1490,7 +1555,9 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   };
   const pickCashTenant = (id) => {
     const t = tenants.find((x) => x.id === id);
-    setCash((c) => ({ ...c, tenantId: id, amount: !amountTouched && t?.rent ? String(t.rent) : c.amount }));
+    // Suggest what's still owed for the month (the full rent if nothing was paid yet)
+    const owed = t?.rent ? Math.max(t.rent - receivedFrom(id, cash.periodMonth), 0) : 0;
+    setCash((c) => ({ ...c, tenantId: id, amount: !amountTouched && owed > 0 ? String(owed) : c.amount }));
     setCashErrors((e) => ({ ...e, tenantId: undefined }));
   };
   const submitCash = (e) => {
@@ -1530,7 +1597,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         amount: Number(cash.amount),
         paymentMethod: "Cash",
         periodMonth: cash.periodMonth,
-        status: "Paid",
+        status: cashStatus,
         verificationStatus: "Approved",
         remarks: cash.notes.trim(),
         ownerUid: cashTenant.ownerUid || property.ownerUid || profile.ownerUid || "",
@@ -1541,7 +1608,20 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         recordedByRole: "caretaker",
         ...(proofUrl ? { proofUrl } : {}),
       });
-      pushNotices([{ userId: cashTenant.id, kind: "payment", category: "payment", type: "success", title: "Cash payment recorded", message: `Your caretaker recorded your ${peso(cash.amount)} cash payment for ${cash.periodMonth}. Thank you!` }]).catch((err) => console.warn("Cash notice failed:", err?.code || err));
+      const leftAfter = cashBalance !== null ? Math.max(cashBalance - cashAmountNum, 0) : 0;
+      pushNotices([
+        {
+          userId: cashTenant.id,
+          kind: "payment",
+          category: "payment",
+          type: "success",
+          title: cashStatus === "Partial" ? "Partial cash payment recorded" : "Cash payment recorded",
+          message:
+            cashStatus === "Partial"
+              ? `Your caretaker recorded your ${peso(cash.amount)} cash payment for ${cash.periodMonth}. ${peso(leftAfter)} is still due for that month.`
+              : `Your caretaker recorded your ${peso(cash.amount)} cash payment for ${cash.periodMonth}. Thank you!`,
+        },
+      ]).catch((err) => console.warn("Cash notice failed:", err?.code || err));
       notifyCashPaymentRecorded(
         {
           id: cashRef.id,
@@ -1555,7 +1635,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         "caretaker",
       );
       setCashOpen(false);
-      notify(`Recorded ${peso(cash.amount)} from ${cashTenant.name}.`);
+      notify(`Recorded ${peso(cash.amount)} from ${cashTenant.name}${cashStatus === "Partial" ? " as a partial payment" : ""}.`);
     } catch (err) {
       console.error("Failed to record cash payment:", err);
       setCashErrors({ form: "Couldn't record the payment. Please try again." });
@@ -1568,26 +1648,45 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const tenantsViewNow = viewOptions.includes(tenantsView) ? tenantsView : viewOptions[0] || "directory";
 
   // Past nights: one small read per night (no index needed), loaded when the history view opens
+  const fetchHistoryNights = async () => {
+    const [y, m, d] = nightKey.split("-").map(Number);
+    const keys = Array.from({ length: HISTORY_NIGHTS }, (_, i) => localDateKey(new Date(y, m - 1, d - i)));
+    const snaps = await Promise.all(keys.map((k) => getDoc(doc(db, "occupancy_logs", `${property.id}_${k}`))));
+    return snaps
+      .map((snap, i) => (snap.exists() ? { key: keys[i], ...snap.data({ serverTimestamps: "estimate" }) } : null))
+      .filter(Boolean);
+  };
+  // Refresh button
   const loadHistory = async () => {
     if (!property?.id) return;
     setHistory((h) => ({ ...h, loading: true, error: false }));
     try {
-      const [y, m, d] = nightKey.split("-").map(Number);
-      const keys = Array.from({ length: HISTORY_NIGHTS }, (_, i) => localDateKey(new Date(y, m - 1, d - i)));
-      const snaps = await Promise.all(keys.map((k) => getDoc(doc(db, "occupancy_logs", `${property.id}_${k}`))));
-      const nights = snaps
-        .map((snap, i) => (snap.exists() ? { key: keys[i], ...snap.data({ serverTimestamps: "estimate" }) } : null))
-        .filter(Boolean);
+      const nights = await fetchHistoryNights();
       setHistory({ loading: false, loaded: true, nights, error: false });
     } catch (err) {
       console.warn("Curfew history unavailable:", err?.code || err);
       setHistory((h) => ({ ...h, loading: false, error: true }));
     }
   };
+  // First open of the history view
+  const historyWanted = tenantsViewNow === "history" && activeTab === "tenants" && Boolean(property?.id);
+  const historyLoading = history.loading || (historyWanted && !history.loaded && !history.error);
   useEffect(() => {
-    if (tenantsViewNow === "history" && activeTab === "tenants" && !history.loaded && !history.loading && !history.error) loadHistory();
+    if (!historyWanted || history.loaded || history.error) return undefined;
+    let active = true;
+    fetchHistoryNights()
+      .then((nights) => {
+        if (active) setHistory({ loading: false, loaded: true, nights, error: false });
+      })
+      .catch((err) => {
+        console.warn("Curfew history unavailable:", err?.code || err);
+        if (active) setHistory((h) => ({ ...h, loading: false, error: true }));
+      });
+    return () => {
+      active = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tenantsViewNow, activeTab, history.loaded, property?.id]);
+  }, [historyWanted, history.loaded, history.error, property?.id]);
 
   const roomsByFloor = useMemo(() => {
     const m = new Map();
@@ -1736,10 +1835,21 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       </Box>
 
       {attention.length > 0 && (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25, mb: { xs: 2, sm: 3 } }}>
-          {attention.map(({ key, ...a }) => (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mb: { xs: 2, sm: 3 } }}>
+          {(attentionOpen ? attention : attention.slice(0, 2)).map(({ key, ...a }) => (
             <AttentionBanner key={key} {...a} />
           ))}
+          {attention.length > 2 && (
+            <Button
+              onClick={() => setAttentionOpen((v) => !v)}
+              color="inherit"
+              aria-expanded={attentionOpen}
+              endIcon={<ExpandMoreIcon sx={{ transform: attentionOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />}
+              sx={{ alignSelf: "flex-start", fontWeight: 700, minHeight: 36, py: 0.5, px: 1.5, borderRadius: 99, textTransform: "none", color: "text.secondary" }}
+            >
+              {attentionOpen ? "Show fewer" : `${attention.length - 2} more to check`}
+            </Button>
+          )}
         </Box>
       )}
 
@@ -1753,13 +1863,49 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       )}
 
       {/* Where things stand (tap a tile to open it) */}
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: { xs: 1.25, md: 2 }, mb: { xs: 2, sm: 3 }, ...rise(1) }}>
-        <StatTile title="Rooms" value={`${occupiedRooms}/${totalRooms}`} subtitle={`${Math.max(0, totalRooms - occupiedRooms)} available`} icon={<MeetingRoomOutlinedIcon fontSize="small" />} onClick={canTenantsTab ? () => goTab("tenants") : undefined} />
-        <StatTile title="Residents" value={activeTenants.length} subtitle="Active tenants" icon={<PeopleAltOutlinedIcon fontSize="small" />} onClick={canTenantsTab ? () => goTab("tenants") : undefined} />
-        {canFinancials && (
-          <StatTile title={`${currentPeriod.split(" ")[0]} rent`} value={peso(collected)} subtitle={`${paidCount} of ${rentTenants.length} paid`} icon={<PaymentIcon fontSize="small" />} onClick={() => goTab("payments")} />
-        )}
-      </Box>
+      {(() => {
+        const tiles = [
+          { key: "beds", title: "Beds filled", value: `${bedsUsed}/${totalBeds}`, subtitle: `${occupiedRooms} of ${totalRooms} rooms in use`, icon: <MeetingRoomOutlinedIcon fontSize="small" />, onClick: canTenantsTab ? () => goTab("tenants") : undefined },
+          { key: "residents", title: "Residents", value: activeTenants.length, subtitle: "Active tenants", icon: <PeopleAltOutlinedIcon fontSize="small" />, onClick: canTenantsTab ? openDirectory : undefined },
+          canOccupancy &&
+            curfewTime && {
+              key: "tonight",
+              title: "Tonight",
+              value: `${checkedCount}/${checkTenants.length}`,
+              subtitle: checkCounts.out > 0 ? `${checkCounts.out} out past curfew` : uncheckedCount > 0 ? `${uncheckedCount} not checked yet` : "Everyone checked",
+              tone: checkCounts.out > 0 ? "error" : undefined,
+              icon: <ScheduleIcon fontSize="small" />,
+              onClick: openCurfewCheck,
+            },
+          canReports && {
+            key: "requests",
+            title: "Open requests",
+            value: activeTickets.length,
+            subtitle: highTickets.length ? `${highTickets.length} high priority` : "None urgent",
+            tone: highTickets.length ? "error" : undefined,
+            icon: <BuildOutlinedIcon fontSize="small" />,
+            onClick: () => goTab("maintenance"),
+          },
+          canFinancials && { key: "rent", title: `${currentPeriod.split(" ")[0]} rent`, value: peso(collected), subtitle: `${paidCount} of ${rentTenants.length} paid`, icon: <PaymentIcon fontSize="small" />, onClick: () => goTab("payments") },
+        ].filter(Boolean);
+        return (
+          <Box
+            sx={{
+              display: "grid",
+              gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: `repeat(${Math.min(tiles.length, 5)}, minmax(0, 1fr))` },
+              gap: { xs: 1.25, md: 2 },
+              mb: { xs: 2, sm: 3 },
+              ...rise(1),
+              // An odd last tile spans the row on phones instead of leaving a hole
+              ...(tiles.length % 2 === 1 ? { "& > :last-of-type": { gridColumn: { xs: "1 / -1", md: "auto" } } } : {}),
+            }}
+          >
+            {tiles.map(({ key, ...t }) => (
+              <StatTile key={key} {...t} />
+            ))}
+          </Box>
+        );
+      })()}
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 2, md: 3 }, alignItems: "start" }}>
         <Box sx={{ display: "flex", flexDirection: "column", gap: { xs: 2, md: 3 }, minWidth: 0 }}>
@@ -1890,11 +2036,21 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         </Box>
       )}
       <Box sx={{ mb: 1.5 }}>
-        <SearchBox value={search} onChange={setSearch} placeholder="Search name or room" />
+        <SearchBox
+          value={search}
+          onChange={(v) => {
+            setSearch(v);
+            setRoomsShown(ROOM_PAGE);
+          }}
+          placeholder="Search name or room"
+        />
       </Box>
       <FilterChips
         value={tenantFilter}
-        onChange={setTenantFilter}
+        onChange={(v) => {
+          setTenantFilter(v);
+          setRoomsShown(ROOM_PAGE);
+        }}
         options={[
           { id: "active", label: "Active", n: activeTenants.length },
           { id: "inactive", label: "Inactive", n: tenants.length - activeTenants.length },
@@ -1917,16 +2073,32 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           />
         </Paper>
       ) : (
-        groupByRoom(filteredTenants).map(([room, list]) => (
-          <Box key={room || "none"} sx={{ mb: 2 }}>
-            <RoomHeader title={room ? `Room ${room}` : "No room yet"} meta={`${list.length} ${list.length === 1 ? "tenant" : "tenants"}`} />
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))", xl: "repeat(3, minmax(0, 1fr))" }, gap: 1 }}>
-              {list.map((t) => (
-                <TenantCard key={t.id} t={t} showRent={canFinancials} rentState={rentState[t.id]} onClick={() => setSelectedTenantId(t.id)} />
+        (() => {
+          const groups = groupByRoom(filteredTenants);
+          const shown = groups.slice(0, roomsShown);
+          const tenantsLeft = groups.slice(roomsShown).reduce((n, [, list]) => n + list.length, 0);
+          return (
+            <>
+              {shown.map(([room, list]) => (
+                <Box key={room || "none"} sx={{ mb: 2 }}>
+                  <RoomHeader title={room ? `Room ${room}` : "No room yet"} meta={`${list.length} ${list.length === 1 ? "tenant" : "tenants"}`} />
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))", xl: "repeat(3, minmax(0, 1fr))" }, gap: 1 }}>
+                    {list.map((t) => (
+                      <TenantCard key={t.id} t={t} showRent={canFinancials} rentState={rentState[t.id]} onClick={() => setSelectedTenantId(t.id)} />
+                    ))}
+                  </Box>
+                </Box>
               ))}
+              {groups.length > ROOM_PAGE && (
+                <Box sx={{ textAlign: "center", mt: 1 }}>
+              <Button size="small" onClick={() => setRoomsShown((n) => (n >= groups.length ? ROOM_PAGE : n + ROOM_PAGE))} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
+                {roomsShown >= groups.length ? "Show fewer rooms" : `Show ${Math.min(ROOM_PAGE, groups.length - roomsShown)} more rooms (${tenantsLeft} ${tenantsLeft === 1 ? "tenant" : "tenants"})`}
+              </Button>
             </Box>
-          </Box>
-        ))
+              )}
+            </>
+          );
+        })()
       )}
     </>
   );
@@ -2101,11 +2273,11 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const historyView = (
     <>
       <Box sx={{ ...row, justifyContent: "flex-end", mb: 1 }}>
-        <Button size="small" startIcon={<RefreshOutlinedIcon />} onClick={loadHistory} disabled={history.loading} sx={{ fontWeight: 700, textTransform: "none", minHeight: 40 }}>
+        <Button size="small" startIcon={<RefreshOutlinedIcon />} onClick={loadHistory} disabled={historyLoading} sx={{ fontWeight: 700, textTransform: "none", minHeight: 40 }}>
           Refresh
         </Button>
       </Box>
-      {history.loading && !history.loaded ? (
+      {historyLoading && !history.loaded ? (
         <Box sx={{ display: "grid", gap: 1 }}>
           {[0, 1, 2].map((k) => (
             <Skeleton key={k} variant="rounded" height={72} sx={{ borderRadius: 3 }} />
@@ -2121,7 +2293,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         </Paper>
       ) : (
         <Box sx={{ display: "grid", gap: 1 }}>
-          {history.nights.map((n) => {
+          {history.nights.slice(0, nightsShown).map((n) => {
             const list = Object.entries(n.entries || {}).map(([id, e]) => ({ id, ...e }));
             const count = (k) => list.filter((e) => e.status === k).length;
             const flagged = list.filter((e) => e.status === "out" || e.status === "late").sort((a, b) => String(a.roomNumber).localeCompare(String(b.roomNumber), undefined, { numeric: true }));
@@ -2181,6 +2353,13 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
               </Paper>
             );
           })}
+          {history.nights.length > NIGHT_PAGE && (
+            <Box sx={{ textAlign: "center", mt: 1 }}>
+              <Button size="small" onClick={() => setNightsShown((n) => (n >= history.nights.length ? NIGHT_PAGE : n + NIGHT_PAGE))} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
+                {nightsShown >= history.nights.length ? "Show fewer nights" : `Show ${Math.min(NIGHT_PAGE, history.nights.length - nightsShown)} older nights`}
+              </Button>
+            </Box>
+          )}
         </Box>
       )}
     </>
@@ -2206,7 +2385,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                 aria-pressed={tenantsViewNow === v.id}
                 variant={tenantsViewNow === v.id ? "contained" : "text"}
                 color={tenantsViewNow === v.id ? "primary" : "inherit"}
-                sx={{ flex: 1, minHeight: 42, px: 1, fontWeight: 800, borderRadius: 2.5, textTransform: "none", boxShadow: "none", color: tenantsViewNow === v.id ? undefined : "text.secondary" }}
+                sx={{ flex: 1, minWidth: 0, minHeight: 42, px: 1, fontWeight: 800, fontSize: { xs: 13, sm: 14 }, whiteSpace: "nowrap", borderRadius: 2.5, textTransform: "none", boxShadow: "none", color: tenantsViewNow === v.id ? undefined : "text.secondary" }}
               >
                 {v.label}
                 {v.badge > 0 && <Chip size="small" color="error" label={v.badge} sx={{ ml: 0.75, height: 20, fontWeight: 800 }} />}
@@ -2249,11 +2428,18 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
             </Paper>
           ) : (
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.5, sm: 2 } }}>
-              {shownTickets.map((t, i) => (
-                <Box key={t.id} sx={{ ...rise(i), minWidth: 0 }}>
+              {shownTickets.slice(0, ticketsShown).map((t, i) => (
+                <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0 }}>
                   <RequestCard t={t} busy={busyTicket === t.id} onStatus={changeTicketStatus} />
                 </Box>
               ))}
+            </Box>
+          )}
+          {shownTickets.length > LIST_PAGE && (
+            <Box sx={{ textAlign: "center", mt: 1.5 }}>
+              <Button size="small" onClick={() => setTicketsShown((n) => (n >= shownTickets.length ? LIST_PAGE : n + LIST_PAGE))} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
+                {ticketsShown >= shownTickets.length ? "Show fewer" : `Show ${Math.min(LIST_PAGE, shownTickets.length - ticketsShown)} more requests`}
+              </Button>
             </Box>
           )}
 
@@ -2273,11 +2459,18 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
               </Button>
               {archiveOpen && (
                 <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.5, sm: 2 }, mt: 1.5 }}>
-                  {resolvedTickets.map((t) => (
+                  {resolvedTickets.slice(0, archiveShown).map((t) => (
                     <Box key={t.id} sx={{ minWidth: 0, opacity: 0.85 }}>
                       <RequestCard t={t} busy={busyTicket === t.id} onStatus={changeTicketStatus} compact />
                     </Box>
                   ))}
+                </Box>
+              )}
+              {archiveOpen && resolvedTickets.length > LIST_PAGE && (
+                <Box sx={{ textAlign: "center", mt: 1.5 }}>
+                  <Button size="small" onClick={() => setArchiveShown((n) => (n >= resolvedTickets.length ? LIST_PAGE : n + LIST_PAGE))} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
+                    {archiveShown >= resolvedTickets.length ? "Show fewer" : `Show ${Math.min(LIST_PAGE, resolvedTickets.length - archiveShown)} more`}
+                  </Button>
                 </Box>
               )}
             </Box>
@@ -2306,7 +2499,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: { xs: 1.25, md: 2 }, mb: { xs: 2, sm: 3 } }}>
         <StatTile title="Collected" value={peso(collected)} subtitle={currentPeriod} icon={<PaymentsOutlinedIcon fontSize="small" />} />
         <StatTile title="Paid" value={`${paidCount}/${rentTenants.length}`} subtitle="Tenants this month" icon={<CheckCircleOutlinedIcon fontSize="small" />} />
-        <StatTile title="Verifying" value={pendingCount} subtitle="Waiting for owner" icon={<HistoryIcon fontSize="small" />} />
+        <StatTile title="Verifying" value={pendingCount} subtitle="Waiting for the owner" icon={<HistoryIcon fontSize="small" />} />
         <StatTile title="Unpaid" value={unpaidTenants.length} subtitle="Still to collect" tone={unpaidTenants.length > 0 ? "error" : undefined} icon={<WarningAmberOutlinedIcon fontSize="small" />} />
       </Box>
 
@@ -2317,7 +2510,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           </Typography>
         ) : (
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
-            {unpaidTenants.map((t) => (
+            {unpaidTenants.slice(0, unpaidShown).map((t) => (
               <Box key={t.id} sx={{ ...row, gap: 1.25, p: 1.25, borderRadius: 2.5, border: "1px solid", borderColor: "divider" }}>
                 <Box sx={{ minWidth: 0, flex: 1 }}>
                   <Typography sx={{ fontWeight: 800, lineHeight: 1.25 }} noWrap>
@@ -2325,15 +2518,25 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                   </Typography>
                   <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
                     Room {t.roomNumber}
-                    {t.rent ? ` · ${peso(t.rent)}` : ""}
+                    {rentState[t.id] === "partial" && t.rent
+                      ? ` · ${peso(Math.max(t.rent - receivedFrom(t.id, currentPeriod), 0))} left of ${peso(t.rent)}`
+                      : t.rent
+                        ? ` · ${peso(t.rent)}`
+                        : ""}
                     {rentState[t.id] === "rejected" ? " · last payment rejected" : ""}
                   </Typography>
                 </Box>
+                {rentState[t.id] === "partial" && <Pill label="Partial" tone="warning" sx={{ flexShrink: 0, display: { xs: "none", sm: "inline-flex" } }} />}
                 <Button size="small" variant="outlined" onClick={() => openCash(t.id)} sx={{ fontWeight: 700, borderRadius: 2, minHeight: 40, flexShrink: 0, textTransform: "none" }}>
                   Record cash
                 </Button>
               </Box>
             ))}
+            {unpaidTenants.length > LIST_PAGE && (
+              <Button size="small" onClick={() => setUnpaidShown((n) => (n >= unpaidTenants.length ? LIST_PAGE : n + LIST_PAGE))} sx={{ alignSelf: "center", fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
+                {unpaidShown >= unpaidTenants.length ? "Show fewer" : `Show ${Math.min(LIST_PAGE, unpaidTenants.length - unpaidShown)} more`}
+              </Button>
+            )}
           </Box>
         )}
       </Panel>
@@ -2356,8 +2559,9 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
             options={[
               { id: "all", label: "All", n: payCounts.all },
               { id: "paid", label: "Paid", n: payCounts.paid },
+              ...(payCounts.partial > 0 ? [{ id: "partial", label: "Partial", n: payCounts.partial }] : []),
               { id: "pending", label: "Pending", n: payCounts.pending },
-              { id: "rejected", label: "Rejected", n: payCounts.rejected },
+              ...(payCounts.rejected > 0 ? [{ id: "rejected", label: "Rejected", n: payCounts.rejected }] : []),
             ]}
           />
           {shownPayments.length === 0 ? (
@@ -2372,9 +2576,11 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
             </Box>
           )}
           {shownPayments.length > payLimit && (
-            <Button fullWidth onClick={() => setPayLimit((n) => n + 20)} sx={{ mt: 1.5, minHeight: 46, fontWeight: 700, textTransform: "none" }}>
-              Show more ({shownPayments.length - payLimit} left)
-            </Button>
+            <Box sx={{ textAlign: "center", mt: 1.5 }}>
+              <Button size="small" onClick={() => setPayLimit((n) => n + 20)} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
+                Show {Math.min(20, shownPayments.length - payLimit)} more
+              </Button>
+            </Box>
           )}
         </>
       )}
@@ -2431,6 +2637,9 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
     if (rooms.some((r) => r.id !== roomDlg.id && String(r.roomName).trim().toLowerCase() === name.toLowerCase())) return setRoomDlg((d) => ({ ...d, error: "Another room already uses that name." }));
     if (capacity < 1) return setRoomDlg((d) => ({ ...d, error: "A room needs at least one bed." }));
     if (capacity < editingOccupants) return setRoomDlg((d) => ({ ...d, error: `${editingOccupants} ${editingOccupants === 1 ? "tenant lives" : "tenants live"} here, so it needs at least ${editingOccupants} ${editingOccupants === 1 ? "bed" : "beds"}.` }));
+    // Tenants are linked to their room by its name, so renaming would leave them without a room
+    if (editingRoom && editingOccupants > 0 && name !== String(editingRoom.roomName).trim())
+      return setRoomDlg((d) => ({ ...d, error: `${editingOccupants} ${editingOccupants === 1 ? "tenant is" : "tenants are"} assigned to ${editingRoom.roomName}. Ask the owner to move them before renaming the room.` }));
     if (!(rate >= 0)) return setRoomDlg((d) => ({ ...d, error: "Enter the monthly rate per bed (0 or more)." }));
     if (editingRoom) {
       saveRooms(rooms.map((r) => (r.id === roomDlg.id ? { ...r, roomName: name, floor, capacity, monthlyRatePerBed: rate } : r)), `Saved ${name}.`);
@@ -2857,12 +3066,30 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                     setCashErrors((er) => ({ ...er, amount: undefined }));
                   }}
                   error={Boolean(cashErrors.amount)}
-                  helperText={cashErrors.amount || (cashTenant?.rent ? `Room rate: ${peso(cashTenant.rent)}` : undefined)}
+                  helperText={
+                    cashErrors.amount ||
+                    (cashTenant?.rent
+                      ? cashReceivedBefore > 0
+                        ? `Rent ${peso(cashTenant.rent)} · already received ${peso(cashReceivedBefore)} · ${peso(cashBalance)} left`
+                        : `Monthly rent: ${peso(cashTenant.rent)}`
+                      : undefined)
+                  }
                   slotProps={{ htmlInput: { inputMode: "decimal", min: 0, step: "any" } }}
                 />
 
                 <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
-                  <TextField select fullWidth label="Rent for" value={cash.periodMonth} onChange={(e) => setCash((c) => ({ ...c, periodMonth: e.target.value }))} slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}>
+                  <TextField
+                    select
+                    fullWidth
+                    label="Rent for"
+                    value={cash.periodMonth}
+                    onChange={(e) => {
+                      const period = e.target.value;
+                      const owed = cashTenant?.rent ? Math.max(cashTenant.rent - receivedFrom(cashTenant.id, period), 0) : 0;
+                      setCash((c) => ({ ...c, periodMonth: period, amount: !amountTouched && owed > 0 ? String(owed) : c.amount }));
+                    }}
+                    slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}
+                  >
                     {periodOptions.map((p) => (
                       <option key={p} value={p}>
                         {p}
@@ -2884,15 +3111,25 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                   />
                 </Box>
 
+                {cashTenant && cashAmountNum > 0 && cashBalance !== null && (
+                  <Alert severity={cashStatus === "Partial" ? "info" : "success"} sx={{ borderRadius: 2 }}>
+                    {cashStatus === "Partial"
+                      ? `Saved as a partial payment. ${peso(cashBalance - cashAmountNum)} will still be due for ${cash.periodMonth}.`
+                      : cashAmountNum > cashBalance && cashBalance > 0
+                        ? `That's ${peso(cashAmountNum - cashBalance)} more than what's left for ${cash.periodMonth}. Saved as paid.`
+                        : `This settles ${cash.periodMonth} in full.`}
+                  </Alert>
+                )}
+
                 <TextField fullWidth label="Notes (optional)" multiline minRows={2} value={cash.notes} onChange={(e) => setCash((c) => ({ ...c, notes: e.target.value }))} />
 
                 <Box>
                   <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
                     PHOTO OF THE RECEIPT OR CASH (OPTIONAL)
                   </Typography>
-                  {cashProofPreview ? (
+                  {cashProof ? (
                     <Box sx={{ ...row, gap: 1.5, mt: 0.75 }}>
-                      <Box component="img" src={cashProofPreview} alt="Selected photo" sx={{ width: 72, height: 72, borderRadius: 2, objectFit: "cover", border: "1px solid", borderColor: "divider" }} />
+                      <Box component="img" ref={cashPreviewRef} alt="Selected photo" sx={{ width: 72, height: 72, borderRadius: 2, objectFit: "cover", border: "1px solid", borderColor: "divider" }} />
                       <Button color="inherit" onClick={() => setCashProof(null)} disabled={cashSaving} sx={{ fontWeight: 700, textTransform: "none", minHeight: 44 }}>
                         Remove
                       </Button>
@@ -2912,7 +3149,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
               Cancel
             </Button>
             <Button type="submit" variant="contained" disabled={cashSaving || !online} sx={{ minHeight: 46, fontWeight: 800, borderRadius: 2.5, px: 3, textTransform: "none" }}>
-              {cashSaving ? "Saving..." : "Save cash payment"}
+              {cashSaving ? "Saving..." : cashStatus === "Partial" ? "Save partial payment" : "Save cash payment"}
             </Button>
           </DialogActions>
         </Box>

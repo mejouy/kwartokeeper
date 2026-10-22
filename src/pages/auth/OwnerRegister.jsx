@@ -32,6 +32,7 @@ import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
 import AuthLayout, { FormHeading } from "../../components/AuthLayout";
 import { fieldSx, primaryButtonSx } from "../../components/authStyles";
+import { loadPlatformSettings } from "../../utils/platformSettings";
 
 // Same building as the login page, with a different set of lit windows.
 const LIT_PATTERN = [
@@ -121,6 +122,9 @@ export default function OwnerRegister() {
       );
       const user = userCredential.user;
 
+      // Admin → Settings can let new owners in without review
+      const { autoApproveOwners } = await loadPlatformSettings({ fresh: true });
+
       // Write user profile document to Firestore
       await setDoc(doc(db, "users", user.uid), {
         uid: user.uid,
@@ -128,8 +132,10 @@ export default function OwnerRegister() {
         email: form.email.trim(),
         phone: form.phone.trim(),
         role: "owner",
-        status: "pending", // <--- FIXED: Changed from "active" to "pending"
-        approvalStatus: "pending",
+        // Waits for an admin's review, unless auto-approve is on (the rules check the same setting)
+        status: autoApproveOwners ? "active" : "pending",
+        approvalStatus: autoApproveOwners ? "approved" : "pending",
+        ...(autoApproveOwners ? { autoApproved: true } : {}),
         verificationDocs: {
           idUrl: null,
           clearanceUrl: null,

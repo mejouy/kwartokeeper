@@ -1,8 +1,11 @@
 // src/pages/admin/ManageOwners.jsx
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Alert, Avatar, Box, Button, Chip, IconButton, InputBase, LinearProgress, MenuItem, Paper, Skeleton, TextField, Typography } from "@mui/material";
+import PersonAddAltOutlinedIcon from "@mui/icons-material/PersonAddAltOutlined";
+import VerifiedUserOutlinedIcon from "@mui/icons-material/VerifiedUserOutlined";
+import BlockOutlinedIcon from "@mui/icons-material/BlockOutlined";
 import { alpha } from "@mui/material/styles";
 import SearchIcon from "@mui/icons-material/Search";
 import CloseIcon from "@mui/icons-material/Close";
@@ -12,6 +15,12 @@ import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
 import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import { ownerRefCode, normalizeRef } from "../../utils/ownerRef";
+import { ownerAccessOf } from "../../utils/ownerAccess";
+import { occupancyOf, bedsInProperty, holdsBed, tenantPropertyId } from "../../utils/occupancy";
+import { HeaderCard, FilterPills } from "./adminUi";
+import { withoutRemoved } from "../../utils/accountState";
+
+const PAGE = 25; // owners listed at a time
 
 const row = { display: "flex", alignItems: "center" };
 const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
@@ -33,15 +42,9 @@ const keyOf = (v) => String(v || "").trim().toLowerCase();
 const ownerNameOf = (o) =>
   o.fullName || o.name || (o.firstName && o.lastName ? `${o.firstName} ${o.lastName}` : "New owner");
 
-// Same rule as the owner page and the dashboard: an owner is pending if either
-// status or approvalStatus says so (this includes owners who resubmitted their
-// documents), then rejected, then suspended, else active.
-const statusOf = (o) => {
-  if (o.status === "pending" || o.approvalStatus === "pending") return "pending";
-  if (o.approvalStatus === "rejected") return "rejected";
-  if (o.status === "suspended") return "suspended";
-  return "active";
-};
+// The same rule the route guard uses (suspended / rejected / pending / active),
+// so the admin list always matches what the owner can actually do
+const statusOf = (o) => ownerAccessOf(o);
 
 const docsComplete = (o) => !!(o.verificationDocs?.idUrl && o.verificationDocs?.clearanceUrl);
 
@@ -83,45 +86,6 @@ function StatusPill({ status }) {
   );
 }
 
-function SummaryStrip({ items }) {
-  return (
-    <Paper
-      elevation={0}
-      sx={{
-        ...cardSx,
-        overflow: "hidden",
-        display: "grid",
-        gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" },
-        mb: { xs: 2, sm: 2.5 },
-      }}
-    >
-      {items.map((item, i) => (
-        <Box
-          key={item.label}
-          sx={{
-            px: { xs: 1.75, sm: 2.5 },
-            py: { xs: 1.25, sm: 1.75 },
-            minWidth: 0,
-            borderTop: { xs: i > 1 ? "1px solid" : "none", md: "none" },
-            borderLeft: { xs: i % 2 === 1 ? "1px solid" : "none", md: i === 0 ? "none" : "1px solid" },
-            borderColor: "divider",
-          }}
-        >
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }} noWrap component="div">
-            {item.label}
-          </Typography>
-          <Typography
-            noWrap
-            sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: { xs: "1.2rem", sm: "1.45rem" }, lineHeight: 1.25, color: item.color }}
-          >
-            {item.value}
-          </Typography>
-        </Box>
-      ))}
-    </Paper>
-  );
-}
-
 export default function ManageOwners() {
   const navigate = useNavigate();
   const [owners, setOwners] = useState([]);
@@ -131,7 +95,8 @@ export default function ManageOwners() {
   const [filterTab, setFilterTab] = useState("all");
   const [sortBy, setSortBy] = useState("newest");
   const [properties, setProperties] = useState([]);
-  const [tenantCounts, setTenantCounts] = useState({});
+  const [tenantSources, setTenantSources] = useState({ tenants: [], users: [] });
+  const [shown, setShown] = useState(PAGE);
 
   useEffect(() => {
     const q = query(collection(db, "users"), where("role", "==", "owner"));
@@ -149,7 +114,7 @@ export default function ManageOwners() {
           return toMillis(b.createdAt) - toMillis(a.createdAt);
         });
 
-        setOwners(ownerData);
+        setOwners(withoutRemoved(ownerData));
         setError("");
         setLoading(false);
       },
@@ -165,39 +130,54 @@ export default function ManageOwners() {
   useEffect(() => {
     const unsubProps = onSnapshot(
       collection(db, "properties"),
-      (snap) => setProperties(snap.docs.map((d) => d.data())),
+      (snap) => setProperties(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
       (e) => console.warn("Could not load properties:", e)
     );
+    // Tenants can be saved in "tenants", in "users", or both (same id)
     const unsubTenants = onSnapshot(
       collection(db, "tenants"),
-      (snap) => {
-        const map = {};
-        snap.docs.forEach((d) => {
-          const k = keyOf(d.data().ownerUid);
-          if (k) map[k] = (map[k] || 0) + 1;
-        });
-        setTenantCounts(map);
-      },
+      (snap) => setTenantSources((s) => ({ ...s, tenants: snap.docs.map((d) => ({ id: d.id, ...d.data() })) })),
       (e) => console.warn("Could not load tenants:", e)
+    );
+    const unsubTenantUsers = onSnapshot(
+      query(collection(db, "users"), where("role", "==", "tenant")),
+      (snap) => setTenantSources((s) => ({ ...s, users: snap.docs.map((d) => ({ id: d.id, ...d.data() })) })),
+      (e) => console.warn("Could not load tenant profiles:", e)
     );
     return () => {
       unsubProps();
       unsubTenants();
+      unsubTenantUsers();
     };
   }, []);
 
-  const portfolioByOwner = useMemo(() => {
+  const { portfolioByOwner, tenantCounts } = useMemo(() => {
+    const merged = new Map();
+    [...tenantSources.tenants, ...tenantSources.users].forEach((t) => {
+      const id = t.uid || t.id;
+      merged.set(id, { ...(merged.get(id) || {}), ...t });
+    });
+    const tenants = [...merged.values()];
+    // Same occupancy rule as the owner pages: beds from rooms, occupied = current tenants
+    const occ = occupancyOf(properties.map((p) => ({ id: p.id, beds: bedsInProperty(p) })), tenants);
+    const ownerOfProperty = new Map(properties.map((p) => [p.id, keyOf(p.ownerUid ?? p.ownerId ?? p.createdBy)]));
     const map = {};
     properties.forEach((p) => {
-      const k = keyOf(p.ownerUid ?? p.ownerId ?? p.createdBy);
+      const k = ownerOfProperty.get(p.id);
       if (!k) return;
       const m = (map[k] = map[k] || { properties: 0, beds: 0, occupied: 0 });
+      const o = occ.byProperty.get(p.id) || { beds: 0, occupied: 0 };
       m.properties += 1;
-      m.beds += Number(p.totalBeds) || 0;
-      m.occupied += Number(p.occupiedBeds) || 0;
+      m.beds += o.beds;
+      m.occupied += o.occupied;
     });
-    return map;
-  }, [properties]);
+    const counts = {};
+    tenants.filter(holdsBed).forEach((t) => {
+      const k = ownerOfProperty.get(tenantPropertyId(t)) || keyOf(t.ownerUid);
+      if (k) counts[k] = (counts[k] || 0) + 1;
+    });
+    return { portfolioByOwner: map, tenantCounts: counts };
+  }, [properties, tenantSources]);
 
   const counts = useMemo(() => {
     const c = { all: owners.length, pending: 0, active: 0, suspended: 0, rejected: 0 };
@@ -255,9 +235,15 @@ export default function ManageOwners() {
 
   return (
     <Box>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: { xs: 2, sm: 2.5 } }}>
-        Manage registered platform owners and review pending applications.
-      </Typography>
+      <HeaderCard
+        description="Review new owner registrations, and open any owner to see their properties, tenants and documents."
+        tiles={[
+          { label: "Owners", value: counts.all, sub: "Signed up", icon: <SupervisorAccountOutlinedIcon />, onClick: () => setFilterTab("all") },
+          { label: "Active", value: counts.active, sub: "Approved", icon: <VerifiedUserOutlinedIcon />, onClick: () => setFilterTab("active") },
+          { label: "Waiting for review", value: counts.pending, sub: counts.pending ? "Needs a decision" : "Nothing waiting", icon: <PersonAddAltOutlinedIcon />, tone: counts.pending ? "warning" : undefined, onClick: () => setFilterTab("pending") },
+          { label: "Suspended or declined", value: counts.suspended + counts.rejected, sub: `${counts.suspended} suspended · ${counts.rejected} declined`, icon: <BlockOutlinedIcon />, tone: counts.suspended + counts.rejected ? "error" : undefined, onClick: () => setFilterTab(counts.suspended ? "suspended" : "rejected") },
+        ]}
+      />
 
       {error && <Alert severity="error" sx={{ mb: 2, borderRadius: 2 }}>{error}</Alert>}
 
@@ -270,17 +256,6 @@ export default function ManageOwners() {
       ) : (
         <>
           {owners.length > 0 && (
-            <SummaryStrip
-              items={[
-                { label: "Owners", value: counts.all },
-                { label: "Active", value: counts.active, color: counts.active > 0 ? "success.main" : undefined },
-                { label: "Pending review", value: counts.pending, color: counts.pending > 0 ? "warning.main" : undefined },
-                { label: "Suspended", value: counts.suspended, color: counts.suspended > 0 ? "error.main" : undefined },
-              ]}
-            />
-          )}
-
-          {owners.length > 0 && (
             <Box sx={{ mb: { xs: 2, sm: 2.5 } }}>
               <Box sx={{ display: "flex", flexDirection: { xs: "column", sm: "row" }, gap: 1.25, mb: 1.5 }}>
                 <Paper elevation={0} sx={{ ...row, gap: 1, px: 1.5, ...cardSx, height: 46, flex: 1, maxWidth: { sm: 460 } }}>
@@ -289,7 +264,10 @@ export default function ManageOwners() {
                     fullWidth
                     placeholder="Search name, email, phone or reference no."
                     value={search}
-                    onChange={(e) => setSearch(e.target.value)}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      setShown(PAGE);
+                    }}
                     slotProps={{ input: { "aria-label": "Search owners" } }}
                   />
                   {search && (
@@ -312,29 +290,14 @@ export default function ManageOwners() {
                 </TextField>
               </Box>
 
-              <Box
-                sx={{
-                  display: "flex",
-                  gap: 1,
-                  overflowX: "auto",
-                  mx: { xs: -2, sm: 0 },
-                  px: { xs: 2, sm: 0 },
-                  scrollbarWidth: "none",
-                  "&::-webkit-scrollbar": { display: "none" },
+              <FilterPills
+                value={filterTab}
+                onChange={(v) => {
+                  setFilterTab(v);
+                  setShown(PAGE);
                 }}
-              >
-                {tabs.map((t) => (
-                  <Chip
-                    key={t.value}
-                    label={`${t.label} · ${counts[t.value]}`}
-                    clickable
-                    onClick={() => setFilterTab(t.value)}
-                    color={filterTab === t.value ? "primary" : "default"}
-                    variant={filterTab === t.value ? "filled" : "outlined"}
-                    sx={{ fontWeight: 700, flexShrink: 0, height: 34, borderRadius: 17 }}
-                  />
-                ))}
-              </Box>
+                options={tabs.map((t) => ({ id: t.value, label: t.label, count: counts[t.value] }))}
+              />
             </Box>
           )}
 
@@ -454,7 +417,7 @@ export default function ManageOwners() {
                   ))}
                 </Box>
 
-                {listOwners.map((owner) => {
+                {listOwners.slice(0, shown).map((owner) => {
                   const name = ownerNameOf(owner);
                   const status = statusOf(owner);
                   const tone = metaOf(status).tone;
@@ -562,6 +525,13 @@ export default function ManageOwners() {
                   );
                 })}
               </Paper>
+              {listOwners.length > PAGE && (
+                <Box sx={{ textAlign: "center", mt: 1.5 }}>
+                  <Button size="small" onClick={() => setShown((n) => (n >= listOwners.length ? PAGE : n + PAGE))} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, px: 1.75 }}>
+                    {shown >= listOwners.length ? "Show fewer" : `Show ${Math.min(PAGE, listOwners.length - shown)} more owners`}
+                  </Button>
+                </Box>
+              )}
             </>
           ) : null}
         </>

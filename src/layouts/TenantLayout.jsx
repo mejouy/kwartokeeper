@@ -1,79 +1,22 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
-import {
-  Box,
-  Divider,
-  IconButton,
-  List,
-  ListItem,
-  ListItemButton,
-  ListItemIcon,
-  ListItemText,
-  Paper,
-  BottomNavigation,
-  BottomNavigationAction,
-  Toolbar,
-  Typography,
-} from "@mui/material";
-import { alpha } from "@mui/material/styles";
-import DashboardIcon from "@mui/icons-material/Dashboard";
+import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import AccountCircleOutlinedIcon from "@mui/icons-material/AccountCircleOutlined";
-import PaymentIcon from "@mui/icons-material/Payment";
+import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
-import LogoutIcon from "@mui/icons-material/Logout";
-import NotificationFeed from "../components/NotificationFeed";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { auth } from "../config/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { auth, db } from "../config/firebase";
 import { checkLeaseEndsOnTenantAppOpen } from "../utils/leaseEndNotifications";
+import AppShell from "./AppShell";
 
-const drawerWidth = 288;
-const BAR_H = { xs: 56, md: 80 }; // shared by the top bar and the sidebar header so their dividers line up
-const BOTTOM_NAV_H = 64;
-
+// Phone order = how often tenants need them: home, pay, repairs, profile
 const NAV_ITEMS = [
-  { id: "overview", label: "Overview", icon: <DashboardIcon /> },
-  { id: "profile", label: "Profile", icon: <AccountCircleOutlinedIcon /> },
-  { id: "payments", label: "Payments", icon: <PaymentIcon /> },
-  { id: "maintenance", label: "Maintenance", icon: <BuildOutlinedIcon /> },
+  { id: "overview", text: "Overview", short: "Home", icon: <DashboardOutlinedIcon /> },
+  { id: "payments", text: "Payments", short: "Payments", icon: <PaymentsOutlinedIcon /> },
+  { id: "maintenance", text: "Repairs", short: "Repairs", icon: <BuildOutlinedIcon /> },
+  { id: "profile", text: "My room & rules", short: "Profile", icon: <AccountCircleOutlinedIcon /> },
 ];
-
-const formatToday = () =>
-  new Date().toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
-
-// Today's date, kept correct for apps that stay open for days (common on
-// phones): refreshes just after midnight and whenever the app returns to the
-// foreground.
-function useTodayLabel() {
-  const [label, setLabel] = useState(formatToday);
-
-  useEffect(() => {
-    let timer;
-    const refresh = () => setLabel(formatToday());
-
-    const scheduleMidnightRefresh = () => {
-      const now = new Date();
-      const nextMidnight = new Date(now);
-      nextMidnight.setHours(24, 0, 5, 0);
-      timer = setTimeout(() => {
-        refresh();
-        scheduleMidnightRefresh();
-      }, nextMidnight - now);
-    };
-
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
-
-    scheduleMidnightRefresh();
-    document.addEventListener("visibilitychange", onVisibilityChange);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, []);
-
-  return label;
-}
 
 // The open tab lives in the URL hash (/tenant#payments). Reloading keeps the
 // tab, the browser's Back button works, and no route changes are needed in App.
@@ -86,22 +29,29 @@ export default function TenantLayout({ children }) {
   const navigate = useNavigate();
   const location = useLocation();
   const activeTab = tabFromHash(location.hash);
-  const todayLabel = useTodayLabel();
   const activeNavItem = NAV_ITEMS.find((item) => item.id === activeTab) || NAV_ITEMS[0];
-  const isOverview = activeNavItem.id === "overview";
+  const [profile, setProfile] = useState({ name: "", subtitle: "" });
 
+  // Who's signed in (for the profile card) + the lease-end reminder check on app open
   useEffect(() => {
     let active = true;
     let tenantUid = "";
     const check = () => {
       if (!active || !tenantUid || document.visibilityState !== "visible") return;
-      checkLeaseEndsOnTenantAppOpen(tenantUid).catch((error) =>
-        console.error("Unable to check tenant lease-end notification:", error)
-      );
+      checkLeaseEndsOnTenantAppOpen(tenantUid).catch((error) => console.error("Unable to check tenant lease-end notification:", error));
     };
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       tenantUid = user?.uid || "";
       check();
+      if (!user) return;
+      getDoc(doc(db, "users", user.uid))
+        .then((snap) => {
+          if (!active) return;
+          const d = snap.exists() ? snap.data() : {};
+          const room = d.roomId || d.roomNumber;
+          setProfile({ name: d.fullName || d.name || user.displayName || "Tenant", subtitle: room ? `Tenant · Room ${room}` : user.email || "Tenant" });
+        })
+        .catch(() => active && setProfile({ name: user.displayName || "Tenant", subtitle: user.email || "Tenant" }));
     });
     document.addEventListener("visibilitychange", check);
     return () => {
@@ -124,25 +74,18 @@ export default function TenantLayout({ children }) {
   // Forcefully override parent #root styles from inside this layout component alone
   useEffect(() => {
     const rootEl = document.getElementById("root");
-    if (rootEl) {
-      const originalMaxWidth = rootEl.style.maxWidth;
-      const originalMargin = rootEl.style.margin;
-      const originalPadding = rootEl.style.padding;
-      const originalWidth = rootEl.style.width;
-
-      rootEl.style.setProperty("max-width", "none", "important");
-      rootEl.style.setProperty("width", "100%", "important");
-      rootEl.style.setProperty("margin", "0", "important");
-      rootEl.style.setProperty("padding", "0", "important");
-
-      return () => {
-        rootEl.style.maxWidth = originalMaxWidth;
-        rootEl.style.margin = originalMargin;
-        rootEl.style.padding = originalPadding;
-        rootEl.style.width = originalWidth;
-      };
-    }
-    return undefined;
+    if (!rootEl) return undefined;
+    const original = { maxWidth: rootEl.style.maxWidth, margin: rootEl.style.margin, padding: rootEl.style.padding, width: rootEl.style.width };
+    rootEl.style.setProperty("max-width", "none", "important");
+    rootEl.style.setProperty("width", "100%", "important");
+    rootEl.style.setProperty("margin", "0", "important");
+    rootEl.style.setProperty("padding", "0", "important");
+    return () => {
+      rootEl.style.maxWidth = original.maxWidth;
+      rootEl.style.margin = original.margin;
+      rootEl.style.padding = original.padding;
+      rootEl.style.width = original.width;
+    };
   }, []);
 
   const handleLogout = async () => {
@@ -154,196 +97,18 @@ export default function TenantLayout({ children }) {
     }
   };
 
-  const sidebar = (
-    <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Brand header: same height as the top bar so the divider lines up */}
-      <Toolbar sx={{ px: 2.5, height: BAR_H, minHeight: BAR_H }}>
-        <Box
-          component="img"
-          src="/KwartoKeeper-Secondary-Logo.png"
-          alt="KwartoKeeper"
-          sx={{ display: "block", height: 64, maxWidth: "100%", width: "auto", objectFit: "contain" }}
-        />
-      </Toolbar>
-      <Divider />
-
-      <Box sx={{ flexGrow: 1, overflowY: "auto" }}>
-        <Typography
-          variant="caption"
-          sx={{ display: "block", px: 3, pt: 2, pb: 0.5, fontWeight: 800, letterSpacing: 0.8, color: "text.secondary" }}
-        >
-          TENANT PORTAL
-        </Typography>
-        <List sx={{ py: 0.5 }}>
-          {NAV_ITEMS.map((item) => (
-            <ListItem key={item.id} disablePadding>
-              <ListItemButton
-                selected={activeNavItem.id === item.id}
-                onClick={() => setActiveTab(item.id)}
-                sx={{
-                  mx: 1.5,
-                  my: 0.25,
-                  borderRadius: 2,
-                  "&.Mui-selected": {
-                    bgcolor: "rgba(255, 69, 0, 0.10)",
-                    color: "primary.main",
-                    "&:hover": { bgcolor: "rgba(255, 69, 0, 0.14)" },
-                  },
-                  "&.Mui-selected .MuiListItemIcon-root": { color: "primary.main" },
-                }}
-              >
-                <ListItemIcon sx={{ minWidth: 40 }}>{item.icon}</ListItemIcon>
-                <ListItemText primary={item.label} slotProps={{ primary: { sx: { fontWeight: 600 } } }} />
-              </ListItemButton>
-            </ListItem>
-          ))}
-        </List>
-      </Box>
-
-      <Divider />
-      <Box sx={{ p: 1.5 }}>
-        <ListItemButton
-          onClick={handleLogout}
-          sx={{ borderRadius: 2, color: "error.main", "&:hover": { bgcolor: "rgba(211, 47, 47, 0.08)" } }}
-        >
-          <ListItemIcon sx={{ color: "error.main", minWidth: 40 }}>
-            <LogoutIcon />
-          </ListItemIcon>
-          <ListItemText primary="Logout" slotProps={{ primary: { sx: { fontWeight: 600 } } }} />
-        </ListItemButton>
-      </Box>
-    </Box>
-  );
-
   return (
-    <Box
-      sx={{
-        display: "flex",
-        minHeight: "100dvh", // dvh: phone browser toolbars don't push the bottom nav off-screen
-        width: "100%",
-        bgcolor: (theme) => alpha(theme.palette.background.paper, 0.35),
-      }}
+    <AppShell
+      groups={[{ heading: null, items: NAV_ITEMS }]}
+      activeId={activeNavItem.id}
+      onSelect={setActiveTab}
+      title={activeNavItem.id === "overview" ? "" : activeNavItem.text}
+      profile={profile}
+      roleLabel="Tenant"
+      navLabel="Tenant pages"
+      onLogout={handleLogout}
     >
-      {/* Desktop sidebar */}
-      <Box
-        component="aside"
-        sx={{
-          display: { xs: "none", md: "block" },
-          width: drawerWidth,
-          flexShrink: 0,
-          position: "fixed",
-          top: 0,
-          bottom: 0,
-          left: 0,
-          bgcolor: "background.paper",
-          borderRight: "1px solid",
-          borderColor: "divider",
-          zIndex: (theme) => theme.zIndex.appBar + 1,
-        }}
-      >
-        {sidebar}
-      </Box>
-      <Box sx={{ display: { xs: "none", md: "block" }, width: drawerWidth, flexShrink: 0 }} />
-
-      {/* Main column */}
-      <Box sx={{ flexGrow: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-        {/* Top bar */}
-        <Box
-          component="header"
-          sx={{
-            position: "sticky",
-            top: 0,
-            zIndex: (theme) => theme.zIndex.appBar,
-            height: BAR_H,
-            px: { xs: 2, sm: 3 },
-            bgcolor: "background.default",
-            color: "text.primary",
-            borderBottom: "1px solid",
-            borderColor: "divider",
-            display: "flex",
-            alignItems: "center",
-          }}
-        >
-          {/* Phones: brand mark, since there is no sidebar */}
-          <Box
-            component="img"
-            src="/KwartoKeeper-Icon.png"
-            alt="KwartoKeeper"
-            sx={{ display: { xs: "block", md: "none" }, height: 28, width: "auto", mr: 1.5 }}
-          />
-          {!isOverview && (
-            <Typography variant="h6" noWrap component="div" sx={{ minWidth: 0, fontFamily: '"Inter", sans-serif', fontWeight: 700 }}>
-              {activeNavItem.label}
-            </Typography>
-          )}
-          <Box sx={{ ml: "auto", display: "flex", alignItems: "center", gap: 1, flexShrink: 0 }}>
-            {isOverview && (
-              <Typography variant="body2" noWrap sx={{ color: "text.secondary", fontWeight: 600 }}>
-                {todayLabel}
-              </Typography>
-            )}
-            <NotificationFeed />
-            <IconButton
-              onClick={handleLogout}
-              aria-label="Log out"
-              sx={{ display: { xs: "inline-flex", md: "none" }, color: "error.main" }}
-            >
-              <LogoutIcon />
-            </IconButton>
-          </Box>
-        </Box>
-
-        {/* Content */}
-        <Box
-          component="main"
-          sx={{
-            p: { xs: 2, sm: 3 },
-            flexGrow: 1,
-            minWidth: 0,
-            boxSizing: "border-box",
-            // leave room for the fixed bottom bar (and the iPhone home indicator)
-            pb: { xs: `calc(${BOTTOM_NAV_H + 24}px + env(safe-area-inset-bottom, 0px))`, md: 3 },
-          }}
-        >
-          {typeof children === "function"
-            ? children(activeTab, setActiveTab)
-            : children || <Outlet context={{ activeTab, setActiveTab }} />}
-        </Box>
-      </Box>
-
-      {/* Phone-only bottom navigation */}
-      <Paper
-        elevation={0}
-        sx={{
-          display: { xs: "block", md: "none" },
-          position: "fixed",
-          bottom: 0,
-          left: 0,
-          right: 0,
-          zIndex: (theme) => theme.zIndex.appBar,
-          borderTop: "1px solid",
-          borderColor: "divider",
-          borderRadius: 0,
-          bgcolor: "background.default",
-          pb: "env(safe-area-inset-bottom, 0px)",
-        }}
-      >
-        <BottomNavigation
-          showLabels
-          value={NAV_ITEMS.findIndex((i) => i.id === activeNavItem.id)}
-          onChange={(event, v) => setActiveTab(NAV_ITEMS[v].id)}
-          sx={{ bgcolor: "transparent", height: BOTTOM_NAV_H }}
-        >
-          {NAV_ITEMS.map((item) => (
-            <BottomNavigationAction
-              key={item.id}
-              label={item.label}
-              icon={item.icon}
-              sx={{ minWidth: 0, "& .MuiBottomNavigationAction-label": { fontWeight: 600 } }}
-            />
-          ))}
-        </BottomNavigation>
-      </Paper>
-    </Box>
+      {typeof children === "function" ? children(activeTab, setActiveTab) : children || <Outlet context={{ activeTab, setActiveTab }} />}
+    </AppShell>
   );
 }

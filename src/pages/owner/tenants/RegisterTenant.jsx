@@ -36,6 +36,7 @@ import {
   getPropertyRoomOccupancy,
   reconcilePropertyOccupancy,
 } from "../../../utils/reconcilePropertyOccupancy";
+import { isRoomUnderMaintenance, MAINTENANCE_ROOM_MESSAGE } from "../../../utils/roomStatus";
 
 // ---------------------------------------------------------------------------
 // Same layout as the property setup (PropertyWizard): dark sidebar with the
@@ -205,7 +206,7 @@ function Group({ icon, title, children }) {
     >
       <Box sx={{ display: "flex", alignItems: "center", gap: 0.75, mb: 1.5 }}>
         {icon}
-        <Typography variant="body2" color="text.secondary" fontWeight={600}>
+        <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
           {title}
         </Typography>
       </Box>
@@ -292,23 +293,19 @@ export default function RegisterTenant() {
   });
 
   const [idPhotoFile, setIdPhotoFile] = useState(null);
-  const [idPhotoPreview, setIdPhotoPreview] = useState("");
+  const idPreviewRef = useRef(null);
   const [properties, setProperties] = useState([]);
   const [rooms, setRooms] = useState([]);
-  const [bedOptions, setBedOptions] = useState([]);
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [loadingProperties, setLoadingProperties] = useState(true);
 
-  // Preview of the chosen ID photo (and clean up the object URL)
+  // Preview of the chosen ID photo: the object URL goes straight onto the <img>, and is freed on change
   useEffect(() => {
-    if (!idPhotoFile) {
-      setIdPhotoPreview("");
-      return undefined;
-    }
+    if (!idPhotoFile || !idPreviewRef.current) return undefined;
     const url = URL.createObjectURL(idPhotoFile);
-    setIdPhotoPreview(url);
+    idPreviewRef.current.src = url;
     return () => URL.revokeObjectURL(url);
   }, [idPhotoFile]);
 
@@ -361,22 +358,13 @@ export default function RegisterTenant() {
     };
   }, [form.propertyId]);
 
-  useEffect(() => {
+  // Open beds in the chosen room, worked out from the room's occupancy
+  const bedOptions = useMemo(() => {
     const selectedRoom = rooms.find((r) => r.roomName === form.roomId);
-    if (selectedRoom?.capacity) {
-      const occupiedBeds = Number(selectedRoom.occupiedBeds || 0);
-      const availableCount = Math.max(0, Number(selectedRoom.capacity) - occupiedBeds);
-      const availableStart = occupiedBeds + 1;
-
-      setBedOptions(
-        Array.from(
-          { length: availableCount },
-          (_, i) => `Bed ${availableStart + i}`
-        )
-      );
-    } else {
-      setBedOptions([]);
-    }
+    if (!selectedRoom?.capacity) return [];
+    const occupiedBeds = Number(selectedRoom.occupiedBeds || 0);
+    const availableCount = Math.max(0, Number(selectedRoom.capacity) - occupiedBeds);
+    return Array.from({ length: availableCount }, (_, i) => `Bed ${occupiedBeds + 1 + i}`);
   }, [form.roomId, rooms]);
 
   const handleChange = (field) => (e) => {
@@ -436,6 +424,9 @@ export default function RegisterTenant() {
     if (s === 1) {
       if (!form.propertyId) return { field: "propertyId", message: "Please select a property." };
       if (!form.roomId) return { field: "roomId", message: "Please select a room." };
+      if (isRoomUnderMaintenance(rooms.find((r) => r.roomName === form.roomId))) {
+        return { field: "roomId", message: MAINTENANCE_ROOM_MESSAGE };
+      }
       if (bedOptions.length > 0 && !form.bedId) return { field: "bedId", message: "Please assign a bed." };
     }
     if (s === 2) {
@@ -495,29 +486,36 @@ export default function RegisterTenant() {
 
     setLoading(true);
     try {
-      // 2. Upload ID Photo to Cloudinary
-      let idPhotoUrl = null;
-      if (idPhotoFile) {
-        try {
-          idPhotoUrl = await uploadToCloudinary(idPhotoFile);
-        } catch (uploadError) {
-          throw new Error("Failed to upload ID photo. Please check your connection and try again.");
-        }
-      }
-
-      // 3. Resolve Lease Duration (Standard vs Custom)
-      const finalLeaseDuration =
-        form.leaseDuration === "custom"
-          ? form.customLeaseDuration.trim()
-          : form.leaseDuration;
+      // 2. Re-check the room with the latest data before anything is uploaded
+      //    or created: it may have filled up or been put under maintenance
+      //    since this form was opened.
       const freshRooms = await getPropertyRoomOccupancy(form.propertyId);
       const selectedRoom = freshRooms.find((room) => room.roomName === form.roomId);
       const roomOccupiedBeds = Number(selectedRoom?.occupiedBeds || 0);
       const roomCapacity = Number(selectedRoom?.capacity || 0);
 
+      if (isRoomUnderMaintenance(selectedRoom)) {
+        throw new Error("This room was just put under maintenance. Choose another room.");
+      }
       if (!selectedRoom || roomOccupiedBeds >= roomCapacity) {
         throw new Error("The selected room is already full. Choose another room or bed.");
       }
+
+      // 3. Upload ID Photo to Cloudinary
+      let idPhotoUrl = null;
+      if (idPhotoFile) {
+        try {
+          idPhotoUrl = await uploadToCloudinary(idPhotoFile);
+        } catch {
+          throw new Error("Failed to upload ID photo. Please check your connection and try again.");
+        }
+      }
+
+      // Resolve Lease Duration (Standard vs Custom)
+      const finalLeaseDuration =
+        form.leaseDuration === "custom"
+          ? form.customLeaseDuration.trim()
+          : form.leaseDuration;
 
       const leaseStart = new Date(`${form.leaseStartDate}T00:00:00`);
       const leaseMonths =
@@ -739,8 +737,7 @@ export default function RegisterTenant() {
                         placeholder="e.g. 09171234567"
                         value={form.phone}
                         onChange={handleChange("phone")}
-                        inputProps={{ maxLength: 15, inputMode: "numeric" }}
-                        slotProps={{
+                        slotProps={{ htmlInput: { maxLength: 15, inputMode: "numeric" },
                           input: {
                             startAdornment: (
                               <InputAdornment position="start">
@@ -784,7 +781,7 @@ export default function RegisterTenant() {
                           >
                             <Box
                               component="img"
-                              src={idPhotoPreview}
+                              ref={idPreviewRef}
                               alt="ID preview"
                               sx={{ width: 56, height: 56, borderRadius: "4px", objectFit: "cover", flexShrink: 0 }}
                             />
@@ -868,8 +865,9 @@ export default function RegisterTenant() {
                         {rooms.map((r) => {
                           const availableBeds = Math.max(0, Number(r.capacity) - Number(r.occupiedBeds || 0));
                           const isFull = availableBeds === 0;
+                          const inMaintenance = isRoomUnderMaintenance(r);
                           return (
-                            <MenuItem key={r.roomName} value={r.roomName} disabled={isFull}>
+                            <MenuItem key={r.roomName} value={r.roomName} disabled={isFull || inMaintenance}>
                               <Box sx={{ minWidth: 0 }}>
                                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
                                   {r.roomName}
@@ -877,9 +875,13 @@ export default function RegisterTenant() {
                                     {" "}· Floor {r.floor}
                                   </Typography>
                                 </Typography>
-                                <Typography variant="caption" color={isFull ? "error" : "text.secondary"}>
-                                  {isFull ? "Fully occupied" : `${availableBeds} of ${r.capacity} beds available`}
-                                  {r.monthlyRatePerBed !== undefined && ` · ₱${r.monthlyRatePerBed}/bed`}
+                                <Typography variant="caption" color={inMaintenance ? "warning.main" : isFull ? "error" : "text.secondary"}>
+                                  {inMaintenance
+                                    ? `Under maintenance${r.maintenanceNote ? ` · ${r.maintenanceNote}` : ""}`
+                                    : isFull
+                                    ? "Fully occupied"
+                                    : `${availableBeds} of ${r.capacity} beds available`}
+                                  {!inMaintenance && r.monthlyRatePerBed !== undefined && ` · ₱${r.monthlyRatePerBed}/bed`}
                                 </Typography>
                               </Box>
                             </MenuItem>

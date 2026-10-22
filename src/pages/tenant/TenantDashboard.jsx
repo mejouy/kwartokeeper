@@ -68,7 +68,7 @@ import CloudOffOutlinedIcon from "@mui/icons-material/CloudOffOutlined";
 
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, collection, addDoc, updateDoc, arrayUnion, query, where, onSnapshot, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, collection, addDoc, updateDoc, arrayUnion, query, where, onSnapshot, serverTimestamp, writeBatch } from "firebase/firestore";
 
 import { auth, db } from "../../config/firebase";
 import {
@@ -88,7 +88,22 @@ import { CATEGORIES, rankMaintenanceRequests } from "../../utils/maintenancePrio
    Constants
 --------------------------------------------------------------------------- */
 const RULES_PREVIEW = 4; // rules shown before "Show all"
-const BOTTOM_NAV_H = 64;
+const ADVANCE_MONTHS = 5; // how many months ahead a tenant can pay
+const periodLabel = (d) => d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
+const shortPeriod = (label) => {
+  const [m, y] = String(label).split(" ");
+  return `${(m || "").slice(0, 3)} ${y || ""}`.trim();
+};
+// "October 2026" / "October 2026 – December 2026" / "Oct, Dec 2026"
+const periodsText = (list) => {
+  if (!list.length) return "";
+  if (list.length === 1) return list[0];
+  return `${shortPeriod(list[0])} – ${shortPeriod(list[list.length - 1])}${list.length > 2 ? ` (${list.length} months)` : ""}`;
+};
+const PAGE_SIZE = 6; // long lists show this many at a time
+const ANNOUNCE_PREVIEW = 3; // announcements on the overview before "Show more"
+const ATTENTION_PREVIEW = 2; // alerts shown before "Show N more"
+const BOTTOM_NAV_H = 66; // the phone bottom bar in AppShell
 const row = { display: "flex", alignItems: "center" };
 const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
 
@@ -329,7 +344,7 @@ function Pill({ label, tone = "default", icon, sx }) {
 
 function Panel({ title, icon, action, children, sx }) {
   return (
-    <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 3 }, ...sx }}>
+    <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 3 }, display: "flex", flexDirection: "column", minWidth: 0, ...sx }}>
       <Box sx={{ ...row, justifyContent: "space-between", gap: 1.5, mb: 2 }}>
         <Box sx={{ ...row, gap: 1.25, minWidth: 0 }}>
           {icon && (
@@ -438,12 +453,37 @@ function PaymentRow({ p, onClick }) {
   );
 }
 
-function TicketCard({ t, compact, onAction }) {
+// With many requests, each one is a short summary row (title, status, priority,
+// date) that opens to the full details. `collapsible` turns that on.
+function TicketCard({ t, compact, onAction, collapsible = false, defaultOpen = true }) {
+  const [open, setOpen] = useState(defaultOpen);
   const tier = t.priority?.tier || "Low";
   const status = t.status || "Pending";
   const statusTone = status === "Resolved" ? "success" : status === "In Progress" ? "info" : status === "Cancelled" ? "default" : "warning";
   const date = fmtDate(t.createdAt);
   const stepIndex = status === "Resolved" ? 2 : status === "In Progress" ? 1 : 0;
+  const details = !compact && (!collapsible || open);
+  const updates = Array.isArray(t.followUps) ? t.followUps.length : 0;
+  const hasNote = Boolean(t.remarks || t.resolutionNotes);
+
+  const summary = (
+    <>
+      <Box sx={{ ...row, alignItems: "flex-start", justifyContent: "space-between", gap: 1 }}>
+        <Typography sx={{ fontWeight: 800, overflowWrap: "anywhere", minWidth: 0 }}>{t.title}</Typography>
+        <Box sx={{ ...row, gap: 0.5, flexShrink: 0 }}>
+          <Pill label={status} tone={statusTone} />
+          {collapsible && <ExpandMoreIcon sx={{ color: "text.secondary", transform: open ? "rotate(180deg)" : "none", transition: "transform .2s" }} />}
+        </Box>
+      </Box>
+      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1 }}>
+        <Pill label={`${tier} priority`} tone={TIER_TONE[tier]} />
+        {t.category && <Pill label={String(t.category)} />}
+        {date && <Pill label={`Reported ${date}`} />}
+        {collapsible && !open && hasNote && <Pill label="Landlord replied" tone="info" />}
+        {collapsible && !open && updates > 0 && <Pill label={`${updates} ${updates === 1 ? "update" : "updates"}`} />}
+      </Box>
+    </>
+  );
 
   return (
     <Paper
@@ -456,36 +496,40 @@ function TicketCard({ t, compact, onAction }) {
         minWidth: 0,
       }}
     >
-      <Box sx={{ ...row, alignItems: "flex-start", justifyContent: "space-between", gap: 1 }}>
-        <Typography sx={{ fontWeight: 800, overflowWrap: "anywhere" }}>{t.title}</Typography>
-        <Pill label={status} tone={statusTone} sx={{ flexShrink: 0 }} />
-      </Box>
-      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1 }}>
-        <Pill label={`${tier} priority`} tone={TIER_TONE[tier]} />
-        {t.category && <Pill label={String(t.category)} />}
-        {date && <Pill label={`Reported ${date}`} />}
-      </Box>
-      {t.description && !compact && (
+      {collapsible ? (
+        <Box
+          component="button"
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          sx={{ display: "block", width: "100%", p: 0, m: 0, border: 0, bgcolor: "transparent", font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer", "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 4, borderRadius: 1 } }}
+        >
+          {summary}
+        </Box>
+      ) : (
+        summary
+      )}
+      {t.description && details && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1.25, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
           {t.description}
         </Typography>
       )}
-      {status === "Cancelled" && t.cancelReason && !compact && (
+      {status === "Cancelled" && t.cancelReason && details && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1.25, overflowWrap: "anywhere" }}>
           <strong>Reason:</strong> {t.cancelReason}
         </Typography>
       )}
-      {!compact && status !== "Cancelled" && (
+      {details && status !== "Cancelled" && (
         <Box sx={{ mt: 2, px: 0.5 }}>
           <StepTrack steps={["Reported", "In progress", "Resolved"]} current={stepIndex} complete={stepIndex === 2} />
         </Box>
       )}
-      {t.photoUrl && !compact && (
+      {t.photoUrl && details && (
         <Box component="a" href={t.photoUrl} target="_blank" rel="noopener noreferrer" sx={{ display: "inline-block", mt: 1.25 }}>
           <Box component="img" src={t.photoUrl} alt="Photo of the issue" loading="lazy" sx={{ width: 96, height: 96, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider", display: "block" }} />
         </Box>
       )}
-      {(t.remarks || t.resolutionNotes) && (
+      {hasNote && (compact || details) && (
         <Box sx={{ mt: 1.5, p: 1.25, borderRadius: 2, bgcolor: (th) => alpha(th.palette.info.main, 0.08) }}>
           <Typography variant="caption" sx={{ fontWeight: 800, color: "info.dark" }}>
             Note from your landlord
@@ -495,7 +539,7 @@ function TicketCard({ t, compact, onAction }) {
           </Typography>
         </Box>
       )}
-      {!compact && Array.isArray(t.followUps) && t.followUps.length > 0 && (
+      {details && updates > 0 && (
         <Box sx={{ mt: 1.5 }}>
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
             YOUR UPDATES
@@ -519,7 +563,7 @@ function TicketCard({ t, compact, onAction }) {
           ))}
         </Box>
       )}
-      {!compact && onAction && !["Resolved", "Cancelled"].includes(status) && (
+      {details && onAction && !["Resolved", "Cancelled"].includes(status) && (
         <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1.5 }}>
           <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => onAction("update", t)} sx={{ minHeight: 40, fontWeight: 700, borderRadius: 2, textTransform: "none" }}>
             Add an update
@@ -537,6 +581,98 @@ function TicketCard({ t, compact, onAction }) {
         </Box>
       )}
     </Paper>
+  );
+}
+
+// "Show N more" under a long list (adds a page at a time instead of everything at once)
+function ShowMore({ shown, total, step, onMore, onLess, noun = "more" }) {
+  if (total <= step && shown >= total) return null;
+  const left = total - shown;
+  return (
+    <Box sx={{ ...row, justifyContent: "center", gap: 0.5, mt: 1 }}>
+      {left > 0 && (
+        <Button size="small" onClick={onMore} endIcon={<ExpandMoreIcon />} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
+          Show {Math.min(step, left)} {noun}
+        </Button>
+      )}
+      {shown > step && (
+        <Button size="small" color="inherit" onClick={onLess} sx={{ fontWeight: 700, minHeight: 36, py: 0.5, px: 1.5, borderRadius: 99, textTransform: "none", color: "text.secondary" }}>
+          Show less
+        </Button>
+      )}
+    </Box>
+  );
+}
+
+// Tap-to-filter pills with counts (scroll sideways on phones)
+function FilterPills({ options, value, onChange }) {
+  return (
+    <Box sx={{ display: "flex", gap: 0.75, overflowX: "auto", mx: { xs: -2, sm: 0 }, px: { xs: 2, sm: 0 }, mb: 2, scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
+      {options.map((o) => {
+        const on = value === o.id;
+        return (
+          <Box
+            key={o.id}
+            component="button"
+            type="button"
+            onClick={() => onChange(o.id)}
+            aria-pressed={on}
+            sx={{
+              ...row,
+              gap: 0.75,
+              flexShrink: 0,
+              height: 38,
+              px: 1.5,
+              borderRadius: 99,
+              font: "inherit",
+              fontSize: 13.5,
+              fontWeight: 700,
+              cursor: "pointer",
+              border: "1px solid",
+              borderColor: on ? "text.primary" : "divider",
+              bgcolor: on ? "text.primary" : "background.default",
+              color: on ? "background.default" : "text.secondary",
+            }}
+          >
+            {o.label}
+            <Box component="span" sx={{ opacity: 0.65, fontWeight: 600 }}>{o.count}</Box>
+          </Box>
+        );
+      })}
+    </Box>
+  );
+}
+
+// One year of payments: a header with the year's total that opens to its rows
+function PaymentYear({ year, list, defaultOpen, onPick }) {
+  const [open, setOpen] = useState(defaultOpen);
+  const [shown, setShown] = useState(PAGE_SIZE);
+  const paid = list.filter((p) => ["paid", "partial"].includes(String(p.status || "").toLowerCase())).reduce((s, p) => s + (Number(p.amount) || 0), 0);
+  return (
+    <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 3, overflow: "hidden" }}>
+      <Box
+        component="button"
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        sx={{ ...row, width: "100%", gap: 1.25, px: 1.75, py: 1.25, border: 0, font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer", bgcolor: (t) => alpha(t.palette.background.paper, open ? 0.45 : 0.25) }}
+      >
+        <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, flex: 1 }}>{year}</Typography>
+        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
+          {list.length} {list.length === 1 ? "payment" : "payments"}
+          {paid > 0 ? ` · ${peso(paid)} paid` : ""}
+        </Typography>
+        <ExpandMoreIcon sx={{ color: "text.secondary", transform: open ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+      </Box>
+      {open && (
+        <Box sx={{ p: 1.25, display: "flex", flexDirection: "column", gap: 1 }}>
+          {list.slice(0, shown).map((p) => (
+            <PaymentRow key={p.id} p={p} onClick={() => onPick(p)} />
+          ))}
+          <ShowMore shown={Math.min(shown, list.length)} total={list.length} step={PAGE_SIZE} onMore={() => setShown((n) => n + PAGE_SIZE)} onLess={() => setShown(PAGE_SIZE)} />
+        </Box>
+      )}
+    </Box>
   );
 }
 
@@ -670,15 +806,13 @@ const MAX_PHOTO_MB = 8;
 // Camera / gallery picker with a thumbnail. Validation errors go to onError.
 function PhotoPicker({ file, onChange, onError, label = "Add a photo", hint, disabled }) {
   const inputRef = useRef(null);
-  const [preview, setPreview] = useState("");
+  const previewRef = useRef(null);
 
+  // The thumbnail's object URL is set on the <img> directly and freed when the photo changes
   useEffect(() => {
-    if (!file) {
-      setPreview("");
-      return undefined;
-    }
+    if (!file || !previewRef.current) return undefined;
     const url = URL.createObjectURL(file);
-    setPreview(url);
+    previewRef.current.src = url;
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
@@ -703,7 +837,7 @@ function PhotoPicker({ file, onChange, onError, label = "Add a photo", hint, dis
       <input ref={inputRef} type="file" accept="image/*" hidden onChange={handlePick} />
       {file ? (
         <Box sx={{ ...row, gap: 1.5, p: 1, borderRadius: 2.5, border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
-          <Box component="img" src={preview} alt="Selected photo" sx={{ width: 64, height: 64, borderRadius: 2, objectFit: "cover", flexShrink: 0 }} />
+          <Box component="img" ref={previewRef} alt="Selected photo" sx={{ width: 64, height: 64, borderRadius: 2, objectFit: "cover", flexShrink: 0 }} />
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography variant="body2" noWrap sx={{ fontWeight: 700 }}>
               {file.name}
@@ -942,6 +1076,12 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const [loadError, setLoadError] = useState("");
   const [listenError, setListenError] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
+  const retryLoad = () => {
+    setLoading(true);
+    setLoadError("");
+    setListenError(false);
+    setReloadKey((k) => k + 1);
+  };
 
   // ---- tenant info
   const [tenantInfo, setTenantInfo] = useState({
@@ -988,9 +1128,14 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const [paymentFilter, setPaymentFilter] = useState("all");
   const [proofFile, setProofFile] = useState(null);
   const [proofError, setProofError] = useState("");
-  const [showAllAnnouncements, setShowAllAnnouncements] = useState(false);
+  const [announcementsShown, setAnnouncementsShown] = useState(ANNOUNCE_PREVIEW);
+  const [announcementFilter, setAnnouncementFilter] = useState("all");
+  const [attentionOpen, setAttentionOpen] = useState(false);
+  const [ticketFilter, setTicketFilter] = useState("all");
+  const [ticketsShown, setTicketsShown] = useState(PAGE_SIZE);
+  const [archiveShown, setArchiveShown] = useState(PAGE_SIZE);
   const [coverFailed, setCoverFailed] = useState(false);
-  const [rulesAcked, setRulesAcked] = useState(true);
+  const [rulesAckedSig, setRulesAckedSig] = useState("");
   const [openPaymentModal, setOpenPaymentModal] = useState(false);
   const [payStep, setPayStep] = useState(0); // 0 pay, 1 details, 2 done
   const [selectedPaymentMethod, setSelectedPaymentMethod] = useState("");
@@ -998,6 +1143,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const [paymentTouched, setPaymentTouched] = useState({});
   const [paymentForm, setPaymentForm] = useState({ amount: "", referenceNumber: "", paymentDate: getTodayInputValue(), remarks: "" });
   const [paymentError, setPaymentError] = useState("");
+  const [payMonths, setPayMonths] = useState([]); // period labels being paid in this submission
   const [submittedPayment, setSubmittedPayment] = useState(null);
   const [receipt, setReceipt] = useState(null);
 
@@ -1050,7 +1196,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     if (!endMs && tenantInfo.leaseMonths) {
       endMs = addMonthsClamped(new Date(startMs), tenantInfo.leaseMonths)?.getTime() || 0;
     }
-    const now = Date.now();
+    const now = today.getTime();
     if (!endMs || endMs <= startMs) {
       const monthsIn = Math.max(0, Math.floor((now - startMs) / (30.44 * 86400000)));
       return { open: true, monthsIn, startMs };
@@ -1060,16 +1206,37 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     return { open: false, startMs, endMs, progress, daysLeft, ended: daysLeft < 0 };
   }, [tenantInfo.leaseStartDate, tenantInfo.leaseEndDate, tenantInfo.leaseMonths, today]);
 
+  // ---- months the tenant can pay: this month and up to ADVANCE_MONTHS ahead, not past the lease end
+  const payableMonths = useMemo(() => {
+    const leaseEnd = lease && !lease.open ? lease.endMs : null;
+    const statusFor = (label) => {
+      const list = payments.filter((p) => String(p.periodMonth || "").trim().toLowerCase() === label.toLowerCase());
+      const s = (p) => String(p.status || "").toLowerCase();
+      if (list.some((p) => s(p) === "paid")) return "paid";
+      if (list.some((p) => ["pending", "pending verification"].includes(s(p)))) return "pending";
+      if (list.some((p) => s(p) === "partial")) return "partial";
+      return "open";
+    };
+    const out = [];
+    for (let i = 0; i <= ADVANCE_MONTHS; i += 1) {
+      const first = new Date(today.getFullYear(), today.getMonth() + i, 1);
+      if (leaseEnd && first.getTime() > leaseEnd) break;
+      const label = periodLabel(first);
+      out.push({ label, short: shortPeriod(label), current: i === 0, status: statusFor(label) });
+    }
+    return out;
+  }, [payments, today, lease]);
+  const openMonths = payableMonths.filter((m) => m.status === "open" || m.status === "partial");
+  // Already paid (or sent) for months after this one
+  const aheadMonths = payableMonths.filter((m) => !m.current && (m.status === "paid" || m.status === "pending"));
+  const canPayAhead = !canPay && openMonths.some((m) => !m.current);
+
   // ---- load tenant profile + realtime listeners
   // Waits for Firebase to restore the session (auth.currentUser is null for a
   // moment after a reload, which used to bounce people to the login page).
   useEffect(() => {
     let cancelled = false;
     let unsubs = [];
-
-    setLoading(true);
-    setLoadError("");
-    setListenError(false);
 
     const loadProfile = async (user) => {
       try {
@@ -1155,7 +1322,10 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           rentDueDay: Number(data.rentDueDay || data.dueDay || 5),
         });
 
-        if (!cancelled) setLoading(false);
+        if (!cancelled) {
+          setOutbox(readOutbox(user.uid));
+          setLoading(false);
+        }
       } catch (err) {
         console.error("Error fetching tenant profile:", err);
         if (!cancelled) setLoadError("We couldn't load your account. Check your connection and try again.");
@@ -1211,7 +1381,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           (snapshot) => {
             const docs = snapshot.docs
               .map((d) => ({ id: d.id, ...d.data() }))
-              .filter((n) => n.announcementId || n.kind === "notice")
+              .filter((n) => (n.announcementId || n.kind === "notice") && n.category !== "maintenance" && !/^Repair update/i.test(n.title || ""))
               .sort((a, b) => getTimestampMillis(b.createdAt) - getTimestampMillis(a.createdAt));
             setAnnouncements(docs);
           },
@@ -1244,10 +1414,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     const user = auth.currentUser;
     if (!user || flushing.current) return;
     const items = readOutbox(user.uid);
-    if (items.length === 0) {
-      setOutbox([]);
-      return;
-    }
+    // Nothing saved: the list on screen was already read from storage when the page loaded
+    if (items.length === 0) return;
     flushing.current = true;
     let sent = 0;
     try {
@@ -1279,10 +1447,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     setOutbox(next);
   };
   useEffect(() => {
-    if (loading) return;
-    const user = auth.currentUser;
-    if (user) setOutbox(readOutbox(user.uid));
-    if (online) flushOutbox();
+    if (loading || !online) return;
+    flushOutbox();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [online, loading]);
 
@@ -1456,7 +1622,9 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   };
 
   // ---- payment flow
-  const openPayRentModal = () => {
+  const openPayRentModal = (months) => {
+    const first = openMonths[0]?.label || currentPeriod;
+    setPayMonths(Array.isArray(months) && months.length ? months : [first]);
     setPaymentError("");
     setPaymentTouched({});
     setSubmittedPayment(null);
@@ -1473,7 +1641,19 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     setOpenPaymentModal(true);
   };
 
-  const amountNum = Number(paymentForm.amount);
+  // Months in calendar order; several months = a fixed amount of one month's rent each
+  const sortedPayMonths = openMonths.map((m) => m.label).filter((l) => payMonths.includes(l));
+  const multiMonth = sortedPayMonths.length > 1;
+  const monthlyRentNum = Number(tenantInfo.monthlyRent) || 0;
+  const totalDue = monthlyRentNum * Math.max(sortedPayMonths.length, 1);
+  const togglePayMonth = (label) => {
+    const next = payMonths.includes(label) ? payMonths.filter((l) => l !== label) : [...payMonths, label];
+    const list = next.length ? next : payMonths; // always keep one month
+    setPayMonths(list);
+    // Paying for one month keeps the amount editable; several months fix it to rent x months
+    setPaymentForm((f) => ({ ...f, amount: String(monthlyRentNum * Math.max(list.length, 1) || f.amount) }));
+  };
+  const amountNum = multiMonth ? totalDue : Number(paymentForm.amount);
   const paymentErrors = {
     amount: !amountNum || amountNum <= 0 ? "Enter a valid amount." : "",
     referenceNumber: !paymentForm.referenceNumber.trim() ? "Enter the reference number from your payment." : "",
@@ -1492,25 +1672,48 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       setPaymentError("Your account is not linked to an owner yet. Please contact the property owner.");
       return;
     }
+    if (multiMonth && !(monthlyRentNum > 0)) {
+      setPaymentError("Your monthly rent isn't set yet, so you can only pay one month at a time. Ask your landlord to set it.");
+      return;
+    }
+
+    // One record per month, so the owner verifies, receipts and tracks each month on its own.
+    // Months paid together share the reference number and a group id.
+    const months = sortedPayMonths.length ? sortedPayMonths : [currentPeriod];
+    const groupId = months.length > 1 ? `adv_${Date.now()}_${Math.random().toString(36).slice(2, 7)}` : null;
+    const baseRemarks = paymentForm.remarks.trim();
+    const buildRecord = (periodMonth, extra = {}) => ({
+      tenantId: user.uid,
+      tenantName: tenantInfo.name,
+      ownerUid: tenantInfo.ownerUid,
+      propertyId: tenantInfo.propertyId,
+      propertyName: tenantInfo.propertyName,
+      roomNumber: tenantInfo.roomNumber,
+      amount: months.length > 1 ? monthlyRentNum : amountNum,
+      paymentMethod: payMethodKey,
+      periodMonth,
+      // IMPORTANT: a tenant can never mark a payment as Paid.
+      status: "Pending",
+      verificationStatus: "Pending",
+      referenceNumber: paymentForm.referenceNumber.trim(),
+      paymentDate: paymentForm.paymentDate,
+      remarks: months.length > 1 ? [`One of ${months.length} months paid together (${periodsText(months)}).`, baseRemarks].filter(Boolean).join(" ") : baseRemarks,
+      ...(groupId ? { advanceGroupId: groupId, advanceMonths: months } : {}),
+      // Every month offered is this month or later, so anything else is paid ahead
+      ...(periodMonth !== currentPeriod ? { paidInAdvance: true } : {}),
+      ...extra,
+    });
+    const summaryOf = (records) => ({
+      ...records[0],
+      amount: records.reduce((s, r) => s + (Number(r.amount) || 0), 0),
+      periodMonth: periodsText(months),
+      months,
+    });
+
     if (!online) {
-      const queuedRecord = {
-        tenantId: user.uid,
-        tenantName: tenantInfo.name,
-        ownerUid: tenantInfo.ownerUid,
-        propertyId: tenantInfo.propertyId,
-        propertyName: tenantInfo.propertyName,
-        roomNumber: tenantInfo.roomNumber,
-        amount: amountNum,
-        paymentMethod: payMethodKey,
-        periodMonth: currentPeriod,
-        status: "Pending",
-        verificationStatus: "Pending",
-        referenceNumber: paymentForm.referenceNumber.trim(),
-        paymentDate: paymentForm.paymentDate,
-        remarks: paymentForm.remarks.trim(),
-      };
-      queueOffline("payment", queuedRecord);
-      setSubmittedPayment({ ...queuedRecord, queued: true });
+      const queued = months.map((m) => buildRecord(m));
+      queued.forEach((r) => queueOffline("payment", r));
+      setSubmittedPayment({ ...summaryOf(queued), queued: true });
       setPayStep(2);
       return;
     }
@@ -1531,29 +1734,19 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         }
       }
 
-      const record = {
-        tenantId: user.uid,
-        tenantName: tenantInfo.name,
-        ownerUid: tenantInfo.ownerUid,
-        propertyId: tenantInfo.propertyId,
-        propertyName: tenantInfo.propertyName,
-        roomNumber: tenantInfo.roomNumber,
-        amount: amountNum,
-        paymentMethod: payMethodKey,
-        periodMonth: currentPeriod,
-        // IMPORTANT: a tenant can never mark a payment as Paid.
-        status: "Pending",
-        verificationStatus: "Pending",
-        referenceNumber: paymentForm.referenceNumber.trim(),
-        paymentDate: paymentForm.paymentDate,
-        remarks: paymentForm.remarks.trim(),
-        ...(proofUrl ? { proofUrl } : {}),
-      };
+      const records = months.map((m) => buildRecord(m, proofUrl ? { proofUrl } : {}));
+      // All months are saved together, or none are
+      const batch = writeBatch(db);
+      const refs = records.map((record) => {
+        const ref = doc(collection(db, "payments"));
+        batch.set(ref, { ...record, createdAt: serverTimestamp() });
+        return ref;
+      });
+      await batch.commit();
+      // One notice for the owner, not one per month
+      notifyPaymentSubmitted({ id: refs[0].id, ...summaryOf(records) }, "tenant");
 
-      const paymentRef = await addDoc(collection(db, "payments"), { ...record, createdAt: serverTimestamp() });
-      notifyPaymentSubmitted({ id: paymentRef.id, ...record }, "tenant");
-
-      setSubmittedPayment(record);
+      setSubmittedPayment(summaryOf(records));
       setPayStep(2);
     } catch (err) {
       console.error("Error submitting payment:", err);
@@ -1601,24 +1794,21 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const hasHouseRules = Boolean(tenantInfo.curfewTime) || tenantInfo.rules.length > 0 || tenantInfo.ruleFiles.length > 0;
   const rulesSig = JSON.stringify([tenantInfo.curfewTime, tenantInfo.rules]);
   const rulesKey = `kk_rules_ack_${tenantInfo.propertyId}`;
-  useEffect(() => {
-    if (!tenantInfo.propertyId || !hasHouseRules) {
-      setRulesAcked(true);
-      return;
-    }
+  const storedRulesAck = (() => {
     try {
-      setRulesAcked(window.localStorage.getItem(rulesKey) === rulesSig);
+      return window.localStorage.getItem(rulesKey);
     } catch {
-      setRulesAcked(false);
+      return null;
     }
-  }, [tenantInfo.propertyId, hasHouseRules, rulesKey, rulesSig]);
+  })();
+  const rulesAcked = !tenantInfo.propertyId || !hasHouseRules || storedRulesAck === rulesSig || rulesAckedSig === `${rulesKey}|${rulesSig}`;
   const ackRules = () => {
     try {
       window.localStorage.setItem(rulesKey, rulesSig);
     } catch {
       /* storage unavailable: the banner just returns next visit */
     }
-    setRulesAcked(true);
+    setRulesAckedSig(`${rulesKey}|${rulesSig}`);
   };
   const hasCover = Boolean(tenantInfo.coverPhotoUrl) && !coverFailed;
 
@@ -1626,6 +1816,10 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     const y = String(new Date().getFullYear());
     return payments.filter((p) => p.status === "Paid" && String(p.periodMonth || "").includes(y)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
   }, [payments]);
+
+  const unreadCount = announcements.filter((n) => n.isRead === false).length;
+  const visibleAnnouncements = announcementFilter === "unread" ? announcements.filter((n) => n.isRead === false) : announcements;
+  const shownTickets = ticketFilter === "all" ? activeTickets : activeTickets.filter((t) => (t.status || "Pending") === ticketFilter);
 
   const paymentKind = (p) => {
     const k = String(p.status || "pending").toLowerCase();
@@ -1663,7 +1857,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           title="We couldn't open your dashboard"
           body={loadError}
           action={
-            <Button variant="contained" startIcon={<RefreshOutlinedIcon />} onClick={() => setReloadKey((k) => k + 1)} sx={{ mt: 2, fontWeight: 700, borderRadius: 2.5, minHeight: 46 }}>
+            <Button variant="contained" startIcon={<RefreshOutlinedIcon />} onClick={retryLoad} sx={{ mt: 2, fontWeight: 700, borderRadius: 2.5, minHeight: 46 }}>
               Try again
             </Button>
           }
@@ -1881,83 +2075,143 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
             {dueText}
             {canPay ? ` · ${dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
           </Typography>
+          {aheadMonths.length > 0 && (
+            <Typography variant="caption" sx={{ display: "block", color: "#c8e6c9", fontWeight: 700, mt: -1, mb: 1.5 }}>
+              Also covered: {aheadMonths.map((m) => `${m.short}${m.status === "pending" ? " (sent)" : ""}`).join(", ")}
+            </Typography>
+          )}
           {canPay ? (
-            <Button variant="contained" fullWidth size="large" startIcon={<PaymentIcon />} onClick={openPayRentModal} sx={{ fontWeight: 800, borderRadius: 2.5, minHeight: 48 }}>
+            <Button variant="contained" fullWidth size="large" startIcon={<PaymentIcon />} onClick={() => openPayRentModal()} sx={{ fontWeight: 800, borderRadius: 2.5, minHeight: 48 }}>
               Pay rent
             </Button>
           ) : (
-            <Button fullWidth size="large" variant="outlined" onClick={() => goTab("payments")} sx={{ ...heroBtnSx, minHeight: 48 }}>
-              View payments
-            </Button>
+            canPayAhead ? (
+              <Button fullWidth size="large" variant="outlined" startIcon={<PaymentIcon />} onClick={() => openPayRentModal()} sx={{ ...heroBtnSx, minHeight: 48 }}>
+                Pay next month early
+              </Button>
+            ) : (
+              <Button fullWidth size="large" variant="outlined" onClick={() => goTab("payments")} sx={{ ...heroBtnSx, minHeight: 48 }}>
+                View payments
+              </Button>
+            )
           )}
         </Box>
       </Box>
 
-      {/* Needs attention */}
+      {/* Needs attention: the most urgent first, the rest one tap away */}
       {attention.length > 0 && (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25, mb: { xs: 2, sm: 3 } }}>
-          {attention.map(({ key, ...a }) => (
+        <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mb: { xs: 2, sm: 3 } }}>
+          {(attentionOpen ? attention : attention.slice(0, ATTENTION_PREVIEW)).map(({ key, ...a }) => (
             <AttentionBanner key={key} {...a} />
           ))}
+          {attention.length > ATTENTION_PREVIEW && (
+            <Button
+              onClick={() => setAttentionOpen((v) => !v)}
+              aria-expanded={attentionOpen}
+              color="inherit"
+              endIcon={<ExpandMoreIcon sx={{ transform: attentionOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />}
+              sx={{ alignSelf: "flex-start", fontWeight: 700, minHeight: 40, textTransform: "none", color: "text.secondary" }}
+            >
+              {attentionOpen ? "Show fewer" : `${attention.length - ATTENTION_PREVIEW} more ${attention.length - ATTENTION_PREVIEW === 1 ? "thing" : "things"} to check`}
+            </Button>
+          )}
         </Box>
       )}
 
       {/* Quick actions */}
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: { xs: 1, sm: 1.5 }, mb: { xs: 2, sm: 3 }, ...rise(1) }}>
-        <QuickAction icon={<PaymentIcon fontSize="small" />} label={canPay ? "Pay rent" : "Payments"} onClick={canPay ? openPayRentModal : () => goTab("payments")} />
-        <QuickAction icon={<BuildOutlinedIcon fontSize="small" />} label="Report issue" onClick={openRepair} />
+      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: { xs: 0.75, sm: 1.5 }, mb: { xs: 2, sm: 3 }, ...rise(1) }}>
+        <QuickAction
+          icon={<PaymentIcon fontSize="small" />}
+          label={canPay ? "Pay rent" : canPayAhead ? "Pay ahead" : "Payments"}
+          onClick={canPay || canPayAhead ? () => openPayRentModal() : () => goTab("payments")}
+        />
+        <QuickAction icon={<BuildOutlinedIcon fontSize="small" />} label="Report issue" onClick={openRepair} badge={activeTickets.length} />
+        <QuickAction icon={<PolicyOutlinedIcon fontSize="small" />} label="House rules" onClick={() => goTab("profile")} />
       </Box>
 
       {/* Panels: what's happening now */}
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 2, md: 3 }, alignItems: "start" }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 2, md: 3 }, alignItems: "stretch" }}>
         <Panel
-          title="Announcements"
+          title={unreadCount > 0 ? `Announcements · ${unreadCount} new` : "Announcements"}
           icon={<CampaignOutlinedIcon fontSize="small" />}
           sx={rise(2)}
           action={
-            <Box sx={{ display: "flex", gap: 0.5 }}>
-              {announcements.some((n) => n.isRead === false) && (
-                <Button size="small" startIcon={<DoneAllIcon fontSize="small" />} onClick={() => markRead(announcements)} sx={{ fontWeight: 700, minHeight: 40 }}>
-                  Mark all read
-                </Button>
-              )}
-              {announcements.length > 3 && (
-                <Button size="small" onClick={() => setShowAllAnnouncements((v) => !v)} sx={{ fontWeight: 700, minHeight: 40 }}>
-                  {showAllAnnouncements ? "Show less" : `Show all (${announcements.length})`}
-                </Button>
-              )}
-            </Box>
+            announcements.some((n) => n.isRead === false) && (
+              <Button size="small" startIcon={<DoneAllIcon fontSize="small" />} onClick={() => markRead(announcements)} sx={{ fontWeight: 700, minHeight: 40, flexShrink: 0 }}>
+                Mark all read
+              </Button>
+            )
           }
         >
           {announcements.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              No announcements. Updates from your landlord will show up here.
-            </Typography>
-          ) : (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
-              {(showAllAnnouncements ? announcements : announcements.slice(0, 3)).map((n) => (
-                <AnnouncementItem key={n.id} n={n} onRead={markRead} />
-              ))}
+            <Box sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", py: 3, gap: 1 }}>
+              <Box sx={{ width: 52, height: 52, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: "rgba(255, 69, 0, 0.10)", color: "primary.main" }}>
+                <CampaignOutlinedIcon />
+              </Box>
+              <Typography sx={{ fontWeight: 800 }}>No announcements yet</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 280 }}>
+                Updates from your landlord, like water interruptions or house meetings, show up here.
+              </Typography>
             </Box>
+          ) : (
+            <>
+              {unreadCount > 0 && announcements.length > ANNOUNCE_PREVIEW && (
+                <FilterPills
+                  value={announcementFilter}
+                  onChange={(v) => {
+                    setAnnouncementFilter(v);
+                    setAnnouncementsShown(ANNOUNCE_PREVIEW);
+                  }}
+                  options={[
+                    { id: "all", label: "All", count: announcements.length },
+                    { id: "unread", label: "Unread", count: unreadCount },
+                  ]}
+                />
+              )}
+              <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
+                {visibleAnnouncements.slice(0, announcementsShown).map((n) => (
+                  <AnnouncementItem key={n.id} n={n} onRead={markRead} />
+                ))}
+                {visibleAnnouncements.length === 0 && (
+                  <Typography variant="body2" color="text.secondary">You're all caught up.</Typography>
+                )}
+              </Box>
+              <ShowMore
+                shown={Math.min(announcementsShown, visibleAnnouncements.length)}
+                total={visibleAnnouncements.length}
+                step={ANNOUNCE_PREVIEW}
+                onMore={() => setAnnouncementsShown((n) => n + PAGE_SIZE)}
+                onLess={() => setAnnouncementsShown(ANNOUNCE_PREVIEW)}
+              />
+            </>
           )}
         </Panel>
 
         <Panel
-          title="Open requests"
+          title={activeTickets.length > 0 ? `Open requests · ${activeTickets.length}` : "Open requests"}
           icon={<BuildOutlinedIcon fontSize="small" />}
           sx={rise(3)}
           action={
             rankedTickets.length > 0 && (
-              <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => goTab("maintenance")} sx={{ fontWeight: 700, minHeight: 40 }}>
-                View all
+              <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => goTab("maintenance")} sx={{ fontWeight: 700, minHeight: 40, flexShrink: 0 }}>
+                {activeTickets.length > 2 ? `All ${activeTickets.length}` : "View all"}
               </Button>
             )
           }
         >
           {activeTickets.length === 0 ? (
-            <Typography variant="body2" color="text.secondary">
-              Nothing pending. Use "Report issue" above if something needs fixing.
-            </Typography>
+            <Box sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", py: 3, gap: 1 }}>
+              <Box sx={{ width: 52, height: 52, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: (t) => alpha(t.palette.success.main, 0.12), color: "success.main" }}>
+                <CheckCircleOutlinedIcon />
+              </Box>
+              <Typography sx={{ fontWeight: 800 }}>Nothing needs fixing</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 280 }}>
+                If something breaks in your room, report it and your landlord sees it right away.
+              </Typography>
+              <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={openRepair} sx={{ mt: 0.5, fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.75, textTransform: "none" }}>
+                Report an issue
+              </Button>
+            </Box>
           ) : (
             <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
               {activeTickets.slice(0, 2).map((t) => (
@@ -1979,8 +2233,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           Pay your rent and submit it for owner verification.
         </Typography>
         {!isPhone && (
-          <Button variant="contained" startIcon={<PaymentIcon />} onClick={openPayRentModal} disabled={!canPay} sx={{ fontWeight: 700, borderRadius: 2.5, px: 2.5, flexShrink: 0 }}>
-            {isPaid ? "Paid" : isAwaitingVerification ? "Awaiting verification" : "Pay rent"}
+          <Button variant="contained" startIcon={<PaymentIcon />} onClick={() => openPayRentModal()} disabled={!canPay && !canPayAhead} sx={{ fontWeight: 700, borderRadius: 2.5, px: 2.5, flexShrink: 0 }}>
+            {canPay ? "Pay rent" : canPayAhead ? "Pay ahead" : isPaid ? "Paid" : "Awaiting verification"}
           </Button>
         )}
       </Box>
@@ -2087,6 +2341,39 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         </Paper>
       )}
 
+      {/* Coming months: what's covered, and paying ahead */}
+      {payableMonths.length > 1 && (
+        <Panel
+          title="Coming months"
+          icon={<CalendarMonthOutlinedIcon fontSize="small" />}
+          sx={{ mb: { xs: 2, sm: 2.5 }, ...rise(2) }}
+          action={
+            openMonths.some((m) => !m.current) && (
+              <Button size="small" variant="outlined" startIcon={<PaymentIcon />} onClick={() => openPayRentModal(openMonths.filter((m) => !m.current || canPay).slice(0, 2).map((m) => m.label))} sx={{ fontWeight: 700, borderRadius: 2.5, minHeight: 40, flexShrink: 0 }}>
+                Pay ahead
+              </Button>
+            )
+          }
+        >
+          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(3, minmax(0, 1fr))", sm: "repeat(6, minmax(0, 1fr))" }, gap: 0.75 }}>
+            {payableMonths.map((m) => {
+              const tone = m.status === "paid" ? "success" : m.status === "pending" ? "warning" : m.current && !canPay ? "warning" : null;
+              return (
+                <Box key={m.label} sx={{ p: 1.25, borderRadius: 2, textAlign: "center", border: "1px solid", borderColor: tone ? (t) => alpha(t.palette[tone].main, 0.4) : "divider", bgcolor: tone ? (t) => alpha(t.palette[tone].main, 0.07) : "transparent" }}>
+                  <Typography sx={{ fontWeight: 800, fontSize: 14 }}>{m.short}</Typography>
+                  <Typography variant="caption" sx={{ fontWeight: 700, color: tone ? `${tone}.dark` : "text.secondary" }}>
+                    {m.status === "paid" ? "Paid" : m.status === "pending" ? "Being checked" : m.status === "partial" ? "Part paid" : m.current ? "Due" : "Not yet"}
+                  </Typography>
+                </Box>
+              );
+            })}
+          </Box>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>
+            You can pay up to {ADVANCE_MONTHS} months ahead{lease && !lease.open ? ", until your lease ends" : ""}. Each month is checked by your owner.
+          </Typography>
+        </Panel>
+      )}
+
       <Panel
         title="Payment history"
         icon={<HistoryIcon fontSize="small" />}
@@ -2094,42 +2381,26 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         action={paidThisYear > 0 && <Pill label={`${peso(paidThisYear)} paid in ${new Date().getFullYear()}`} tone="success" />}
       >
         {payments.length > 0 && (
-          <Box sx={{ display: "flex", gap: 1, overflowX: "auto", mx: { xs: -2, sm: 0 }, px: { xs: 2, sm: 0 }, mb: 2, scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
-            {[
-              { id: "all", label: "All" },
-              { id: "paid", label: "Paid" },
-              { id: "pending", label: "Pending" },
-              ...(paymentCounts.rejected > 0 ? [{ id: "rejected", label: "Rejected" }] : []),
-            ].map((f) => (
-              <Chip
-                key={f.id}
-                label={`${f.label} · ${paymentCounts[f.id]}`}
-                clickable
-                onClick={() => setPaymentFilter(f.id)}
-                color={paymentFilter === f.id ? "primary" : "default"}
-                variant={paymentFilter === f.id ? "filled" : "outlined"}
-                sx={{ fontWeight: 700, flexShrink: 0, height: 40, borderRadius: 20 }}
-              />
-            ))}
-          </Box>
+          <FilterPills
+            value={paymentFilter}
+            onChange={setPaymentFilter}
+            options={[
+              { id: "all", label: "All", count: paymentCounts.all },
+              { id: "paid", label: "Paid", count: paymentCounts.paid },
+              { id: "pending", label: "Pending", count: paymentCounts.pending },
+              ...(paymentCounts.rejected > 0 ? [{ id: "rejected", label: "Rejected", count: paymentCounts.rejected }] : []),
+            ]}
+          />
         )}
         {payments.length === 0 ? (
           <EmptyState icon={<ReceiptLongOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="No payments yet" body="Your submitted payments will show up here." />
         ) : filteredPayments.length === 0 ? (
           <EmptyState icon={<CheckCircleOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="Nothing here" body="No payments match this filter." />
         ) : (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {paymentsByYear.map(([year, list]) => (
-              <Box key={year}>
-                <Typography variant="caption" sx={{ fontWeight: 800, letterSpacing: 0.6, color: "text.secondary" }}>
-                  {year}
-                </Typography>
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25, mt: 0.75 }}>
-                  {list.map((p) => (
-                    <PaymentRow key={p.id} p={p} onClick={() => setReceipt(p)} />
-                  ))}
-                </Box>
-              </Box>
+          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
+            {/* Latest year open, older years folded up */}
+            {paymentsByYear.map(([year, list], i) => (
+              <PaymentYear key={`${paymentFilter}-${year}`} year={year} list={list} defaultOpen={i === 0} onPick={setReceipt} />
             ))}
           </Box>
         )}
@@ -2353,13 +2624,41 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
               <EmptyState icon={<CheckCircleOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="All sorted" body="No open requests right now." />
             </Paper>
           ) : (
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.5, sm: 2 } }}>
-              {activeTickets.map((t, i) => (
-                <Box key={t.id} sx={{ ...rise(i), minWidth: 0 }}>
-                  <TicketCard t={t} onAction={openTicketDlg} />
-                </Box>
-              ))}
-            </Box>
+            <>
+              {activeTickets.length > 3 && (
+                <FilterPills
+                  value={ticketFilter}
+                  onChange={(v) => {
+                    setTicketFilter(v);
+                    setTicketsShown(PAGE_SIZE);
+                  }}
+                  options={[
+                    { id: "all", label: "All open", count: activeTickets.length },
+                    { id: "Pending", label: "Waiting", count: activeTickets.filter((t) => (t.status || "Pending") === "Pending").length },
+                    { id: "In Progress", label: "Being fixed", count: activeTickets.filter((t) => t.status === "In Progress").length },
+                  ]}
+                />
+              )}
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.25, sm: 1.5 }, alignItems: "start" }}>
+                {shownTickets.slice(0, ticketsShown).map((t, i) => (
+                  <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0 }}>
+                    {/* A few requests: open in full. Many: short rows that open on tap */}
+                    <TicketCard t={t} onAction={openTicketDlg} collapsible={activeTickets.length > 2} defaultOpen={activeTickets.length <= 2} />
+                  </Box>
+                ))}
+              </Box>
+              {shownTickets.length === 0 && (
+                <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>No requests here.</Typography>
+              )}
+              <ShowMore
+                shown={Math.min(ticketsShown, shownTickets.length)}
+                total={shownTickets.length}
+                step={PAGE_SIZE}
+                noun="more requests"
+                onMore={() => setTicketsShown((n) => n + PAGE_SIZE)}
+                onLess={() => setTicketsShown(PAGE_SIZE)}
+              />
+            </>
           )}
 
           {/* Resolved requests live in the archive, out of the way */}
@@ -2378,13 +2677,23 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 </Box>
               </Button>
               {archiveOpen && (
-                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.5, sm: 2 }, mt: 1.5 }}>
-                  {resolvedTickets.map((t) => (
-                    <Box key={t.id} sx={{ minWidth: 0, opacity: 0.85 }}>
-                      <TicketCard t={t} />
-                    </Box>
-                  ))}
-                </Box>
+                <>
+                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.25, sm: 1.5 }, mt: 1.5, alignItems: "start" }}>
+                    {resolvedTickets.slice(0, archiveShown).map((t) => (
+                      <Box key={t.id} sx={{ minWidth: 0, opacity: 0.85 }}>
+                        <TicketCard t={t} collapsible defaultOpen={false} />
+                      </Box>
+                    ))}
+                  </Box>
+                  <ShowMore
+                    shown={Math.min(archiveShown, resolvedTickets.length)}
+                    total={resolvedTickets.length}
+                    step={PAGE_SIZE}
+                    noun="more"
+                    onMore={() => setArchiveShown((n) => n + PAGE_SIZE)}
+                    onLess={() => setArchiveShown(PAGE_SIZE)}
+                  />
+                </>
               )}
             </Box>
           )}
@@ -2394,8 +2703,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   );
 
   const fabAction =
-    isPhone && activeTab === "payments" && canPay
-      ? { label: "Pay rent", icon: <PaymentIcon sx={{ mr: 0.75 }} />, onClick: openPayRentModal }
+    isPhone && activeTab === "payments" && (canPay || canPayAhead)
+      ? { label: canPay ? "Pay rent" : "Pay ahead", icon: <PaymentIcon sx={{ mr: 0.75 }} />, onClick: () => openPayRentModal() }
       : isPhone && activeTab === "maintenance"
         ? { label: "New request", icon: <AddIcon sx={{ mr: 0.75 }} />, onClick: openRepair }
         : null;
@@ -2435,7 +2744,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           severity="warning"
           sx={{ mb: 2, borderRadius: 2 }}
           action={
-            <Button color="inherit" size="small" onClick={() => setReloadKey((k) => k + 1)} sx={{ fontWeight: 700 }}>
+            <Button color="inherit" size="small" onClick={retryLoad} sx={{ fontWeight: 700 }}>
               Retry
             </Button>
           }
@@ -2481,7 +2790,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         <DialogTitle sx={{ pb: 1.25 }}>
           <Box sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
             <Typography sx={{ fontWeight: 800, fontSize: "1.1rem" }}>
-              {payStep === 2 ? "Payment submitted" : `Pay rent · ${currentPeriod}`}
+              {payStep === 2 ? "Payment submitted" : `Pay rent · ${periodsText(sortedPayMonths.length ? sortedPayMonths : [currentPeriod])}`}
             </Typography>
             <IconButton edge="end" aria-label="Close" onClick={closePayment} disabled={paymentSubmitting}>
               <CloseIcon />
@@ -2501,13 +2810,75 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           {/* STEP 0: pay */}
           {payStep === 0 && (
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2.25, pt: 0.5 }}>
+              {/* Which months this payment covers (pay ahead by picking more) */}
+              {payableMonths.length > 1 && (
+                <Box>
+                  <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 0.75 }}>
+                    <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
+                      Paying for
+                    </Typography>
+                    <Typography variant="caption" color="text.secondary">
+                      Tap more months to pay ahead
+                    </Typography>
+                  </Box>
+                  <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 0.75 }}>
+                    {payableMonths.map((m) => {
+                      const selectable = m.status === "open" || m.status === "partial";
+                      const on = payMonths.includes(m.label);
+                      return (
+                        <Box
+                          key={m.label}
+                          component="button"
+                          type="button"
+                          disabled={!selectable || (rentMissing && !on && payMonths.length > 0)}
+                          onClick={() => togglePayMonth(m.label)}
+                          aria-pressed={on}
+                          sx={{
+                            minWidth: 0,
+                            p: 1,
+                            borderRadius: 2,
+                            font: "inherit",
+                            textAlign: "center",
+                            cursor: selectable ? "pointer" : "default",
+                            border: "1.5px solid",
+                            borderColor: on ? "primary.main" : "divider",
+                            bgcolor: (t) => (on ? alpha(t.palette.primary.main, 0.08) : "transparent"),
+                            color: "text.primary",
+                            opacity: selectable ? 1 : 0.6,
+                            "&:disabled": { cursor: "default" },
+                          }}
+                        >
+                          <Box sx={{ ...row, justifyContent: "center", gap: 0.5, fontWeight: 800, fontSize: 14 }}>
+                            {on && <CheckIcon sx={{ fontSize: 15, color: "primary.main" }} />}
+                            {m.short}
+                          </Box>
+                          <Box sx={{ fontSize: 11.5, color: m.status === "paid" ? "success.dark" : m.status === "pending" ? "warning.dark" : "text.secondary", fontWeight: 600 }}>
+                            {m.status === "paid" ? "Paid" : m.status === "pending" ? "Sent" : m.status === "partial" ? "Part paid" : m.current ? "This month" : "Ahead"}
+                          </Box>
+                        </Box>
+                      );
+                    })}
+                  </Box>
+                  {rentMissing && (
+                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                      Paying several months at once needs your monthly rent set. Ask your landlord.
+                    </Typography>
+                  )}
+                </Box>
+              )}
+
               <Box sx={{ p: 2, borderRadius: 2.5, bgcolor: "rgba(255, 69, 0, 0.08)" }}>
                 <Typography variant="body2" color="text.secondary">
                   Amount to send
                 </Typography>
                 <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, fontSize: "1.9rem", color: "primary.main", lineHeight: 1.2 }}>
-                  {peso(tenantInfo.monthlyRent)}
+                  {peso(multiMonth ? totalDue : tenantInfo.monthlyRent)}
                 </Typography>
+                {multiMonth && (
+                  <Typography variant="caption" color="text.secondary">
+                    {peso(monthlyRentNum)} × {sortedPayMonths.length} months · send it as one payment
+                  </Typography>
+                )}
               </Box>
 
               {tenantInfo.paymentNote.trim() && (
@@ -2629,16 +3000,32 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 <Pill label={payMethodKey} />
               </Box>
 
+              {multiMonth && (
+                <Box sx={{ p: 1.5, borderRadius: 2.5, bgcolor: (t) => alpha(t.palette.primary.main, 0.06) }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                    {sortedPayMonths.length} months: {sortedPayMonths.map(shortPeriod).join(", ")}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Your owner verifies each month. Each one is marked Paid when they do.
+                  </Typography>
+                </Box>
+              )}
+
               <TextField
-                label="Payment amount"
+                label={multiMonth ? "Total amount sent" : "Payment amount"}
                 type="number"
                 fullWidth
                 size="small"
-                value={paymentForm.amount}
+                value={multiMonth ? String(totalDue) : paymentForm.amount}
                 onChange={(e) => setPaymentForm({ ...paymentForm, amount: e.target.value })}
                 onBlur={() => setPaymentTouched((t) => ({ ...t, amount: true }))}
+                disabled={multiMonth}
                 error={!!showPayErr("amount")}
-                helperText={showPayErr("amount") || (amountNum > 0 && tenantInfo.monthlyRent > 0 && amountNum !== tenantInfo.monthlyRent ? `This is different from your monthly rent of ${peso(tenantInfo.monthlyRent)}. Your owner will review it.` : "")}
+                helperText={
+                  multiMonth
+                    ? `${peso(monthlyRentNum)} for each of ${sortedPayMonths.length} months. To send a different amount, pay one month at a time.`
+                    : showPayErr("amount") || (amountNum > 0 && tenantInfo.monthlyRent > 0 && amountNum !== tenantInfo.monthlyRent ? `This is different from your monthly rent of ${peso(tenantInfo.monthlyRent)}. Your owner will review it.` : "")
+                }
                 slotProps={{ input: { startAdornment: <Typography sx={{ mr: 1 }}>₱</Typography> }, htmlInput: { min: 0, inputMode: "decimal" } }}
               />
 
@@ -2699,7 +3086,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
               {!online && (
                 <Alert severity="warning" icon={<WifiOffOutlinedIcon />} sx={{ borderRadius: 2 }}>
-                  You're offline. Your details are kept, so you can submit once you're back online.
+                  You're offline. Submitting saves it on your phone, and it's sent automatically once you're back online.
                 </Alert>
               )}
 
@@ -2757,11 +3144,11 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
               <Button
                 variant="contained"
                 onClick={handlePaymentSubmit}
-                disabled={paymentSubmitting || !online}
+                disabled={paymentSubmitting}
                 startIcon={paymentSubmitting ? <CircularProgress size={18} color="inherit" /> : <PaymentIcon />}
                 sx={{ fontWeight: 700, borderRadius: 2.5, px: 3 }}
               >
-                {paymentSubmitting ? "Submitting..." : "Submit payment"}
+                {paymentSubmitting ? "Submitting..." : !online ? "Save and send later" : multiMonth ? `Submit ${sortedPayMonths.length} months` : "Submit payment"}
               </Button>
             </>
           )}
@@ -2895,7 +3282,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                   Copy reference
                 </Button>
               )}
-              {receipt.receiptNo && String(receipt.status || "").toLowerCase() === "paid" && (
+              {receipt.receiptNo && ["paid", "partial"].includes(String(receipt.status || "").toLowerCase()) && (
                 <Button
                   startIcon={<ReceiptLongOutlinedIcon />}
                   onClick={() =>
@@ -2910,6 +3297,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                       method: receipt.paymentMethod,
                       amountText: peso(receipt.amount),
                       remarks: receipt.remarks,
+                      partial: String(receipt.status || "").toLowerCase() === "partial",
                     })
                   }
                   sx={{ fontWeight: 700 }}

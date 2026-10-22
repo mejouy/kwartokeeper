@@ -19,11 +19,11 @@ const STEPS = [
   },
   {
     title: "Rules and amenities",
-    body: "Set house rules, curfew and what's included, like Wi-Fi or laundry.",
+    body: "How many floors, what's included (like Wi-Fi or laundry), curfew and house rules.",
   },
   {
-    title: "Rooms and layout",
-    body: "Add your rooms and how many beds each one has.",
+    title: "Rooms and beds",
+    body: "How many rooms each floor has, the beds in each, and the rate per bed.",
   },
 ];
 

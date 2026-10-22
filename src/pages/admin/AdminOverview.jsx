@@ -1,24 +1,30 @@
 // src/pages/admin/AdminOverview.jsx
 
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Alert, Avatar, Box, Button, Card, CardActionArea, CardContent, Chip, GlobalStyles, Paper, Skeleton, Typography } from "@mui/material";
+import { Alert, Avatar, Box, Button, Skeleton, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import SupervisorAccountOutlinedIcon from "@mui/icons-material/SupervisorAccountOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
-import CampaignOutlinedIcon from "@mui/icons-material/CampaignOutlined";
-import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import TaskAltIcon from "@mui/icons-material/TaskAlt";
-import PersonAddIcon from "@mui/icons-material/PersonAdd";
-import MapsHomeWorkIcon from "@mui/icons-material/MapsHomeWork";
-import GroupIcon from "@mui/icons-material/Group";
+import PersonAddAltOutlinedIcon from "@mui/icons-material/PersonAddAltOutlined";
+import HomeWorkOutlinedIcon from "@mui/icons-material/HomeWorkOutlined";
+import GroupsOutlinedIcon from "@mui/icons-material/GroupsOutlined";
 import FactCheckOutlinedIcon from "@mui/icons-material/FactCheckOutlined";
-import { collection, onSnapshot, query, where } from "firebase/firestore";
+import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import ConstructionOutlinedIcon from "@mui/icons-material/ConstructionOutlined";
+import DonutLargeOutlinedIcon from "@mui/icons-material/DonutLargeOutlined";
+import { collection, doc, getDoc, onSnapshot, query, where } from "firebase/firestore";
 import { db } from "../../config/firebase";
 import { useAuth } from "../../context/AuthContext";
+import { ownerAccessOf } from "../../utils/ownerAccess";
+import { occupancyOf, bedsInProperty, holdsBed } from "../../utils/occupancy";
+import { loadPlatformSettings } from "../../utils/platformSettings";
+import { HeaderCard, Panel, Pill } from "./adminUi";
+import { withoutRemoved } from "../../utils/accountState";
 
+const R = { sm: "10px", md: "14px" };
 const row = { display: "flex", alignItems: "center" };
-const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
 
 const toMillis = (ts) => {
   if (!ts) return 0;
@@ -26,19 +32,11 @@ const toMillis = (ts) => {
   const n = new Date(ts).getTime();
   return Number.isNaN(n) ? 0 : n;
 };
-
-// Helper to format Firestore timestamps safely
-const formatDate = (timestamp) => {
-  const ms = toMillis(timestamp);
-  if (!ms) return "Recently";
-  return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+const formatDate = (ts) => {
+  const ms = toMillis(ts);
+  return ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Recently";
 };
-
-const ownerName = (o) => {
-  if (o.firstName && o.lastName) return `${o.firstName} ${o.lastName}`;
-  return o.fullName || o.name || o.displayName || "New owner";
-};
-
+const ownerName = (o) => (o.firstName && o.lastName ? `${o.firstName} ${o.lastName}` : o.fullName || o.name || o.displayName || "New owner");
 const initials = (name) =>
   name
     .split(/\s+/)
@@ -46,315 +44,189 @@ const initials = (name) =>
     .slice(0, 2)
     .map((w) => w[0].toUpperCase())
     .join("") || "?";
+const docsComplete = (o) => Boolean(o.verificationDocs?.idUrl && o.verificationDocs?.clearanceUrl);
+const plural = (n, one, many) => `${n} ${n === 1 ? one : many}`;
 
-const QUICK_ACTIONS = [
-  { label: "Manage owners", hint: "Approve, view or suspend registered owners.", path: "/admin/owners", Icon: SupervisorAccountOutlinedIcon },
-  { label: "System broadcasts", hint: "Send updates or announcements to owners.", path: "/admin/announcements", Icon: CampaignOutlinedIcon },
-  { label: "Global settings", hint: "Adjust platform settings and configurations.", path: "/admin/settings", Icon: SettingsOutlinedIcon },
+// Owner accounts by where they are in the approval flow
+const ACCOUNT_STATES = [
+  { key: "active", label: "Active", color: "success.main" },
+  { key: "pending", label: "Waiting for review", color: "warning.main" },
+  { key: "rejected", label: "Declined", color: "error.light" },
+  { key: "suspended", label: "Suspended", color: "error.main" },
 ];
-
-// Windows light up once on load; switched off for "reduce motion" users.
-const AnimationStyles = (
-  <GlobalStyles
-    styles={{
-      "@keyframes kkPop": {
-        from: { opacity: 0, transform: "scale(0.6)" },
-        to: { opacity: 1, transform: "scale(1)" },
-      },
-      "@media (prefers-reduced-motion: reduce)": {
-        "*, *::before, *::after": { animationDuration: "0.001ms !important", transitionDuration: "0.001ms !important" },
-      },
-    }}
-  />
-);
-
-// Same dorm-facade windows as the owner overview. Here a lit window means an
-// approved owner: 30 windows = every owner who has signed up.
-const WINDOW_COUNT = 30;
-const LIGHT_ORDER = [3, 17, 8, 24, 1, 12, 27, 5, 20, 14, 9, 29, 2, 22, 11, 6, 25, 16, 0, 19, 28, 7, 13, 23, 4, 21, 10, 26, 15, 18];
-const WINDOW_RANK = LIGHT_ORDER.reduce((acc, cell, rank) => ({ ...acc, [cell]: rank }), {});
-
-function ApprovalWindows({ approved, total }) {
-  const rate = total > 0 ? approved / total : 0;
-  const litCount = approved > 0 ? Math.max(1, Math.round(rate * WINDOW_COUNT)) : 0;
-  return (
-    <Box>
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(10, 1fr)", gap: { xs: 0.75, md: 1 }, width: "100%", maxWidth: 320 }}>
-        {Array.from({ length: WINDOW_COUNT }).map((_, i) => (
-          <Box
-            key={i}
-            sx={{
-              aspectRatio: "1",
-              borderRadius: "4px",
-              bgcolor: WINDOW_RANK[i] < litCount ? "primary.main" : "rgba(202, 220, 246, 0.14)",
-              animation: `kkPop 0.4s ease-out ${i * 18}ms both`,
-            }}
-          />
-        ))}
-      </Box>
-      <Typography variant="caption" sx={{ color: "#cadcf6", display: "block", mt: 1.25 }}>
-        {total > 0 ? `${approved} of ${total} owners approved` : "No owners have signed up yet"}
-      </Typography>
-    </Box>
-  );
-}
-
-function MetricBox({ title, value, subtitle, icon, subtitleColor = "text.secondary", onClick }) {
-  const body = (
-    <CardContent sx={{ p: { xs: 1.75, sm: 2.5 }, "&:last-child": { pb: { xs: 1.75, sm: 2.5 } } }}>
-      <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 1, mb: 1 }}>
-        <Typography variant="body2" color="text.secondary" fontWeight="600" sx={{ lineHeight: 1.3 }}>
-          {title}
-        </Typography>
-        <Box sx={{ p: { xs: 0.75, sm: 1 }, borderRadius: 2, bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main", display: "flex", flexShrink: 0 }}>
-          {icon}
-        </Box>
-      </Box>
-      <Typography
-        variant="h4"
-        fontWeight="800"
-        sx={{ fontFamily: '"Inter", sans-serif', fontSize: { xs: "1.5rem", sm: "2.125rem" }, wordBreak: "break-word" }}
-      >
-        {value}
-      </Typography>
-      <Typography variant="caption" sx={{ color: subtitleColor, display: "block" }}>
-        {subtitle}
-      </Typography>
-    </CardContent>
-  );
-  return (
-    <Card elevation={0} sx={{ ...cardSx, height: "100%", overflow: "hidden" }}>
-      {onClick ? (
-        <CardActionArea onClick={onClick} sx={{ height: "100%", alignItems: "stretch", "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } }}>
-          {body}
-        </CardActionArea>
-      ) : (
-        body
-      )}
-    </Card>
-  );
-}
 
 export default function AdminOverview() {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const [ready, setReady] = useState({ users: false, properties: false, tenants: false });
+  const [ready, setReady] = useState({ owners: false, properties: false, tenants: false });
   const [error, setError] = useState("");
-  const [owners, setOwners] = useState({ approved: 0, suspended: 0, rejected: 0, pending: [] });
-  const [totalProperties, setTotalProperties] = useState(0);
-  const [totalTenants, setTotalTenants] = useState(0);
+  const [owners, setOwners] = useState([]);
+  const [properties, setProperties] = useState([]);
+  const [tenantSources, setTenantSources] = useState({ tenants: [], users: [] });
+  const [adminName, setAdminName] = useState("");
+  const [settings, setSettings] = useState(null);
 
   useEffect(() => {
     const markReady = (key) => setReady((r) => (r[key] ? r : { ...r, [key]: true }));
-    const fail = (what) => (err) => {
+    const fail = (what, key) => (err) => {
       console.error(`Error loading ${what}:`, err);
-      setError(`Some ${what} could not be loaded.`);
-      markReady(what);
+      setError(`Some ${what} couldn't be loaded, so a few numbers may be off.`);
+      markReady(key);
     };
-
-    // 1. Owners only, split by where they are in the approval flow.
-    //    "Pending" matches the owner page: status OR approvalStatus is pending
-    //    (that includes owners who resubmitted or replaced their documents).
-    const unsubUsers = onSnapshot(
-      query(collection(db, "users"), where("role", "==", "owner")),
-      (snapshot) => {
-        let approved = 0;
-        let suspended = 0;
-        let rejected = 0;
-        const pending = [];
-
-        snapshot.docs.forEach((d) => {
-          const data = d.data();
-          if (data.status === "pending" || data.approvalStatus === "pending") pending.push({ id: d.id, ...data });
-          else if (data.approvalStatus === "rejected") rejected++;
-          else if (data.status === "suspended") suspended++;
-          else approved++;
-        });
-
-        pending.sort((a, b) => toMillis(b.createdAt) - toMillis(a.createdAt));
-        setOwners({ approved, suspended, rejected, pending });
-        markReady("users");
-      },
-      fail("users")
-    );
-
-    // 2. ALL properties
-    const unsubProperties = onSnapshot(
-      collection(db, "properties"),
-      (snapshot) => {
-        setTotalProperties(snapshot.docs.length);
-        markReady("properties");
-      },
-      fail("properties")
-    );
-
-    // 3. ALL tenants
-    const unsubTenants = onSnapshot(
-      collection(db, "tenants"),
-      (snapshot) => {
-        setTotalTenants(snapshot.docs.length);
-        markReady("tenants");
-      },
-      fail("tenants")
-    );
-
-    return () => {
-      unsubUsers();
-      unsubProperties();
-      unsubTenants();
-    };
+    const unsubs = [
+      onSnapshot(
+        query(collection(db, "users"), where("role", "==", "owner")),
+        (snap) => {
+          setOwners(withoutRemoved(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+          markReady("owners");
+        },
+        fail("owners", "owners")
+      ),
+      onSnapshot(
+        collection(db, "properties"),
+        (snap) => {
+          setProperties(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+          markReady("properties");
+        },
+        fail("properties", "properties")
+      ),
+      // Tenants live in "tenants" and/or "users" (same id); both are read and merged
+      onSnapshot(
+        collection(db, "tenants"),
+        (snap) => {
+          setTenantSources((s) => ({ ...s, tenants: snap.docs.map((d) => ({ id: d.id, ...d.data() })) }));
+          markReady("tenants");
+        },
+        fail("tenants", "tenants")
+      ),
+      onSnapshot(
+        query(collection(db, "users"), where("role", "==", "tenant")),
+        (snap) => setTenantSources((s) => ({ ...s, users: snap.docs.map((d) => ({ id: d.id, ...d.data() })) })),
+        (err) => console.warn("Tenant profiles unavailable:", err?.code || err)
+      ),
+    ];
+    loadPlatformSettings({ fresh: true }).then(setSettings);
+    return () => unsubs.forEach((u) => u());
   }, []);
 
-  const loading = !(ready.users && ready.properties && ready.tenants);
-  const pendingCount = owners.pending.length;
-  const pendingPreview = useMemo(() => owners.pending.slice(0, 5), [owners.pending]); // up to 5 in the feed
+  useEffect(() => {
+    if (!currentUser?.uid) return;
+    getDoc(doc(db, "users", currentUser.uid))
+      .then((snap) => setAdminName(snap.data()?.fullName || snap.data()?.name || ""))
+      .catch(() => {});
+  }, [currentUser]);
 
-  const adminName =
-    currentUser?.displayName || (currentUser?.email ? currentUser.email.split("@")[0] : "") || "Admin";
-  const totalOwners = owners.approved + owners.suspended + owners.rejected + pendingCount;
+  const byState = useMemo(() => {
+    const m = { active: [], pending: [], rejected: [], suspended: [] };
+    owners.forEach((o) => m[ownerAccessOf(o)].push(o));
+    m.pending.sort((a, b) => toMillis(a.verificationDocs?.submittedAt || a.createdAt) - toMillis(b.verificationDocs?.submittedAt || b.createdAt)); // oldest waiting first
+    return m;
+  }, [owners]);
+
+  // Same occupancy rule as the owner pages
+  const occ = useMemo(() => {
+    const merged = new Map();
+    [...tenantSources.tenants, ...tenantSources.users].forEach((t) => {
+      const id = t.uid || t.id;
+      merged.set(id, { ...(merged.get(id) || {}), ...t });
+    });
+    const tenants = [...merged.values()];
+    const result = occupancyOf(properties.map((p) => ({ id: p.id, beds: bedsInProperty(p) })), tenants);
+    // Current tenants only (Active or Pending), same as everywhere else
+    return { ...result, residents: tenants.filter(holdsBed).length };
+  }, [properties, tenantSources]);
+
+  const loading = !(ready.owners && ready.properties && ready.tenants);
+  const pending = byState.pending;
+  const name = adminName || currentUser?.displayName || (currentUser?.email ? currentUser.email.split("@")[0] : "") || "Admin";
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
-
-  // Pill tuned for the dark hero
-  const statusTone =
-    pendingCount > 0
-      ? { label: `${pendingCount} to review`, bg: "rgba(255, 167, 38, 0.18)", fg: "#ffcc80" }
-      : { label: "All clear", bg: "rgba(76, 175, 80, 0.18)", fg: "#a5d6a7" };
-
-  const welcomeSubtitle =
-    pendingCount > 0
-      ? `${pendingCount} owner ${pendingCount === 1 ? "registration is" : "registrations are"} waiting for your approval.`
-      : `Nothing waiting. ${totalProperties} ${totalProperties === 1 ? "property" : "properties"} and ${totalTenants} ${totalTenants === 1 ? "tenant" : "tenants"} on the platform.`;
-
-  const panelSx = { ...cardSx, p: { xs: 2, sm: 3 } };
-  const panelTitleSx = { fontFamily: '"Inter", sans-serif', fontWeight: 700 };
+  const totalOwners = owners.length;
 
   if (loading) {
     return (
       <Box>
-        {error && <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>{error}</Alert>}
-        <Skeleton variant="rounded" height={220} sx={{ borderRadius: 4, mb: 3 }} />
-        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }, gap: { xs: 1.5, md: 2.5 }, mb: 4 }}>
-          {[0, 1, 2, 3].map((k) => <Skeleton key={k} variant="rounded" height={118} sx={{ borderRadius: 3 }} />)}
+        {error && <Alert severity="warning" sx={{ mb: 2, borderRadius: R.md }}>{error}</Alert>}
+        <Skeleton variant="rounded" height={220} sx={{ borderRadius: "22px", mb: 2.5 }} />
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1.3fr 1fr" }, gap: 2.5 }}>
+          <Skeleton variant="rounded" height={300} sx={{ borderRadius: "18px" }} />
+          <Skeleton variant="rounded" height={300} sx={{ borderRadius: "18px" }} />
         </Box>
-        <Skeleton variant="rounded" height={280} sx={{ borderRadius: 3 }} />
       </Box>
     );
   }
 
   return (
-    <Box>
-      {AnimationStyles}
-
-      {error && <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>{error}</Alert>}
-
-      {/* Welcome hero — same dark brand surface as the owner overview */}
-      <Box
-        sx={{
-          position: "relative",
-          overflow: "hidden",
-          bgcolor: "#202020",
-          color: "#ffffff",
-          borderRadius: 4,
-          p: { xs: 2.5, sm: 4 },
-          mb: 3,
-          display: "grid",
-          gridTemplateColumns: { xs: "1fr", md: "1.2fr 0.8fr" },
-          gap: { xs: 3, md: 4 },
-          alignItems: "center",
-        }}
-      >
-        <Box
-          sx={{
-            position: "absolute",
-            top: -140,
-            right: -100,
-            width: 380,
-            height: 380,
-            borderRadius: "50%",
-            background: "radial-gradient(circle, rgba(255, 69, 0, 0.22), transparent 70%)",
-            pointerEvents: "none",
-          }}
-        />
-
-        <Box sx={{ position: "relative" }}>
-          <Chip size="small" label={statusTone.label} sx={{ bgcolor: statusTone.bg, color: statusTone.fg, fontWeight: 700, mb: 1.5 }} />
-          <Typography
-            variant="h4"
-            component="h1"
-            sx={{
-              fontFamily: '"Inter", sans-serif',
-              fontWeight: 900,
-              color: "#ffffff",
-              fontSize: { xs: "1.6rem", sm: "2.1rem" },
-              lineHeight: 1.15,
-              wordBreak: "break-word",
-            }}
-          >
-            {greeting}, {adminName}
-          </Typography>
-          <Typography variant="body2" sx={{ color: "#cadcf6", mt: 1, maxWidth: 460 }}>
-            {welcomeSubtitle}
-          </Typography>
-          <Button
-            variant="contained"
-            startIcon={<FactCheckOutlinedIcon />}
-            onClick={() => navigate("/admin/owners")}
-            sx={{ mt: 2.5, width: { xs: "100%", sm: "auto" }, fontWeight: 700 }}
-          >
-            {pendingCount > 0 ? "Review registrations" : "Manage owners"}
-          </Button>
-        </Box>
-
-        <Box sx={{ position: "relative" }}>
-          <ApprovalWindows approved={owners.approved} total={totalOwners} />
-        </Box>
-      </Box>
-
-      {/* Top metrics — 2x2 on phones, 4 across on desktop */}
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, 1fr)", md: "repeat(4, 1fr)" }, gap: { xs: 1.5, md: 2.5 }, mb: 4 }}>
-        <MetricBox
-          title="Pending Approvals"
-          value={pendingCount}
-          subtitle="Owners awaiting verification"
-          subtitleColor={pendingCount > 0 ? "warning.main" : "text.secondary"}
-          icon={<PersonAddIcon fontSize="small" />}
-          onClick={() => navigate("/admin/owners")}
-        />
-        <MetricBox
-          title="Approved Owners"
-          value={owners.approved}
-          subtitle={owners.suspended + owners.rejected > 0 ? `${owners.suspended + owners.rejected} suspended or rejected` : "Active platform clients"}
-          icon={<SupervisorAccountOutlinedIcon fontSize="small" />}
-          onClick={() => navigate("/admin/owners")}
-        />
-        <MetricBox title="Total Properties" value={totalProperties} subtitle="System-wide dorms/apts" icon={<MapsHomeWorkIcon fontSize="small" />} />
-        <MetricBox title="Total Tenants" value={totalTenants} subtitle="Across all properties" icon={<GroupIcon fontSize="small" />} />
-      </Box>
-
-      {/* Bottom panels */}
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: { xs: 2, md: 3 }, mb: 2, alignItems: "start" }}>
-        {/* Left: pending registrations */}
-        <Paper elevation={0} sx={panelSx}>
-          <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1.5, mb: 2 }}>
-            <Typography variant="h6" sx={panelTitleSx}>Needs Your Review</Typography>
-            <Button size="small" variant="outlined" onClick={() => navigate("/admin/owners")}>
-              View All
+    <Box sx={{ maxWidth: 1200, mx: "auto" }}>
+      {error && <Alert severity="warning" sx={{ mb: 2, borderRadius: R.md }}>{error}</Alert>}
+      {settings?.maintenanceMode && (
+        <Alert
+          severity="warning"
+          icon={<ConstructionOutlinedIcon />}
+          sx={{ mb: 2, borderRadius: R.md, alignItems: "center" }}
+          action={
+            <Button color="inherit" size="small" onClick={() => navigate("/admin/settings")} sx={{ fontWeight: 700 }}>
+              Settings
             </Button>
-          </Box>
+          }
+        >
+          <strong>Maintenance mode is on.</strong> Owners, caretakers and tenants are seeing the maintenance screen.
+        </Alert>
+      )}
 
-          {pendingPreview.length === 0 ? (
-            <Box sx={{ textAlign: "center", py: 3 }}>
-              <Box sx={{ width: 56, height: 56, borderRadius: "50%", mx: "auto", mb: 1.5, ...row, justifyContent: "center", bgcolor: (t) => alpha(t.palette.success.main, 0.12) }}>
+      <HeaderCard
+        eyebrow={
+          <Box sx={{ mb: 1 }}>
+            <Pill label={pending.length > 0 ? `${pending.length} to review` : "All clear"} tone={pending.length > 0 ? "warning" : "success"} />
+          </Box>
+        }
+        title={`${greeting}, ${name}`}
+        description={
+          pending.length > 0
+            ? `${plural(pending.length, "owner registration is", "owner registrations are")} waiting for your approval.`
+            : `Nothing waiting. ${plural(properties.length, "property", "properties")} and ${plural(occ.residents, "tenant", "tenants")} on the platform.`
+        }
+        action={
+          <Button variant="contained" disableElevation startIcon={<FactCheckOutlinedIcon />} onClick={() => navigate("/admin/owners")} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 44, boxShadow: "0 10px 22px -14px rgba(255,69,0,.9)" }}>
+            {pending.length > 0 ? "Review registrations" : "Manage owners"}
+          </Button>
+        }
+        tiles={[
+          { label: "Waiting for review", value: pending.length, sub: pending.length ? `Oldest from ${formatDate(pending[0].verificationDocs?.submittedAt || pending[0].createdAt)}` : "Nothing waiting", icon: <PersonAddAltOutlinedIcon />, tone: pending.length ? "warning" : undefined, onClick: () => navigate("/admin/owners") },
+          { label: "Active owners", value: byState.active.length, sub: `${totalOwners} signed up in total`, icon: <SupervisorAccountOutlinedIcon />, onClick: () => navigate("/admin/owners") },
+          { label: "Properties", value: properties.length, sub: `${occ.beds} beds`, icon: <HomeWorkOutlinedIcon /> },
+          { label: "Occupancy", value: `${occ.rate}%`, sub: `${occ.occupied} of ${occ.beds} beds filled`, icon: <DonutLargeOutlinedIcon /> },
+        ]}
+      />
+
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "minmax(0, 1.35fr) minmax(0, 1fr)" }, gap: { xs: 2, md: 2.5 }, alignItems: "stretch" }}>
+        {/* Who needs a decision */}
+        <Panel
+          title="Needs your review"
+          icon={<FactCheckOutlinedIcon />}
+          action={
+            pending.length > 0 && (
+              <Button size="small" endIcon={<ChevronRightIcon />} onClick={() => navigate("/admin/owners")} sx={{ fontWeight: 700, flexShrink: 0 }}>
+                All {pending.length}
+              </Button>
+            )
+          }
+        >
+          {pending.length === 0 ? (
+            <Box sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", py: 4 }}>
+              <Box sx={{ width: 56, height: 56, borderRadius: "50%", mb: 1.5, display: "grid", placeItems: "center", bgcolor: (t) => alpha(t.palette.success.main, 0.12) }}>
                 <TaskAltIcon sx={{ fontSize: 28, color: "success.main" }} />
               </Box>
-              <Typography sx={{ fontWeight: 700 }}>All caught up</Typography>
-              <Typography variant="body2" color="text.secondary">No pending registrations.</Typography>
+              <Typography sx={{ fontWeight: 800 }}>All caught up</Typography>
+              <Typography variant="body2" color="text.secondary">
+                New owner registrations show up here.
+              </Typography>
             </Box>
           ) : (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-              {pendingPreview.map((owner) => {
-                const name = ownerName(owner);
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
+              {pending.slice(0, 6).map((owner) => {
+                const nm = ownerName(owner);
+                const complete = docsComplete(owner);
                 return (
                   <Box
                     key={owner.id}
@@ -369,78 +241,95 @@ export default function AdminOverview() {
                       font: "inherit",
                       color: "inherit",
                       cursor: "pointer",
-                      p: 1.5,
-                      borderRadius: 2,
-                      bgcolor: (t) => alpha(t.palette.background.paper, 0.35),
+                      p: 1.25,
+                      borderRadius: R.md,
+                      bgcolor: "transparent",
                       border: "1px solid",
                       borderColor: "divider",
-                      transition: "border-color .15s",
-                      "&:hover": { borderColor: "primary.main" },
+                      transition: "border-color .15s, background-color .15s",
+                      "&:hover": { borderColor: "primary.main", bgcolor: (t) => alpha(t.palette.primary.main, 0.03) },
                       "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
                     }}
                   >
-                    <Avatar sx={{ width: 40, height: 40, bgcolor: "rgba(255, 69, 0, 0.12)", color: "primary.main", fontWeight: 800, fontSize: 15 }}>
-                      {initials(name)}
-                    </Avatar>
+                    <Avatar sx={{ width: 40, height: 40, bgcolor: (t) => alpha(t.palette.warning.main, 0.16), color: "warning.dark", fontWeight: 800, fontSize: 14 }}>{initials(nm)}</Avatar>
                     <Box sx={{ minWidth: 0, flex: 1 }}>
-                      <Typography noWrap variant="subtitle2" sx={{ fontWeight: 700 }}>{name}</Typography>
+                      <Typography noWrap sx={{ fontWeight: 700, fontSize: 14.5 }}>
+                        {nm}
+                      </Typography>
                       <Typography variant="caption" color="text.secondary" noWrap component="div">
-                        {owner.email || "No email"} · Applied {formatDate(owner.createdAt)}
+                        {owner.email || "No email"} · {formatDate(owner.verificationDocs?.submittedAt || owner.createdAt)}
                       </Typography>
                     </Box>
-                    <Chip label={owner.verificationDocs ? "Docs in" : "No docs"} color={owner.verificationDocs ? "warning" : "default"} size="small" sx={{ flexShrink: 0, fontWeight: 700 }} />
+                    <Pill label={complete ? "Docs ready" : "Docs missing"} tone={complete ? "success" : "default"} sx={{ display: { xs: "none", sm: "inline-flex" } }} />
+                    <ChevronRightIcon sx={{ color: "text.disabled", flexShrink: 0 }} />
                   </Box>
                 );
               })}
-              {pendingCount > pendingPreview.length && (
-                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textAlign: "center" }}>
-                  +{pendingCount - pendingPreview.length} more waiting
+              {pending.length > 6 && (
+                <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, textAlign: "center", mt: 0.5 }}>
+                  +{pending.length - 6} more waiting
                 </Typography>
               )}
             </Box>
           )}
-        </Paper>
+        </Panel>
 
-        {/* Right: quick actions */}
-        <Paper elevation={0} sx={panelSx}>
-          <Typography variant="h6" sx={{ ...panelTitleSx, mb: 2 }}>Quick Actions</Typography>
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
-            {QUICK_ACTIONS.map(({ label, hint, path, Icon }) => (
-              <Box
-                key={path}
-                component="button"
-                type="button"
-                onClick={() => navigate(path)}
-                sx={{
-                  ...row,
-                  gap: 1.5,
-                  width: "100%",
-                  textAlign: "left",
-                  font: "inherit",
-                  color: "inherit",
-                  cursor: "pointer",
-                  p: 1.5,
-                  borderRadius: 2,
-                  bgcolor: (t) => alpha(t.palette.background.paper, 0.35),
-                  border: "1px solid",
-                  borderColor: "divider",
-                  transition: "border-color .15s",
-                  "&:hover": { borderColor: "primary.main" },
-                  "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
-                }}
-              >
-                <Box sx={{ width: 40, height: 40, borderRadius: "50%", flexShrink: 0, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.1)" }}>
-                  <Icon sx={{ fontSize: 20, color: "primary.main" }} />
+        <Box sx={{ display: "flex", flexDirection: "column", gap: { xs: 2, md: 2.5 }, minWidth: 0 }}>
+          {/* Owner accounts at a glance */}
+          <Panel title="Owner accounts" icon={<SupervisorAccountOutlinedIcon />} action={<Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700 }}>{totalOwners}</Typography>}>
+            {totalOwners === 0 ? (
+              <Typography variant="body2" color="text.secondary">
+                No owners have signed up yet.
+              </Typography>
+            ) : (
+              <>
+                <Box sx={{ display: "flex", height: 10, borderRadius: 99, overflow: "hidden", bgcolor: (t) => alpha(t.palette.text.primary, 0.06), mb: 1.75 }}>
+                  {ACCOUNT_STATES.map((s) =>
+                    byState[s.key].length ? <Box key={s.key} sx={{ width: `${(byState[s.key].length / totalOwners) * 100}%`, bgcolor: s.color }} /> : null
+                  )}
                 </Box>
-                <Box sx={{ minWidth: 0, flex: 1 }}>
-                  <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>{label}</Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", lineHeight: 1.35 }}>{hint}</Typography>
+                <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1 }}>
+                  {ACCOUNT_STATES.map((s) => (
+                    <Box key={s.key} sx={{ ...row, gap: 1, minWidth: 0 }}>
+                      <Box sx={{ width: 10, height: 10, borderRadius: "3px", bgcolor: s.color, flexShrink: 0 }} />
+                      <Typography variant="body2" color="text.secondary" noWrap sx={{ flex: 1, minWidth: 0 }}>
+                        {s.label}
+                      </Typography>
+                      <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                        {byState[s.key].length}
+                      </Typography>
+                    </Box>
+                  ))}
                 </Box>
-                <ArrowForwardIcon fontSize="small" sx={{ color: "text.secondary" }} />
+              </>
+            )}
+          </Panel>
+
+          {/* Platform switches */}
+          <Panel
+            title="Platform"
+            icon={<SettingsOutlinedIcon />}
+            action={
+              <Button size="small" endIcon={<ChevronRightIcon />} onClick={() => navigate("/admin/settings")} sx={{ fontWeight: 700, flexShrink: 0 }}>
+                Settings
+              </Button>
+            }
+          >
+            {[
+              { label: "Maintenance mode", value: settings?.maintenanceMode ? "On" : "Off", tone: settings?.maintenanceMode ? "warning" : "success" },
+              { label: "New owners", value: settings?.autoApproveOwners ? "Auto-approved" : "Reviewed by you", tone: settings?.autoApproveOwners ? "warning" : "default" },
+              { label: "Property limit", value: settings ? `${settings.maxPropertiesPerOwner} per owner` : "—" },
+              { label: "Tenants on the platform", value: String(occ.residents), icon: <GroupsOutlinedIcon /> },
+            ].map((it, i) => (
+              <Box key={it.label} sx={{ ...row, justifyContent: "space-between", gap: 1, py: 1, borderTop: i ? "1px solid" : "none", borderColor: "divider" }}>
+                <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
+                  {it.label}
+                </Typography>
+                {it.tone ? <Pill label={it.value} tone={it.tone} /> : <Typography variant="body2" sx={{ fontWeight: 800 }}>{it.value}</Typography>}
               </Box>
             ))}
-          </Box>
-        </Paper>
+          </Panel>
+        </Box>
       </Box>
     </Box>
   );

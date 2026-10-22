@@ -1,9 +1,13 @@
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Navigate, useLocation } from "react-router-dom";
-import { onAuthStateChanged } from "firebase/auth";
+import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../config/firebase"; // Adjust path to your firebase config
 import { Box, CircularProgress } from "@mui/material";
+import { ownerAccessOf, RESTRICTED_OWNER_PATHS } from "../utils/ownerAccess";
+import { loadPlatformSettings } from "../utils/platformSettings";
+import { SIGNED_OUT_REASON_KEY } from "../utils/accountState";
+import MaintenanceScreen from "./MaintenanceScreen";
 
 const ROLE_HOME_PATHS = {
   owner: "/owner",
@@ -16,6 +20,7 @@ export default function ProtectedRoute({ children, allowedRoles = [] }) {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState(null);
   const [userDoc, setUserDoc] = useState(null);
+  const [settings, setSettings] = useState(null); // only read for non-admins (maintenance mode)
   const location = useLocation();
 
   useEffect(() => {
@@ -24,11 +29,23 @@ export default function ProtectedRoute({ children, allowedRoles = [] }) {
         setUser(currentUser);
         
         // Fetch the user's document from Firestore to check their status
+        let role = "";
         try {
           const docRef = doc(db, "users", currentUser.uid);
           const docSnap = await getDoc(docRef);
           
           if (docSnap.exists()) {
+            role = docSnap.data().role || "";
+            // Deleted or disabled in Firebase (marked by scripts/sync-auth-accounts.cjs)
+            if (docSnap.data().accountRemoved) {
+              try {
+                sessionStorage.setItem(SIGNED_OUT_REASON_KEY, docSnap.data().accountRemoved === "disabled" ? "disabled" : "deleted");
+              } catch {
+                /* storage blocked */
+              }
+              await signOut(auth).catch(() => {});
+              return; // onAuthStateChanged runs again with no user
+            }
             setUserDoc(docSnap.data());
           } else {
             const roleProfiles = await Promise.all([
@@ -41,6 +58,8 @@ export default function ProtectedRoute({ children, allowedRoles = [] }) {
         } catch (error) {
           console.error("Error fetching user data:", error);
         }
+        // Admins are never locked out by maintenance mode
+        if (role !== "admin") setSettings(await loadPlatformSettings());
       } else {
         setUser(null);
         setUserDoc(null);
@@ -65,10 +84,23 @@ export default function ProtectedRoute({ children, allowedRoles = [] }) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
+  // Maintenance mode (Admin → Settings): everyone but admins sees the maintenance screen
+  if (settings?.maintenanceMode && userDoc?.role !== "admin") {
+    return <MaintenanceScreen settings={settings} />;
+  }
+
   // 3. ROUTE GUARD: If the user is suspended, redirect them to the suspended page
-  // We make sure they aren't already ON the suspended page to prevent an infinite redirect loop
-  if (userDoc?.status === "suspended" && location.pathname !== "/suspended") {
+  // We make sure they aren't already ON the suspended page to prevent an infinite redirect loop.
+  // Owners use the shared rule, so a declined (rejected) owner can still re-submit documents.
+  const ownerAccess = userDoc?.role === "owner" ? ownerAccessOf(userDoc) : null;
+  const isSuspended = ownerAccess ? ownerAccess === "suspended" : userDoc?.status === "suspended";
+  if (isSuspended && location.pathname !== "/suspended") {
     return <Navigate to="/suspended" replace />;
+  }
+
+  // Signed in with a temporary password (invited caretakers): choose their own first
+  if (userDoc?.mustChangePassword === true && location.pathname !== "/set-password") {
+    return <Navigate to="/set-password" replace />;
   }
 
   if (allowedRoles.length > 0) {
@@ -80,10 +112,9 @@ export default function ProtectedRoute({ children, allowedRoles = [] }) {
       return <Navigate to={ROLE_HOME_PATHS[role] || "/login"} replace />;
     }
 
-    const isPendingOwner = role === "owner" && [userDoc?.status, userDoc?.approvalStatus]
-      .some((status) => String(status || "").toLowerCase() === "pending");
-    const pendingOwnerPaths = ["/owner", "/welcome", "/setup", "/wizard-success"];
-    if (isPendingOwner && !pendingOwnerPaths.includes(location.pathname)) {
+    // Pending or declined owners can only use the dashboard, Account and the setup wizard
+    const restricted = ownerAccess === "pending" || ownerAccess === "rejected";
+    if (restricted && !RESTRICTED_OWNER_PATHS.includes(location.pathname)) {
       return <Navigate to="/owner" replace />;
     }
   }

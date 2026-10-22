@@ -7,9 +7,6 @@ export const enter = (delayMs = 0) => ({
 
 /** Shared look for the form inputs on both pages. */
 export const fieldSx = {
-  // the theme gives every TextField a cream root; keep that colour on the input only
-  backgroundColor: 'transparent',
-  borderRadius: 0,
   '& .MuiOutlinedInput-root': {
     borderRadius: '10px',
     bgcolor: '#faf6f0',

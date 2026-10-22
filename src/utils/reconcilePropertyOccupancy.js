@@ -8,11 +8,10 @@ import {
   where,
 } from "firebase/firestore";
 import { db } from "../config/firebase";
+import { holdsBed } from "./occupancy";
 
-const isActiveTenant = (tenant) => {
-  const status = String(tenant?.status || "active").trim().toLowerCase();
-  return status !== "inactive" && status !== "archived" && status !== "deactivated";
-};
+// Same rule as the dashboard and reports: Active and Pending tenants hold a bed
+const isActiveTenant = holdsBed;
 
 const normalizeRoomId = (roomId) => String(roomId || "").trim();
 
@@ -35,7 +34,8 @@ export const getActiveTenantAssignments = async (propertyId) => {
   });
 
   return [...uniqueTenants.values()].filter((tenant) => {
-    return tenant.role === "tenant" && isActiveTenant(tenant) && tenant.propertyId;
+    // Older tenant records may have no role saved; they're still tenants
+    return (!tenant.role || tenant.role === "tenant") && isActiveTenant(tenant) && tenant.propertyId;
   });
 };
 
@@ -95,7 +95,8 @@ export async function reconcilePropertyOccupancy(propertyId) {
   await updateDoc(propertyRef, {
     rooms: updatedRooms,
     totalBeds,
-    occupiedBeds: assignments.length,
+    // Never more occupied beds than the property has
+    occupiedBeds: totalBeds > 0 ? Math.min(assignments.length, totalBeds) : assignments.length,
     updatedAt: new Date(),
   });
 }

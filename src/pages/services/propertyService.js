@@ -63,7 +63,7 @@ export const uploadToCloudinary = async (file) => {
  * Backward-compatible wrapper for components like PropertyWizard.jsx
  * returning the Cloudinary URL in both object and string forms.
  */
-export const uploadPropertyPhoto = async (file, ownerUid) => {
+export const uploadPropertyPhoto = async (file) => {
   const downloadUrl = await uploadToCloudinary(file);
   return {
     downloadUrl,
@@ -131,7 +131,7 @@ export const saveProperty = async (
     normalizeText(wizardData.coverPhoto);
 
   if (coverPhotoFile instanceof File) {
-    const photoResult = await uploadPropertyPhoto(coverPhotoFile, resolvedOwnerUid);
+    const photoResult = await uploadPropertyPhoto(coverPhotoFile);
     uploadedCoverPhotoUrl = photoResult.downloadUrl;
   }
 
@@ -197,6 +197,6 @@ export const saveProperty = async (
     };
   } catch (error) {
     console.error("Error saving property to Firestore:", error);
-    throw new Error(error.message || "Failed to save property. Please try again.");
+    throw new Error(error.message || "Failed to save property. Please try again.", { cause: error });
   }
 };

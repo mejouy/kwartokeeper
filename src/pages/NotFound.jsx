@@ -1,6 +1,5 @@
-import React from "react";
 import { useNavigate } from "react-router-dom";
-import { Box, Button, Container, Typography, Paper } from "@mui/material";
+import { Button, Container, Typography, Paper } from "@mui/material";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import HomeIcon from "@mui/icons-material/Home";
 
@@ -21,10 +20,10 @@ export default function NotFound() {
         }}
       >
         <ErrorOutlineIcon sx={{ fontSize: 80, color: "text.secondary", mb: 2 }} />
-        <Typography variant="h3" fontWeight="800" gutterBottom>
+        <Typography variant="h3" sx={{ fontWeight: "800" }} gutterBottom>
           404
         </Typography>
-        <Typography variant="h6" fontWeight="700" gutterBottom>
+        <Typography variant="h6" sx={{ fontWeight: "700" }} gutterBottom>
           Page Not Found
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>

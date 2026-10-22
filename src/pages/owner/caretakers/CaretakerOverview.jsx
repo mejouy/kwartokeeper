@@ -50,10 +50,10 @@ export function MetricCard({ title, value, subtitle, icon }) {
     <Card elevation={0} sx={{ border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%" }}>
       <CardContent sx={{ p: 2.5 }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1 }}>
-          <Typography variant="body2" color="text.secondary" fontWeight="600">{title}</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: "600" }}>{title}</Typography>
           <Box sx={{ p: 1, borderRadius: 2, bgcolor: "#F5F5F5" }}>{icon}</Box>
         </Box>
-        <Typography variant="h4" fontWeight="800">{value}</Typography>
+        <Typography variant="h4" sx={{ fontWeight: "800" }}>{value}</Typography>
         <Typography variant="caption" color="text.secondary">{subtitle}</Typography>
       </CardContent>
     </Card>
@@ -254,7 +254,7 @@ export default function CaretakerOverview({ section = "overview" }) {
   return (
     <Container maxWidth="xl" disableGutters>
       {error && <Alert severity="warning" sx={{ mb: 3 }}>{error}</Alert>}
-      <Typography variant="h5" fontWeight="700" sx={{ mb: 3 }}>
+      <Typography variant="h5" sx={{ fontWeight: "700", mb: 3 }}>
         {SECTION_TITLES[section] || SECTION_TITLES.overview}
       </Typography>
 
@@ -278,7 +278,7 @@ export default function CaretakerOverview({ section = "overview" }) {
             <Grid size={{ xs: 12, md: 6 }}>
             <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%" }}>
               <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2, gap: 1 }}>
-                <Typography variant="h6" fontWeight="700">Recent Rent Collected</Typography>
+                <Typography variant="h6" sx={{ fontWeight: "700" }}>Recent Rent Collected</Typography>
                 {canViewPayments && <Button size="small" onClick={() => navigate("/caretaker/payments")}>View all</Button>}
               </Box>
               {!canViewPayments ? (
@@ -290,10 +290,10 @@ export default function CaretakerOverview({ section = "overview" }) {
                     return (
                       <Box key={payment.id} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, p: 1.5, bgcolor: "#FAFAFA", borderRadius: 1 }}>
                         <Box sx={{ minWidth: 0 }}>
-                          <Typography variant="subtitle2" fontWeight="700">{payment.tenantName || "Tenant"}</Typography>
+                          <Typography variant="subtitle2" sx={{ fontWeight: "700" }}>{payment.tenantName || "Tenant"}</Typography>
                           <Typography variant="caption" color="text.secondary">Room {payment.roomNumber || "—"} · {Number.isNaN(paymentDate.getTime()) ? "Date unavailable" : paymentDate.toLocaleDateString()}</Typography>
                         </Box>
-                        <Typography variant="subtitle2" fontWeight="700" sx={{ flexShrink: 0 }}>{money(payment.amount ?? payment.amountPaid ?? payment.rentAmount)}</Typography>
+                        <Typography variant="subtitle2" sx={{ fontWeight: "700", flexShrink: 0 }}>{money(payment.amount ?? payment.amountPaid ?? payment.rentAmount)}</Typography>
                       </Box>
                     );
                   })}
@@ -307,7 +307,7 @@ export default function CaretakerOverview({ section = "overview" }) {
             <Grid size={{ xs: 12, md: 6 }}>
             <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3, height: "100%" }}>
               <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2, gap: 1 }}>
-                <Typography variant="h6" fontWeight="700">Tenant Onboarding</Typography>
+                <Typography variant="h6" sx={{ fontWeight: "700" }}>Tenant Onboarding</Typography>
                 <Chip size="small" color={pendingTenants.length ? "warning" : "default"} label={`${pendingTenants.length} pending`} />
               </Box>
               {pendingTenants.length ? (
@@ -315,7 +315,7 @@ export default function CaretakerOverview({ section = "overview" }) {
                   {pendingTenants.slice(0, 5).map((tenant) => (
                     <Box key={tenant.id} sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 2, p: 1.5, bgcolor: "#FAFAFA", borderRadius: 1 }}>
                       <Box sx={{ minWidth: 0 }}>
-                        <Typography variant="subtitle2" fontWeight="700">{tenant.name || tenant.fullName || "Tenant"}</Typography>
+                        <Typography variant="subtitle2" sx={{ fontWeight: "700" }}>{tenant.name || tenant.fullName || "Tenant"}</Typography>
                         <Typography variant="caption" color="text.secondary">Room {tenant.roomNumber || tenant.roomId || "Not assigned"}</Typography>
                       </Box>
                       <Chip size="small" color="warning" label={tenant.status || "Pending"} />
@@ -334,7 +334,7 @@ export default function CaretakerOverview({ section = "overview" }) {
       {section === "properties" && (
         <>
           <Paper variant="outlined" sx={{ p: 3, mb: 3, borderRadius: 3 }}>
-            <Typography variant="h6" fontWeight="700">{propertyName}</Typography>
+            <Typography variant="h6" sx={{ fontWeight: "700" }}>{propertyName}</Typography>
             <Typography variant="body2" color="text.secondary">{address || "No address provided"}</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
               {rooms.length} rooms • {rooms.reduce((sum, room) => sum + Number(room.capacity || room.beds || room.totalBeds || 0), 0)} beds
@@ -343,7 +343,7 @@ export default function CaretakerOverview({ section = "overview" }) {
           <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(min(100%, 190px), 1fr))", gap: 2.5 }}>
             {rooms.map((room, index) => (
               <Paper key={room.id || room.roomName || index} elevation={0} sx={{ minHeight: 170, p: 2, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", bgcolor: "#F2EADF", border: "1px solid #D8CEC2", borderRadius: 2 }}>
-                <Typography variant="h6" fontWeight="600">{room.roomName || room.roomNumber || `Room ${index + 1}`}</Typography>
+                <Typography variant="h6" sx={{ fontWeight: "600" }}>{room.roomName || room.roomNumber || `Room ${index + 1}`}</Typography>
                 <Typography>Floor {room.floor || "—"} • {Number(room.capacity || room.beds || room.totalBeds || 0)} Beds</Typography>
                 <Typography variant="body2" color="text.secondary">{Number(room.occupiedBeds || 0)} occupied</Typography>
                 <Typography variant="h6" sx={{ color: "#FF4D0A", mt: 0.5 }}>{money(room.monthlyRatePerBed || room.rentPerBed)} <Typography component="span" variant="body2">/ bed</Typography></Typography>
@@ -355,7 +355,7 @@ export default function CaretakerOverview({ section = "overview" }) {
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "1fr", md: "1fr 1fr" }, gap: 3 }}>
             <Box>
               <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}><WifiIcon color="primary" /><Typography variant="h6">Amenities</Typography></Stack>
-              {property?.amenities?.length ? <Stack direction="row" flexWrap="wrap" gap={1}>{property.amenities.map((item, index) => <Chip key={`${item}-${index}`} label={item} variant="outlined" />)}</Stack> : <Typography color="text.secondary">No amenities listed.</Typography>}
+              {property?.amenities?.length ? <Stack direction="row" sx={{ flexWrap: "wrap", gap: 1 }}>{property.amenities.map((item, index) => <Chip key={`${item}-${index}`} label={item} variant="outlined" />)}</Stack> : <Typography color="text.secondary">No amenities listed.</Typography>}
             </Box>
             <Box>
               <Stack direction="row" spacing={1} sx={{ mb: 1, alignItems: "center" }}><PolicyIcon color="primary" /><Typography variant="h6">House Rules</Typography></Stack>
@@ -368,8 +368,8 @@ export default function CaretakerOverview({ section = "overview" }) {
       {section === "tenants" && (
         <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
           <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2.5, flexWrap: "wrap", gap: 2 }}>
-            <Typography variant="h6" fontWeight="700">Tenants at {propertyName}</Typography>
-            <TextField size="small" placeholder="Search tenant or room..." value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} InputProps={{ startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> }} />
+            <Typography variant="h6" sx={{ fontWeight: "700" }}>Tenants at {propertyName}</Typography>
+            <TextField size="small" placeholder="Search tenant or room..." value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" /></InputAdornment> } }} />
           </Box>
           <TenantTable tenants={filteredTenants} />
         </Paper>
@@ -380,7 +380,7 @@ export default function CaretakerOverview({ section = "overview" }) {
           <Box sx={{ maxWidth: 420, mb: 3 }}><MetricCard title="Expected Monthly Rent" value={money(expectedMonthlyRent)} subtitle="Sum of active tenant rent amounts" icon={<PaymentIcon sx={{ color: "#15803D" }} />} /></Box>
           <Alert severity="info" sx={{ my: 2 }}>Payment transactions are not recorded in the system yet. These figures show expected monthly rent, not payments received.</Alert>
           <Paper elevation={0} sx={{ p: 3, border: "1px solid", borderColor: "divider", borderRadius: 3 }}>
-            <Typography variant="h6" fontWeight="700" sx={{ mb: 2 }}>Monthly Rent by Tenant</Typography>
+            <Typography variant="h6" sx={{ fontWeight: "700", mb: 2 }}>Monthly Rent by Tenant</Typography>
             <TableContainer>
               <Table>
                 <TableHead sx={{ bgcolor: "#F5F5F5" }}><TableRow><TableCell><strong>Tenant</strong></TableCell><TableCell><strong>Room</strong></TableCell><TableCell align="right"><strong>Expected Monthly Rent</strong></TableCell></TableRow></TableHead>
@@ -412,7 +412,7 @@ function TenantTable({ tenants }) {
         <TableBody>
           {tenants.length ? tenants.map((tenant) => (
             <TableRow key={tenant.id} hover>
-              <TableCell><Typography variant="subtitle2" fontWeight="700">{tenant.name}</Typography></TableCell>
+              <TableCell><Typography variant="subtitle2" sx={{ fontWeight: "700" }}>{tenant.name}</Typography></TableCell>
               <TableCell>{tenant.roomNumber || "—"}</TableCell>
               <TableCell>{tenant.contact}</TableCell>
               <TableCell><Chip label={tenant.status || "Active"} color={tenant.status === "Inactive" ? "default" : "success"} size="small" /></TableCell>
@@ -429,14 +429,14 @@ function MaintenancePanel({ tickets }) {
     <Paper elevation={0} sx={{ p: 3, border: "1px solid #E0E0E0", borderRadius: 2 }}>
       <Stack direction="row" spacing={1} sx={{ mb: 2, alignItems: "center" }}>
         <BuildOutlinedIcon sx={{ color: "#D97706" }} />
-        <Typography variant="h6" fontWeight="700">Maintenance Requests</Typography>
+        <Typography variant="h6" sx={{ fontWeight: "700" }}>Maintenance Requests</Typography>
       </Stack>
       {tickets.length ? (
         <Stack spacing={1.5}>
           {tickets.map((ticket) => (
             <Box key={ticket.id} sx={{ p: 2, bgcolor: "#FAFAFA", border: "1px solid #E0E0E0", borderRadius: 1 }}>
               <Box sx={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 1 }}>
-                <Typography fontWeight="700">{ticket.title || "Maintenance request"}</Typography>
+                <Typography sx={{ fontWeight: "700" }}>{ticket.title || "Maintenance request"}</Typography>
                 <Chip size="small" label={ticket.status || "Pending"} color={String(ticket.status).toLowerCase() === "resolved" ? "success" : "warning"} />
               </Box>
               <Typography variant="caption" color="text.secondary">{ticket.tenantName || "Tenant"} • Room {ticket.roomNumber || "—"}</Typography>

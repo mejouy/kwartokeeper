@@ -1,6 +1,12 @@
 // src/pages/owner/tenants/TenantList.jsx
+//
+// One searchable list of every tenant, with:
+//  - "Needs attention" quick filters (overdue rent, payments to review,
+//    leases ending, pending onboarding, no room, out past curfew)
+//  - a property filter, status filter and sort
+//  - this month's rent status per tenant instead of a bare "last paid" date
 
-import React, { useState, useEffect } from "react";
+import { Fragment, useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Box,
@@ -13,111 +19,102 @@ import {
   Skeleton,
   InputBase,
   IconButton,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
+  TextField,
+  MenuItem,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 
 import PersonAddOutlinedIcon from "@mui/icons-material/PersonAddOutlined";
-import ApartmentOutlinedIcon from "@mui/icons-material/ApartmentOutlined";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import SearchIcon from "@mui/icons-material/Search";
 import CloseIcon from "@mui/icons-material/Close";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import PeopleOutlineIcon from "@mui/icons-material/PeopleOutlined";
 import ScheduleIcon from "@mui/icons-material/Schedule";
+import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
+import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
+import EventBusyOutlinedIcon from "@mui/icons-material/EventBusyOutlined";
+import HourglassEmptyRoundedIcon from "@mui/icons-material/HourglassEmptyRounded";
+import MeetingRoomOutlinedIcon from "@mui/icons-material/MeetingRoomOutlined";
+import NightsStayOutlinedIcon from "@mui/icons-material/NightsStayOutlined";
+import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutlined";
+import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
+import PendingActionsOutlinedIcon from "@mui/icons-material/PendingActionsOutlined";
+import PieChartOutlineRoundedIcon from "@mui/icons-material/PieChartOutlineRounded";
 
-import {
-  collection,
-  query,
-  where,
-  onSnapshot,
-} from "firebase/firestore";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 
 import { auth, db } from "../../../config/firebase";
 import { normalizePayment } from "../../../utils/normalizePayment";
-import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
+import { MONTHS, DAY_MS, normalizeStatus, STATUS_TONE, rentStatusOf, leaseFlagOf } from "../../../utils/tenantRent";
+import { withoutRemoved } from "../../../utils/accountState";
 
+const HEAD = '"Inter", sans-serif';
+const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
 const row = { display: "flex", alignItems: "center" };
+const panelSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: R.lg };
+const fieldSx = { "& .MuiOutlinedInput-root": { borderRadius: R.sm, bgcolor: "background.default" } };
 
-// Single source of truth for a tenant status, so grouped and unassigned
-// tenants are always colored the same way.
-const getTenantStatusChip = (status) => {
-  const label = status || "Active";
-  if (label === "Pending Onboarding") return { label, tone: "warning" };
-  if (label === "Inactive") return { label, tone: "default" };
-  if (label === "Active") return { label, tone: "success" };
-  return { label, tone: "default" };
-};
+const STATUS_FILTERS = ["All", "Active", "Pending", "Inactive"];
 
-const STATUS_FILTERS = ["All", "Active", "Pending Onboarding", "Inactive"];
+const tenantKey = (t) => t.uid || t.id;
+const displayNameOf = (t) => t.fullName || t.name || "Unnamed Tenant";
+const initialsOf = (name) =>
+  String(name || "?").split(" ").filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
 
-// Soft tinted pill (reads calmer than a filled chip, and stays legible on white)
-function StatusPill({ status }) {
-  const { label, tone } = getTenantStatusChip(status);
+
+const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+// Row of 10 room squares lit by a percentage (same as the Properties page)
+const MINI_SQUARES = 10;
+function MiniSquares({ pct }) {
+  const lit = pct > 0 ? Math.max(1, Math.round((pct / 100) * MINI_SQUARES)) : 0;
   return (
-    <Chip
-      label={label === "Pending Onboarding" ? "Pending" : label}
-      size="small"
+    <Box aria-hidden sx={{ display: "grid", gridTemplateColumns: `repeat(${MINI_SQUARES}, minmax(0, 1fr))`, gap: "3px", mt: 0.75, maxWidth: 150 }}>
+      {Array.from({ length: MINI_SQUARES }).map((_, i) => (
+        <Box key={i} sx={{ aspectRatio: "1", borderRadius: "3px", bgcolor: i < lit ? "primary.main" : (t) => alpha(t.palette.text.primary, 0.09) }} />
+      ))}
+    </Box>
+  );
+}
+
+// How many tenants to draw at once; "Show more" adds the next batch
+const PAGE_SIZE = 50;
+
+function Pill({ label, tone }) {
+  if (tone === "none") return <Typography variant="body2" color="text.disabled">—</Typography>;
+  return (
+    <Box
+      component="span"
       sx={{
+        display: "inline-flex",
+        alignItems: "center",
+        px: 1,
+        height: 24,
+        borderRadius: 99,
+        fontSize: 12.5,
         fontWeight: 700,
-        border: "none",
-        bgcolor: (t) =>
-          tone === "default" ? alpha(t.palette.text.primary, 0.08) : alpha(t.palette[tone].main, 0.12),
+        whiteSpace: "nowrap",
+        bgcolor: (t) => (tone === "default" ? alpha(t.palette.text.primary, 0.07) : alpha(t.palette[tone].main, 0.12)),
         color: (t) => (tone === "default" ? t.palette.text.secondary : t.palette[tone].dark),
       }}
-    />
-  );
-}
-
-function SummaryStrip({ items }) {
-  return (
-    <Paper
-      elevation={0}
-      sx={{
-        bgcolor: "background.default",
-        border: "1px solid",
-        borderColor: "divider",
-        borderRadius: 3,
-        overflow: "hidden",
-        display: "grid",
-        gridTemplateColumns: { xs: "repeat(2, 1fr)", md: `repeat(${items.length}, 1fr)` },
-        mb: { xs: 2, sm: 2.5 },
-      }}
     >
-      {items.map((item, i) => (
-        <Box
-          key={item.label}
-          sx={{
-            px: { xs: 1.75, sm: 2.5 },
-            py: { xs: 1.25, sm: 1.75 },
-            minWidth: 0,
-            borderTop: { xs: i > 1 ? "1px solid" : "none", md: "none" },
-            borderLeft: { xs: i % 2 === 1 ? "1px solid" : "none", md: i === 0 ? "none" : "1px solid" },
-            borderColor: "divider",
-          }}
-        >
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }} noWrap component="div">
-            {item.label}
-          </Typography>
-          <Typography noWrap sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: { xs: "1.2rem", sm: "1.45rem" }, lineHeight: 1.25, color: item.color }}>
-            {item.value}
-          </Typography>
-        </Box>
-      ))}
-    </Paper>
+      {label}
+    </Box>
   );
 }
 
-const groupShellSx = {
-  bgcolor: "background.default",
-  border: "1px solid",
-  borderColor: "divider",
-  borderRadius: "12px !important",
-  overflow: "hidden",
-  "&:before": { display: "none" },
-};
+// "Needs attention" quick filters
+const ATTENTION = [
+  { key: "overdue", label: "Overdue rent", icon: <ErrorOutlineRoundedIcon />, tone: "error" },
+  { key: "review", label: "Payment to review", icon: <ReceiptLongOutlinedIcon />, tone: "info" },
+  { key: "lease", label: "Lease ending", icon: <EventBusyOutlinedIcon />, tone: "warning" },
+  { key: "pending", label: "Pending onboarding", icon: <HourglassEmptyRoundedIcon />, tone: "warning" },
+  { key: "noRoom", label: "No room", icon: <MeetingRoomOutlinedIcon />, tone: "warning" },
+  { key: "curfew", label: "Out past curfew", icon: <NightsStayOutlinedIcon />, tone: "error" },
+];
+
+// Laptop column layout, shared by the header row and every tenant row
+const COLUMNS = "minmax(0, 1.7fr) minmax(0, 1.3fr) minmax(0, 1fr) 128px";
 
 export default function TenantList() {
   const navigate = useNavigate();
@@ -125,65 +122,34 @@ export default function TenantList() {
   const [tenants, setTenants] = useState([]);
   const [properties, setProperties] = useState([]);
   const [payments, setPayments] = useState([]);
+  const [logs, setLogs] = useState([]);
+  // Nothing to load when signed out, so start "done" in that case
+  const [loading, setLoading] = useState(() => Boolean(auth.currentUser));
+  // "Today", fixed when the page opens
+  const [today] = useState(() => new Date());
+
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
-  const [loading, setLoading] = useState(true);
-  const [logs, setLogs] = useState([]);
+  const [propertyFilter, setPropertyFilter] = useState("all");
+  const [attention, setAttention] = useState(null);
+  const [sortBy, setSortBy] = useState("name");
 
   // =========================================================
-  // FORMAT ADDRESS HELPER (Fixes object rendering crash)
-  // =========================================================
-  const formatAddress = (addr) => {
-    if (!addr) return "";
-    if (typeof addr === "string") return addr;
-
-    return [
-      addr.street,
-      addr.barangay,
-      addr.cityMunicipality,
-      addr.province,
-      addr.region,
-    ]
-      .filter(Boolean)
-      .join(", ");
-  };
-
-  // =========================================================
-  // LOAD PROPERTIES
+  // DATA
   // =========================================================
   useEffect(() => {
-    if (!auth.currentUser) return;
-
-    const q = query(
-      collection(db, "properties"),
-      where("ownerUid", "==", auth.currentUser.uid)
-    );
-
+    if (!auth.currentUser) return undefined;
     const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const propData = snapshot.docs.map((doc) => ({
-          id: doc.id,
-          ...doc.data(),
-        }));
-        setProperties(propData);
-      },
-      (error) => {
-        console.error("Error fetching properties:", error);
-      }
+      query(collection(db, "properties"), where("ownerUid", "==", auth.currentUser.uid)),
+      (snapshot) => setProperties(snapshot.docs.map((d) => ({ id: d.id, ...d.data() }))),
+      (error) => console.error("Error fetching properties:", error)
     );
-
     return () => unsubscribe();
   }, []);
 
-  // =========================================================
-  // LOAD TENANTS
-  // =========================================================
+  // Tenants: owner-linked records plus older records linked only by property
   useEffect(() => {
-    if (!auth.currentUser) {
-      setLoading(false);
-      return;
-    }
+    if (!auth.currentUser) return undefined;
 
     const ownerId = auth.currentUser.uid;
     const tenantSources = new Map();
@@ -193,15 +159,12 @@ export default function TenantList() {
       const tenantsById = new Map();
       tenantSources.forEach((sourceTenants) => {
         sourceTenants.forEach((tenant) => {
-          const tenantId = tenant.uid || tenant.id;
-          tenantsById.set(tenantId, {
-            ...(tenantsById.get(tenantId) || {}),
-            ...tenant,
-          });
+          const id = tenantKey(tenant);
+          tenantsById.set(id, { ...(tenantsById.get(id) || {}), ...tenant });
         });
       });
       if (active) {
-        setTenants([...tenantsById.values()]);
+        setTenants(withoutRemoved([...tenantsById.values()]));
         setLoading(false);
       }
     };
@@ -210,10 +173,10 @@ export default function TenantList() {
       onSnapshot(
         query(collection(db, collectionName), where(field, "==", value)),
         (snapshot) => {
-          const records = snapshot.docs
-            .map((tenantDoc) => ({ id: tenantDoc.id, ...tenantDoc.data() }))
-            .filter((tenant) => !usersOnly || tenant.role === "tenant");
-          tenantSources.set(sourceId, records);
+          tenantSources.set(
+            sourceId,
+            snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter((t) => !usersOnly || t.role === "tenant")
+          );
           publishTenants();
         },
         (error) => {
@@ -239,15 +202,15 @@ export default function TenantList() {
     };
   }, [properties]);
 
-  // =========================================================
-  // LOAD CURFEW LOGS (written by the caretaker). Used only to flag who is
-  // out past curfew; failing to read them must not break the directory.
-  // =========================================================
+  // Curfew logs (written by the caretaker). Only tonight's and last night's
+  // checks are needed, so only those are read: the log grows every night and
+  // reading all of it would slow the page down over time.
+  // Failing to read them must not break the list.
   useEffect(() => {
-    if (!auth.currentUser) return;
-
+    if (!auth.currentUser) return undefined;
+    const nights = [dayKey(today), dayKey(new Date(today.getTime() - DAY_MS))];
     const unsubscribe = onSnapshot(
-      query(collection(db, "occupancy_logs"), where("ownerUid", "==", auth.currentUser.uid)),
+      query(collection(db, "occupancy_logs"), where("ownerUid", "==", auth.currentUser.uid), where("date", "in", nights)),
       (snapshot) => {
         const list = snapshot.docs.map((d) => ({ id: d.id, ...d.data() }));
         list.sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
@@ -258,179 +221,205 @@ export default function TenantList() {
         setLogs([]);
       }
     );
-
     return () => unsubscribe();
-  }, []);
+  }, [today]);
 
-  // =========================================================
-  // LOAD PAYMENTS
-  // =========================================================
+  // Payments: only this month's are needed for the rent column, so only this
+  // month's are read (all-time payments grow every month). Every screen that
+  // records a payment saves the month it covers as periodMonth, e.g. "October 2026".
   useEffect(() => {
-    if (!auth.currentUser) return;
-
-    const q = query(
-      collection(db, "payments"),
-      where("ownerUid", "==", auth.currentUser.uid)
-    );
-
+    if (!auth.currentUser) return undefined;
+    const period = `${MONTHS[today.getMonth()]} ${today.getFullYear()}`;
     const unsubscribe = onSnapshot(
-      q,
-      (snapshot) => {
-        const paymentData = snapshot.docs.map((doc) => normalizePayment({
-          id: doc.id,
-          ...doc.data(),
-        }));
-
-        setPayments(paymentData);
-      },
-      (error) => {
-        console.error("Error fetching payments:", error);
-      }
+      query(collection(db, "payments"), where("ownerUid", "==", auth.currentUser.uid), where("periodMonth", "==", period)),
+      (snapshot) => setPayments(snapshot.docs.map((d) => normalizePayment({ id: d.id, ...d.data() }))),
+      (error) => console.error("Error fetching payments:", error)
     );
-
     return () => unsubscribe();
-  }, []);
+  }, [today]);
 
   // =========================================================
-  // GET PAYMENT DATE & FORMAT HELPERS
+  // DERIVED: one enriched row per tenant
   // =========================================================
-  const getPaymentDate = (payment) => {
-    const dateValue = payment?.paymentDate || payment?.createdAt;
-    if (!dateValue) return null;
-
-    if (typeof dateValue.toDate === "function") {
-      return dateValue.toDate();
-    }
-    if (dateValue instanceof Date) {
-      return dateValue;
-    }
-
-    const parsedDate = new Date(dateValue);
-    if (isNaN(parsedDate.getTime())) return null;
-
-    return parsedDate;
-  };
-
-  const formatPaymentDate = (payment) => {
-    const date = getPaymentDate(payment);
-    if (!date) return "No payment";
-
-    return date.toLocaleDateString("en-US", {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
+  const propertyById = useMemo(() => {
+    const map = new Map();
+    properties.forEach((p) => {
+      map.set(p.id, p);
+      if (p.name) map.set(p.name, p); // very old records stored the name
     });
+    return map;
+  }, [properties]);
+
+  const rows = useMemo(() => {
+    const paymentsByTenant = new Map();
+    payments.forEach((p) => {
+      if (!p.tenantId) return;
+      if (!paymentsByTenant.has(p.tenantId)) paymentsByTenant.set(p.tenantId, []);
+      paymentsByTenant.get(p.tenantId).push(p);
+    });
+
+    const recentDays = new Set([dayKey(today), dayKey(new Date(today.getTime() - DAY_MS))]);
+    const latestLogByProperty = new Map();
+    logs.forEach((log) => {
+      if (!latestLogByProperty.has(log.propertyId)) latestLogByProperty.set(log.propertyId, log);
+    });
+
+    return tenants.map((t) => {
+      const status = normalizeStatus(t.status);
+      const property = propertyById.get(t.propertyId) || null;
+      const tenantPayments = [...(paymentsByTenant.get(t.uid) || []), ...(t.uid !== t.id ? paymentsByTenant.get(t.id) || [] : [])];
+      const rent = rentStatusOf(t, tenantPayments, today);
+      const lease = leaseFlagOf(t, today);
+
+      // out / late on the property's latest curfew check (tonight or last night)
+      const log = latestLogByProperty.get(t.propertyId);
+      const curfewStatus = log && recentDays.has(log.date) ? (log.entries?.[t.uid] || log.entries?.[t.id])?.status : null;
+      const curfew = curfewStatus === "out" || curfewStatus === "late" ? curfewStatus : null;
+
+      const current = status !== "Inactive";
+      const flags = {
+        overdue: current && rent.key === "overdue",
+        review: current && rent.key === "review",
+        lease: Boolean(lease),
+        pending: status === "Pending",
+        noRoom: current && !t.roomId,
+        curfew: curfew === "out",
+      };
+
+      return {
+        t,
+        key: tenantKey(t),
+        name: displayNameOf(t),
+        status,
+        property,
+        propertyName: property ? property.propertyName || property.name || "Unnamed Property" : "",
+        rent,
+        lease,
+        curfew,
+        flags,
+      };
+    });
+  }, [tenants, payments, logs, propertyById, today]);
+
+  const attentionCounts = useMemo(() => {
+    const counts = {};
+    ATTENTION.forEach((a) => {
+      counts[a.key] = rows.filter((r) => r.flags[a.key]).length;
+    });
+    return counts;
+  }, [rows]);
+  const attentionShown = ATTENTION.filter((a) => attentionCounts[a.key] > 0);
+
+  const hasUnlinked = rows.some((r) => !r.property);
+  const statusCount = (s) => (s === "All" ? rows.length : rows.filter((r) => r.status === s).length);
+
+  // Header numbers. "Payable" = current tenants who owe rent this month
+  // (not those with no rent set, a lease that ended, or a first due date next month).
+  const currentRows = rows.filter((r) => r.status !== "Inactive");
+  const payable = currentRows.filter((r) => ["paid", "review", "due", "overdue"].includes(r.rent.key));
+  const paidCount = payable.filter((r) => r.rent.key === "paid").length;
+  const unpaidCount = payable.length - paidCount;
+  const collectedPct = payable.length ? Math.round((paidCount / payable.length) * 100) : 0;
+  const headerTiles = [
+    { label: "Current tenants", icon: <PeopleOutlineIcon />, value: currentRows.length, suffix: rows.length > currentRows.length ? `+${rows.length - currentRows.length} former` : "" },
+    { label: `Paid for ${MONTHS[today.getMonth()]}`, icon: <PaymentsOutlinedIcon />, value: paidCount, suffix: `/ ${payable.length}` },
+    { label: "Still unpaid", icon: <PendingActionsOutlinedIcon />, value: unpaidCount, accent: unpaidCount > 0 },
+    { label: "Rent collected", icon: <PieChartOutlineRoundedIcon />, value: `${collectedPct}%`, squares: true, pct: collectedPct },
+  ];
+
+  // =========================================================
+  // FILTER + SORT
+  // =========================================================
+  const term = searchQuery.trim().toLowerCase();
+  const visible = rows
+    .filter((r) => {
+      if (attention && !r.flags[attention]) return false;
+      if (statusFilter !== "All" && r.status !== statusFilter) return false;
+      if (propertyFilter === "unlinked" ? r.property : propertyFilter !== "all" && r.property?.id !== propertyFilter) return false;
+      if (!term) return true;
+      const haystack = [r.name, r.t.email, r.t.phone, r.t.roomId, r.t.bedId, r.propertyName].filter(Boolean).join(" ").toLowerCase();
+      return haystack.includes(term);
+    })
+    .sort((a, b) => {
+      // former tenants always sink to the bottom
+      const inactive = Number(a.status === "Inactive") - Number(b.status === "Inactive");
+      if (inactive) return inactive;
+      if (sortBy === "rent") return a.rent.rank - b.rent.rank || a.name.localeCompare(b.name);
+      if (sortBy === "property") {
+        return (
+          a.propertyName.localeCompare(b.propertyName) ||
+          String(a.t.roomId || "").localeCompare(String(b.t.roomId || ""), undefined, { numeric: true }) ||
+          a.name.localeCompare(b.name)
+        );
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+  const isFiltering = Boolean(term) || statusFilter !== "All" || propertyFilter !== "all" || Boolean(attention);
+
+  // Draw the list in batches so hundreds of tenants stay fast. Changing any
+  // filter starts again from the first batch.
+  const filterKey = [term, statusFilter, propertyFilter, attention, sortBy].join("|");
+  const [page, setPage] = useState({ key: "", count: PAGE_SIZE });
+  const shownCount = page.key === filterKey ? page.count : PAGE_SIZE;
+  const shown = visible.slice(0, shownCount);
+  const remaining = visible.length - shown.length;
+  const clearFilters = () => {
+    setSearchQuery("");
+    setStatusFilter("All");
+    setPropertyFilter("all");
+    setAttention(null);
   };
 
-  const getTenantPayments = (tenantId) => {
-    return payments
-      .filter((payment) => payment.tenantId === tenantId)
-      .sort((a, b) => {
-        const dateA = getPaymentDate(a);
-        const dateB = getPaymentDate(b);
-
-        if (!dateA && !dateB) return 0;
-        if (!dateA) return 1;
-        if (!dateB) return -1;
-
-        return dateB.getTime() - dateA.getTime();
-      });
-  };
-
-  const getLastPayment = (tenantId) => {
-    const tenantPayments = getTenantPayments(tenantId);
-    if (tenantPayments.length === 0) return null;
-    return tenantPayments[0];
-  };
-
   // =========================================================
-  // CURFEW FLAGS — marked out/late on the property's latest check
-  // (tonight or last night). The full history is on each tenant's page.
+  // ONE TENANT ROW
   // =========================================================
-  const dayKey = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  const recentKeys = new Set([dayKey(new Date()), dayKey(new Date(Date.now() - 86400000))]);
-  const latestLogByProperty = new Map();
-  logs.forEach((log) => {
-    if (!latestLogByProperty.has(log.propertyId)) latestLogByProperty.set(log.propertyId, log);
-  });
-  const getCurfewFlag = (tenantId, propertyId) => {
-    const log = latestLogByProperty.get(propertyId);
-    if (!log || !recentKeys.has(log.date)) return null;
-    const status = log.entries?.[tenantId]?.status;
-    return status === "out" || status === "late" ? status : null;
-  };
-  const outPastCurfew = tenants.filter((t) => getCurfewFlag(t.id, t.propertyId) === "out");
-
-  // =========================================================
-  // SEARCH + STATUS FILTER
-  // =========================================================
-  const filteredTenants = tenants.filter((t) => {
-    const name = t.fullName || t.name || "";
-    const email = t.email || "";
-    const room = String(t.roomId || "");
-    const term = searchQuery.trim().toLowerCase();
-
-    const matchesSearch =
-      !term ||
-      name.toLowerCase().includes(term) ||
-      email.toLowerCase().includes(term) ||
-      room.toLowerCase().includes(term);
-
-    const matchesStatus = statusFilter === "All" || getTenantStatusChip(t.status).label === statusFilter;
-
-    return matchesSearch && matchesStatus;
-  });
-
-  const isFiltering = Boolean(searchQuery.trim()) || statusFilter !== "All";
-
-  // =========================================================
-  // GROUP TENANTS BY PROPERTY
-  // =========================================================
-  const groupedByProperty = properties.reduce((acc, property) => {
-    acc[property.id] = {
-      propertyName: property.name || property.propertyName || "Unnamed Property",
-      propertyAddress: formatPropertyAddress(property),
-      tenants: filteredTenants.filter(
-        (t) => t.propertyId === property.id || t.propertyId === property.name
-      ),
-    };
-    return acc;
-  }, {});
-
-  // Catch tenants that aren't tied to any loaded property ID/name
-  const assignedPropertyIds = new Set(properties.map((p) => p.id));
-  const assignedPropertyNames = new Set(properties.map((p) => p.name));
-
-  const unassignedTenants = filteredTenants.filter(
-    (t) =>
-      !t.propertyId ||
-      (!assignedPropertyIds.has(t.propertyId) && !assignedPropertyNames.has(t.propertyId))
-  );
-
-
-  // =========================================================
-  // SHARED ROW RENDERER — one tenant, one tappable row. Used for the
-  // per-property groups and the unassigned group so they never drift apart.
-  // =========================================================
-  const renderTenantRow = (t) => {
-    const lastPayment = getLastPayment(t.id);
-    const displayName = t.fullName || t.name || "Unnamed Tenant";
-    const secondaryLine =
-      t.email || (t.idType ? t.idType.replace("_", " ").toUpperCase() : "No ID provided");
-    const roomText = t.roomId ? `${t.roomId}${t.bedId ? ` · Bed ${t.bedId}` : ""}` : "";
-    const paidText = lastPayment ? formatPaymentDate(lastPayment) : "No payments yet";
-    const curfewFlag = getCurfewFlag(t.id, t.propertyId);
+  const renderRow = (r) => {
+    const { t } = r;
+    const roomText = t.roomId ? `Room ${t.roomId}${t.bedId ? ` · ${String(t.bedId).startsWith("Bed") ? t.bedId : `Bed ${t.bedId}`}` : ""}` : "";
+    const contact = t.phone || t.email || "No contact details";
+    const flagChips = (
+      <>
+        {r.curfew && (
+          <Chip
+            size="small"
+            icon={<ScheduleIcon />}
+            label={r.curfew === "out" ? "Out past curfew" : "Late"}
+            color={r.curfew === "out" ? "error" : "warning"}
+            sx={{ height: 22, fontWeight: 700, "& .MuiChip-icon": { fontSize: 14 } }}
+          />
+        )}
+        {r.lease && (
+          <Chip
+            size="small"
+            icon={<EventBusyOutlinedIcon />}
+            label={r.lease.label}
+            sx={{ height: 22, fontWeight: 700, color: "warning.dark", bgcolor: (th) => alpha(th.palette.warning.main, 0.12), "& .MuiChip-icon": { fontSize: 14, color: "inherit" } }}
+          />
+        )}
+      </>
+    );
+    const place = (
+      <>
+        <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
+          {r.propertyName || <Box component="span" sx={{ color: "warning.dark" }}>Not linked to a property</Box>}
+        </Typography>
+        <Typography variant="caption" noWrap component="div" sx={{ color: roomText ? "text.secondary" : "warning.dark", fontWeight: roomText ? 400 : 700 }}>
+          {roomText || "No room"}
+        </Typography>
+      </>
+    );
 
     return (
       <Box
-        key={t.id}
+        key={r.key}
         component="button"
         type="button"
         onClick={() => navigate(`/owner/tenants/${t.id}`)}
-        aria-label={`Open ${displayName}`}
+        aria-label={`Open ${r.name}`}
         sx={{
           display: "grid",
-          gridTemplateColumns: { xs: "minmax(0, 1fr) auto", md: "minmax(0, 1.7fr) minmax(0, 1fr) minmax(0, 1fr) 128px" },
+          gridTemplateColumns: { xs: "minmax(0, 1fr) auto", md: COLUMNS },
           alignItems: "center",
           columnGap: 2,
           rowGap: 1,
@@ -441,177 +430,213 @@ export default function TenantList() {
           bgcolor: "transparent",
           border: 0,
           cursor: "pointer",
-          px: { xs: 2, sm: 3 },
-          py: { xs: 1.5, md: 1.75 },
+          px: { xs: 2, sm: 2.5 },
+          py: 1.5,
+          opacity: r.status === "Inactive" ? 0.65 : 1,
           transition: "background-color .15s ease",
           "&:hover, &:focus-visible": { bgcolor: "action.hover", outline: "none" },
           "&:hover .kk-chev, &:focus-visible .kk-chev": { color: "primary.main", transform: "translateX(2px)" },
         }}
       >
-        {/* Identity */}
+        {/* Tenant */}
         <Box sx={{ ...row, gap: 1.5, minWidth: 0 }}>
           <Avatar
-            src={t.idPhotoUrl || ""}
+            src={t.idPhotoUrl || undefined}
             alt=""
-            sx={{ width: 40, height: 40, fontSize: "0.95rem", fontWeight: 700, bgcolor: "rgba(255, 69, 0, 0.12)", color: "primary.main" }}
+            sx={{ width: 40, height: 40, fontFamily: HEAD, fontSize: "0.85rem", fontWeight: 800, bgcolor: r.status === "Inactive" ? "action.selected" : "primary.main", color: "#fff" }}
           >
-            {displayName.charAt(0).toUpperCase()}
+            {initialsOf(r.name)}
           </Avatar>
           <Box sx={{ minWidth: 0 }}>
-            <Box sx={{ ...row, gap: 0.75, minWidth: 0 }}>
-              <Typography variant="subtitle2" sx={{ fontWeight: 700 }} noWrap>
-                {displayName}
-              </Typography>
-              {curfewFlag && (
-                <Chip
-                  size="small"
-                  icon={<ScheduleIcon />}
-                  label={curfewFlag === "out" ? "Out past curfew" : "Late"}
-                  color={curfewFlag === "out" ? "error" : "warning"}
-                  sx={{ height: 22, fontWeight: 700, flexShrink: 0, "& .MuiChip-icon": { fontSize: 14 } }}
-                />
-              )}
-            </Box>
-            <Typography variant="caption" color="text.secondary" noWrap component="div">
-              {secondaryLine}
+            <Typography sx={{ fontWeight: 700, fontSize: "0.92rem" }} noWrap>
+              {r.name}
             </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap component="div">
+              {contact}
+            </Typography>
+            {(r.curfew || r.lease) && <Box sx={{ display: { xs: "none", md: "flex" }, gap: 0.5, flexWrap: "wrap", mt: 0.5 }}>{flagChips}</Box>}
           </Box>
         </Box>
 
-        {/* Phones: status on the right of the first line */}
-        <Box sx={{ display: { xs: "flex", md: "none" }, alignItems: "center", gap: 0.5 }}>
-          <StatusPill status={t.status} />
+        {/* Phones: status top right */}
+        <Box sx={{ display: { xs: "flex", md: "none" }, alignItems: "center", gap: 0.25 }}>
+          <Pill label={r.status} tone={STATUS_TONE[r.status]} />
           <ChevronRightIcon className="kk-chev" sx={{ color: "text.disabled", transition: "all .15s ease" }} />
         </Box>
 
-        {/* Phones: room + last payment on one quiet line */}
-        <Box sx={{ display: { xs: "flex", md: "none" }, gridColumn: "1 / -1", alignItems: "center", gap: 1, flexWrap: "wrap", pl: "52px" }}>
-          {roomText ? (
-            <Typography variant="body2" sx={{ fontWeight: 600 }}>{roomText}</Typography>
-          ) : (
-            <Chip label="No room" size="small" variant="outlined" color="warning" sx={{ height: 22 }} />
-          )}
-          <Typography variant="body2" color="text.secondary">· Last paid {lastPayment ? paidText : "—"}</Typography>
+        {/* Phones: where they live + rent + flags, under the name */}
+        <Box sx={{ display: { xs: "flex", md: "none" }, gridColumn: "1 / -1", pl: "52px", flexDirection: "column", gap: 0.75, minWidth: 0 }}>
+          <Box sx={{ minWidth: 0 }}>{place}</Box>
+          <Box sx={{ display: "flex", gap: 0.5, flexWrap: "wrap", alignItems: "center" }}>
+            <Pill label={r.rent.label} tone={r.rent.tone} />
+            {flagChips}
+          </Box>
         </Box>
 
-        {/* Laptops: room */}
-        <Box sx={{ display: { xs: "none", md: "block" }, minWidth: 0 }}>
-          {roomText ? (
-            <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>{roomText}</Typography>
-          ) : (
-            <Chip label="No room" size="small" variant="outlined" color="warning" />
-          )}
-        </Box>
+        {/* Laptops: property / room */}
+        <Box sx={{ display: { xs: "none", md: "block" }, minWidth: 0 }}>{place}</Box>
 
-        {/* Laptops: last payment */}
-        <Box sx={{ display: { xs: "none", md: "block" }, minWidth: 0 }}>
-          <Typography variant="body2" color={lastPayment ? "text.primary" : "text.secondary"} noWrap>
-            {paidText}
-          </Typography>
+        {/* Laptops: rent this month */}
+        <Box sx={{ display: { xs: "none", md: "block" } }}>
+          <Pill label={r.rent.label} tone={r.rent.tone} />
         </Box>
 
         {/* Laptops: status + chevron */}
-        <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 0.5, justifyContent: "flex-end" }}>
-          <StatusPill status={t.status} />
+        <Box sx={{ display: { xs: "none", md: "flex" }, alignItems: "center", gap: 0.25, justifyContent: "flex-end" }}>
+          <Pill label={r.status} tone={STATUS_TONE[r.status]} />
           <ChevronRightIcon className="kk-chev" sx={{ color: "text.disabled", transition: "all .15s ease" }} />
         </Box>
       </Box>
     );
   };
 
-  // Column labels, laptops only (phones read as cards, no table header needed)
   const columnHeader = (
     <Box
       sx={{
         display: { xs: "none", md: "grid" },
-        gridTemplateColumns: "minmax(0, 1.7fr) minmax(0, 1fr) minmax(0, 1fr) 128px",
+        gridTemplateColumns: COLUMNS,
         columnGap: 2,
-        px: 3,
-        py: 1,
-        bgcolor: (t) => alpha(t.palette.background.paper, 0.35),
+        px: 2.5,
+        py: 1.1,
         borderBottom: "1px solid",
         borderColor: "divider",
-        "& > *": { fontWeight: 700, color: "text.secondary", fontSize: "0.75rem", letterSpacing: 0.3 },
+        "& > *": { fontWeight: 700, color: "text.secondary", fontSize: "0.72rem", letterSpacing: ".06em", textTransform: "uppercase" },
       }}
     >
-      <Box>TENANT</Box>
-      <Box>ROOM</Box>
-      <Box>LAST PAYMENT</Box>
-      <Box sx={{ textAlign: "right", pr: 3 }}>STATUS</Box>
+      <Box>Tenant</Box>
+      <Box>Property · room</Box>
+      <Box>Rent · {MONTHS[today.getMonth()]}</Box>
+      <Box sx={{ textAlign: "right", pr: 3.5 }}>Status</Box>
     </Box>
   );
 
-  // Summary counts use ALL tenants (not the filtered list) so they stay stable while searching
-  const countByStatus = (label) => tenants.filter((t) => getTenantStatusChip(t.status).label === label).length;
-  const unassignedCount = tenants.filter((t) => !t.roomId).length;
-
   return (
-    <Box sx={{ minWidth: 0 }}>
-      {/* The top bar already says "Tenants", so the page only adds a one-line
-          description and the primary action. */}
-      <Box sx={{ ...row, justifyContent: "space-between", gap: 2, mb: { xs: 2, sm: 2.5 } }}>
-        <Typography color="text.secondary" sx={{ minWidth: 0 }}>
-          View and manage tenants across your properties
-        </Typography>
-        <Button
-          variant="contained"
-          startIcon={<PersonAddOutlinedIcon />}
-          onClick={() => navigate("/owner/tenants/register")}
-          sx={{ flexShrink: 0, fontWeight: 700, borderRadius: 2.5, display: { xs: "none", sm: "inline-flex" } }}
-        >
-          Register tenant
-        </Button>
-      </Box>
+    <Box sx={{ minWidth: 0, }}>
+      {/* HEADER: same pattern as the Properties page — description + main
+          action, then four stat tiles */}
+      <Paper elevation={0} component="section" sx={{ ...panelSx, borderRadius: R.xl, position: "relative", overflow: "hidden", p: { xs: 2, sm: 3 }, mb: { xs: 2, sm: 2.5 } }}>
+        <Box aria-hidden sx={{ position: "absolute", top: -180, right: -120, width: 380, height: 380, borderRadius: "50%", background: "rgba(255,69,0,.10)", filter: "blur(70px)", pointerEvents: "none" }} />
 
-      {!loading && tenants.length > 0 && (
-        <SummaryStrip
-          items={[
-            { label: "Tenants", value: tenants.length },
-            { label: "Active", value: countByStatus("Active"), color: "success.main" },
-            { label: "Pending onboarding", value: countByStatus("Pending Onboarding"), color: countByStatus("Pending Onboarding") > 0 ? "warning.main" : undefined },
-            { label: "No room yet", value: unassignedCount, color: unassignedCount > 0 ? "warning.main" : undefined },
-          ]}
-        />
-      )}
+        <Box sx={{ position: "relative", display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: { xs: "stretch", sm: "center" }, justifyContent: "space-between", gap: { xs: 1.5, sm: 2 }, mb: { xs: 2, sm: 2.5 } }}>
+          <Typography color="text.secondary" sx={{ minWidth: 0, fontSize: { xs: 14, sm: 15 } }}>
+            View and manage tenants across your properties
+          </Typography>
+          <Button
+            variant="contained"
+            startIcon={<PersonAddOutlinedIcon />}
+            onClick={() => navigate("/owner/tenants/register")}
+            sx={{ flexShrink: 0, fontWeight: 700, borderRadius: R.sm, minHeight: 44, boxShadow: "0 10px 22px -14px rgba(255,69,0,.9)" }}
+          >
+            Register tenant
+          </Button>
+        </Box>
 
-      {/* Curfew heads-up from the caretaker's latest check */}
-      {!loading && outPastCurfew.length > 0 && (
-        <Box
-          sx={{
-            ...row,
-            alignItems: "flex-start",
-            gap: 1.25,
-            p: 1.5,
-            mb: { xs: 2, sm: 2.5 },
-            borderRadius: 3,
-            border: "1px solid",
-            borderColor: (t) => alpha(t.palette.error.main, 0.45),
-            bgcolor: (t) => alpha(t.palette.error.main, 0.07),
-          }}
-        >
-          <ScheduleIcon color="error" sx={{ mt: 0.25 }} />
-          <Box sx={{ minWidth: 0 }}>
-            <Typography sx={{ fontWeight: 800, lineHeight: 1.25 }}>
-              {outPastCurfew.length} {outPastCurfew.length === 1 ? "tenant is" : "tenants are"} out past curfew
-            </Typography>
-            <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: "anywhere" }}>
-              {outPastCurfew.map((t) => t.fullName || t.name || "Tenant").join(", ")}
-            </Typography>
-          </Box>
+        <Box sx={{ position: "relative", display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: { xs: 1, sm: 1.5 } }}>
+          {headerTiles.map((t) => (
+            <Box
+              key={t.label}
+              sx={{ minWidth: 0, display: "flex", alignItems: "flex-start", gap: 1.25, p: { xs: 1.25, sm: 1.75 }, borderRadius: R.md, bgcolor: (th) => alpha(th.palette.background.paper, 0.55) }}
+            >
+              <Box sx={{ width: { xs: 32, sm: 38 }, height: { xs: 32, sm: 38 }, flexShrink: 0, borderRadius: R.sm, display: "grid", placeItems: "center", bgcolor: "#fff", color: "primary.main", "& svg": { fontSize: { xs: 18, sm: 20 } } }}>
+                {t.icon}
+              </Box>
+              <Box sx={{ minWidth: 0, flex: 1 }}>
+                <Typography variant="caption" color="text.secondary" noWrap sx={{ fontWeight: 600, display: "block" }}>
+                  {t.label}
+                </Typography>
+                <Typography noWrap sx={{ fontFamily: HEAD, fontWeight: 800, letterSpacing: "-0.02em", fontSize: { xs: "1.2rem", sm: "1.45rem" }, lineHeight: 1.2, color: t.accent ? "primary.main" : "text.primary" }}>
+                  {loading ? "–" : t.value}
+                  {!loading && t.suffix && (
+                    <Box component="span" sx={{ fontWeight: 600, fontSize: "0.62em", color: "text.secondary" }}>
+                      {" "}{t.suffix}
+                    </Box>
+                  )}
+                </Typography>
+                {t.squares && !loading && <MiniSquares pct={t.pct} />}
+              </Box>
+            </Box>
+          ))}
+        </Box>
+      </Paper>
+
+      {/* NEEDS ATTENTION: one-tap filters for what the owner should act on */}
+      {!loading && rows.length > 0 && (
+        <Box sx={{ ...row, flexWrap: "wrap", gap: 1, mb: { xs: 2, sm: 2.5 } }}>
+          <Typography variant="caption" sx={{ fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "text.secondary", mr: 0.5 }}>
+            Needs attention
+          </Typography>
+          {attentionShown.length === 0 ? (
+            <Box sx={{ ...row, gap: 0.75, color: "success.dark" }}>
+              <CheckCircleOutlineIcon sx={{ fontSize: 18 }} />
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>
+                Nothing right now
+              </Typography>
+            </Box>
+          ) : (
+            attentionShown.map((a) => {
+              const on = attention === a.key;
+              return (
+                <Box
+                  key={a.key}
+                  component="button"
+                  type="button"
+                  aria-pressed={on}
+                  onClick={() => setAttention(on ? null : a.key)}
+                  sx={{
+                    ...row,
+                    gap: 0.75,
+                    height: 34,
+                    pl: 1,
+                    pr: 1.25,
+                    borderRadius: 99,
+                    cursor: "pointer",
+                    fontFamily: HEAD,
+                    fontWeight: 700,
+                    fontSize: 13,
+                    border: "1px solid",
+                    borderColor: (t) => (on ? t.palette[a.tone].main : alpha(t.palette[a.tone].main, 0.3)),
+                    bgcolor: (t) => (on ? t.palette[a.tone].main : alpha(t.palette[a.tone].main, 0.08)),
+                    color: (t) => (on ? "#fff" : t.palette[a.tone].dark),
+                    transition: "background-color .15s, color .15s, border-color .15s",
+                    "& svg": { fontSize: 17 },
+                    "&:hover": { borderColor: (t) => t.palette[a.tone].main },
+                    "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
+                  }}
+                >
+                  {a.icon}
+                  {a.label}
+                  <Box component="span" sx={{ ml: 0.25, px: 0.75, borderRadius: 99, fontSize: 12, bgcolor: on ? "rgba(255,255,255,.25)" : "rgba(255,255,255,.7)" }}>
+                    {attentionCounts[a.key]}
+                  </Box>
+                </Box>
+              );
+            })
+          )}
         </Box>
       )}
 
-      {/* Search + status filter */}
-      {!loading && tenants.length > 0 && (
-        <Box sx={{ mb: { xs: 2, sm: 2.5 } }}>
+      {/* TOOLBAR: search, property, status, sort */}
+      {!loading && rows.length > 0 && (
+        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "minmax(0, 1fr) auto auto auto" }, gap: 1.25, alignItems: "center", mb: { xs: 2, sm: 2.5 } }}>
           <Paper
             elevation={0}
-            sx={{ ...row, gap: 1, px: 1.5, bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3, height: 46 }}
+            sx={{
+              ...panelSx,
+              ...row,
+              gridColumn: { xs: "1 / -1", md: "auto" },
+              gap: 1,
+              px: 1.5,
+              height: 44,
+              minWidth: 0,
+              borderRadius: R.sm,
+              transition: "border-color .15s, box-shadow .15s",
+              "&:focus-within": { borderColor: "primary.main", boxShadow: "0 0 0 3px rgba(255,69,0,.12)" },
+            }}
           >
             <SearchIcon sx={{ color: "text.secondary" }} />
             <InputBase
               fullWidth
-              placeholder="Search name, email or room"
+              placeholder="Search name, phone, email or room"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               inputProps={{ "aria-label": "Search tenants" }}
@@ -623,194 +648,105 @@ export default function TenantList() {
             )}
           </Paper>
 
-          <Box
-            sx={{
-              display: "flex",
-              gap: 1,
-              mt: 1.5,
-              overflowX: "auto",
-              mx: { xs: -2, sm: 0 },
-              px: { xs: 2, sm: 0 },
-              scrollbarWidth: "none",
-              "&::-webkit-scrollbar": { display: "none" },
-            }}
-          >
+          {(properties.length > 1 || hasUnlinked) && (
+            <TextField select size="small" value={propertyFilter} onChange={(e) => setPropertyFilter(e.target.value)} sx={{ ...fieldSx, minWidth: { md: 190 } }} slotProps={{ htmlInput: { "aria-label": "Property" } }}>
+              <MenuItem value="all">All properties</MenuItem>
+              {[...properties]
+                .sort((a, b) => String(a.propertyName || "").localeCompare(String(b.propertyName || "")))
+                .map((p) => (
+                  <MenuItem key={p.id} value={p.id}>{p.propertyName || p.name || "Unnamed Property"}</MenuItem>
+                ))}
+              {hasUnlinked && <MenuItem value="unlinked">Not linked to a property</MenuItem>}
+            </TextField>
+          )}
+
+          <TextField select size="small" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} sx={{ ...fieldSx, minWidth: { md: 150 } }} slotProps={{ htmlInput: { "aria-label": "Status" } }}>
             {STATUS_FILTERS.map((s) => (
-              <Chip
-                key={s}
-                label={s === "Pending Onboarding" ? "Pending" : s}
-                clickable
-                onClick={() => setStatusFilter(s)}
-                color={statusFilter === s ? "primary" : "default"}
-                variant={statusFilter === s ? "filled" : "outlined"}
-                sx={{ fontWeight: 700, flexShrink: 0, height: 34, borderRadius: 17 }}
-              />
+              <MenuItem key={s} value={s}>
+                {s === "All" ? "All statuses" : s} ({statusCount(s)})
+              </MenuItem>
             ))}
-          </Box>
+          </TextField>
+
+          <TextField select size="small" value={sortBy} onChange={(e) => setSortBy(e.target.value)} sx={{ ...fieldSx, minWidth: { md: 170 }, gridColumn: { xs: properties.length > 1 || hasUnlinked ? "1 / -1" : "auto", md: "auto" } }} slotProps={{ htmlInput: { "aria-label": "Sort by" } }}>
+            <MenuItem value="name">Sort: Name</MenuItem>
+            <MenuItem value="rent">Sort: Rent status</MenuItem>
+            <MenuItem value="property">Sort: Property & room</MenuItem>
+          </TextField>
         </Box>
       )}
 
-      {/* DIRECTORY CONTENT */}
+      {/* LIST */}
       {loading ? (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {[0, 1].map((i) => (
-            <Paper key={i} elevation={0} sx={{ ...groupShellSx, p: 2 }}>
-              <Skeleton width="40%" height={28} />
-              <Skeleton variant="rounded" height={56} sx={{ mt: 1.5 }} />
-              <Skeleton variant="rounded" height={56} sx={{ mt: 1 }} />
-            </Paper>
+        <Paper elevation={0} sx={{ ...panelSx, p: 2 }}>
+          {[0, 1, 2, 3].map((i) => (
+            <Skeleton key={i} variant="rounded" height={56} sx={{ mt: i ? 1 : 0, borderRadius: R.sm }} />
           ))}
-        </Box>
-      ) : tenants.length === 0 ? (
-        <Paper elevation={0} sx={{ ...groupShellSx, borderStyle: "dashed", py: 7, px: 3, textAlign: "center" }}>
-          <Box sx={{ width: 64, height: 64, borderRadius: "50%", mx: "auto", mb: 2, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
+        </Paper>
+      ) : rows.length === 0 ? (
+        <Paper elevation={0} sx={{ ...panelSx, borderStyle: "dashed", py: 7, px: 3, textAlign: "center" }}>
+          <Box sx={{ width: 64, height: 64, borderRadius: R.md, mx: "auto", mb: 2, display: "grid", placeItems: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
             <PeopleOutlineIcon sx={{ fontSize: 32, color: "primary.main" }} />
           </Box>
-          <Typography sx={{ fontWeight: 700, mb: 0.5 }}>No tenants enrolled yet</Typography>
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 0.5 }}>No tenants enrolled yet</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
             Register your first tenant to assign them a room and track payments.
           </Typography>
-          <Button variant="contained" startIcon={<PersonAddOutlinedIcon />} onClick={() => navigate("/owner/tenants/register")} sx={{ fontWeight: 700, borderRadius: 2.5 }}>
+          <Button variant="contained" startIcon={<PersonAddOutlinedIcon />} onClick={() => navigate("/owner/tenants/register")} sx={{ fontWeight: 700, borderRadius: R.sm }}>
             Register tenant
           </Button>
         </Paper>
-      ) : filteredTenants.length === 0 ? (
-        <Paper elevation={0} sx={{ ...groupShellSx, py: 5, textAlign: "center" }}>
-          <Typography sx={{ fontWeight: 700 }}>No tenants match</Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Try a different search or filter.
-          </Typography>
-          <Button
-            size="small"
-            onClick={() => {
-              setSearchQuery("");
-              setStatusFilter("All");
-            }}
-            sx={{ mt: 1 }}
-          >
-            Clear filters
-          </Button>
-        </Paper>
       ) : (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-          {Object.entries(groupedByProperty).map(([propId, group], index) => {
-            if (group.tenants.length === 0 && isFiltering) return null; // hide empty groups while filtering
-
-            const formattedAddress = formatAddress(group.propertyAddress);
-            const count = group.tenants.length;
-
-            return (
-              <Accordion
-                // remount when filtering starts/stops so groups open to show matches
-                key={`${propId}-${isFiltering}`}
-                defaultExpanded={index === 0 || isFiltering}
-                disableGutters
-                elevation={0}
-                sx={groupShellSx}
-              >
-                <AccordionSummary
-                  expandIcon={<ExpandMoreIcon />}
-                  sx={{ "& .MuiAccordionSummary-content": { alignItems: "center", my: 1.5, minWidth: 0 } }}
-                >
-                  <Box sx={{ ...row, gap: 1.5, minWidth: 0, flex: 1 }}>
-                    <Box sx={{ width: 36, height: 36, borderRadius: 2, flexShrink: 0, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
-                      <ApartmentOutlinedIcon color="primary" fontSize="small" />
-                    </Box>
-                    <Box sx={{ minWidth: 0 }}>
-                      <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.25 }} noWrap>
-                        {group.propertyName}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" noWrap component="div">
-                        {count} {count === 1 ? "tenant" : "tenants"}
-                        {formattedAddress ? ` · ${formattedAddress}` : ""}
-                      </Typography>
-                    </Box>
-                  </Box>
-                </AccordionSummary>
-
-                <AccordionDetails sx={{ p: 0, borderTop: "1px solid", borderColor: "divider" }}>
-                  {group.tenants.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary" sx={{ px: 3, py: 3, textAlign: "center" }}>
-                      No tenants assigned to this property yet.
-                    </Typography>
-                  ) : (
-                    <>
-                      {columnHeader}
-                      {group.tenants.map((t, i) => (
-                        <React.Fragment key={t.id}>
-                          {i > 0 && <Divider />}
-                          {renderTenantRow(t)}
-                        </React.Fragment>
-                      ))}
-                    </>
-                  )}
-                </AccordionDetails>
-              </Accordion>
-            );
-          })}
-
-          {/* Tenants not tied to any loaded property */}
-          {unassignedTenants.length > 0 && (
-            <Accordion
-              key={`unassigned-${isFiltering}`}
-              defaultExpanded={isFiltering}
-              disableGutters
-              elevation={0}
-              sx={groupShellSx}
-            >
-              <AccordionSummary
-                expandIcon={<ExpandMoreIcon />}
-                sx={{ "& .MuiAccordionSummary-content": { alignItems: "center", my: 1.5, minWidth: 0 } }}
-              >
-                <Box sx={{ ...row, gap: 1.5, minWidth: 0, flex: 1 }}>
-                  <Box sx={{ width: 36, height: 36, borderRadius: 2, flexShrink: 0, ...row, justifyContent: "center", bgcolor: (t) => alpha(t.palette.warning.main, 0.14) }}>
-                    <ApartmentOutlinedIcon sx={{ color: "warning.dark" }} fontSize="small" />
-                  </Box>
-                  <Box sx={{ minWidth: 0 }}>
-                    <Typography variant="subtitle1" sx={{ fontWeight: 800, lineHeight: 1.25 }} noWrap>
-                      Unassigned / other
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" noWrap component="div">
-                      {unassignedTenants.length} {unassignedTenants.length === 1 ? "tenant" : "tenants"} not linked to a property
-                    </Typography>
-                  </Box>
-                </Box>
-              </AccordionSummary>
-
-              <AccordionDetails sx={{ p: 0, borderTop: "1px solid", borderColor: "divider" }}>
-                {columnHeader}
-                {unassignedTenants.map((t, i) => (
-                  <React.Fragment key={t.id}>
-                    {i > 0 && <Divider />}
-                    {renderTenantRow(t)}
-                  </React.Fragment>
-                ))}
-              </AccordionDetails>
-            </Accordion>
+        <>
+          {isFiltering && (
+            <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 1.25 }}>
+              <Typography variant="body2" color="text.secondary">
+                Showing {visible.length} of {rows.length} tenants
+              </Typography>
+              <Button size="small" onClick={clearFilters} sx={{ fontWeight: 700 }}>
+                Clear filters
+              </Button>
+            </Box>
           )}
-        </Box>
+
+          <Paper elevation={0} sx={{ ...panelSx, overflow: "hidden" }}>
+            {visible.length === 0 ? (
+              <Box sx={{ py: 5, px: 2, textAlign: "center" }}>
+                <Typography sx={{ fontWeight: 700 }}>No tenants match</Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+                  Try a different search or filter.
+                </Typography>
+              </Box>
+            ) : (
+              <>
+                {columnHeader}
+                {shown.map((r, i) => (
+                  <Fragment key={r.key}>
+                    {i > 0 && <Divider />}
+                    {renderRow(r)}
+                  </Fragment>
+                ))}
+              </>
+            )}
+          </Paper>
+
+          {remaining > 0 && (
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 0.5, mt: 2 }}>
+              <Button
+                variant="outlined"
+                onClick={() => setPage({ key: filterKey, count: shownCount + PAGE_SIZE })}
+                sx={{ fontWeight: 700, borderRadius: R.sm, minWidth: 200 }}
+              >
+                Show {Math.min(remaining, PAGE_SIZE)} more
+              </Button>
+              <Typography variant="caption" color="text.secondary">
+                Showing {shown.length} of {visible.length}
+              </Typography>
+            </Box>
+          )}
+        </>
       )}
 
-      {/* Phone: floating register button so the primary action stays reachable */}
-      <Button
-        variant="contained"
-        onClick={() => navigate("/owner/tenants/register")}
-        startIcon={<PersonAddOutlinedIcon />}
-        sx={{
-          display: { xs: "inline-flex", sm: "none" },
-          position: "fixed",
-          right: 16,
-          bottom: "calc(80px + env(safe-area-inset-bottom, 0px))",
-          zIndex: (t) => t.zIndex.appBar - 1,
-          borderRadius: 6,
-          px: 2.5,
-          py: 1.2,
-          fontWeight: 700,
-          boxShadow: 6,
-        }}
-      >
-        Register
-      </Button>
     </Box>
   );
 }

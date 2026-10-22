@@ -1,11 +1,13 @@
 // src/utils/generateTempPassword.js
 //
 // Generates a temporary password in the "Kwarto-XXXXX" format shown in the
-// Figma mockup. Random enough for a one-time invite credential; the
-// caretaker is expected to change it on first login (not yet built,
-// flag this to the team when they wire up caretaker Login).
+// Figma mockup. Used once: the caretaker must choose their own password on
+// first sign-in (see pages/auth/SetPassword.jsx).
+// Uses the browser's secure random generator rather than Math.random.
 
 export function generateTempPassword() {
-  const digits = Math.floor(10000 + Math.random() * 90000); // 5-digit number
+  const buf = new Uint32Array(1);
+  (globalThis.crypto || window.crypto).getRandomValues(buf);
+  const digits = 10000 + (buf[0] % 90000); // 5-digit number
   return `Kwarto-${digits}`;
 }
