@@ -31,6 +31,7 @@ import MenuIcon from "@mui/icons-material/Menu";
 import NotificationFeed from "../components/NotificationFeed";
 import { t } from "../i18n";
 import LanguageSwitch from "../components/LanguageSwitch";
+import BrandLogo from "../components/BrandLogo";
 
 const SHELL_DRAWER_W = 288;
 const BAR_H = { xs: 56, md: 72 }; // same as the owner area
@@ -43,7 +44,6 @@ const SIDEBAR = {
   light: {
     bg: "background.default",
     border: "divider",
-    logo: "/KwartoKeeper-Secondary-Logo.png",
     heading: "text.disabled",
     item: "text.secondary",
     itemHover: "text.primary",
@@ -61,7 +61,6 @@ const SIDEBAR = {
   dark: {
     bg: "#202020",
     border: "rgba(255,255,255,0.10)",
-    logo: "/KwartoKeeper-DarkMode.png",
     heading: "rgba(255,255,255,0.42)",
     item: "rgba(255,255,255,0.74)",
     itemHover: "#ffffff",
@@ -170,7 +169,7 @@ export default function AppShell({
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%", bgcolor: S.bg }}>
       {/* Brand header, same height as the top bar so the dividers line up */}
       <Toolbar sx={{ px: 2.5, height: BAR_H, minHeight: BAR_H }}>
-        <Box component="img" src={S.logo} alt={t("KwartoKeeper")} sx={{ display: "block", height: { xs: 34, md: 44 }, maxWidth: "100%", width: "auto", objectFit: "contain" }} />
+        <BrandLogo appearance={sidebarTone === "dark" ? "dark" : "light"} alt={t("KwartoKeeper")} sx={{ display: "block", height: { xs: 34, md: 44 }, maxWidth: "100%", width: "auto", objectFit: "contain" }} />
       </Toolbar>
       <Divider sx={{ borderColor: S.border }} />
 
@@ -290,7 +289,7 @@ export default function AppShell({
           }}
         >
           <Toolbar sx={{ height: BAR_H, minHeight: BAR_H, gap: 1.5, px: { xs: 2, sm: 3 } }}>
-            <Box component="img" src="/KwartoKeeper-Icon.png" alt={t("KwartoKeeper")} sx={{ display: { xs: "block", md: "none" }, height: 30, width: 30, flexShrink: 0 }} />
+            <BrandLogo appearance="light" variant="icon" alt={t("KwartoKeeper")} sx={{ display: { xs: "block", md: "none" }, height: 30, width: 30, flexShrink: 0 }} />
             {/* The page's main heading for screen readers (the overview has its own) */}
             {title && (
               <Typography component="h1" noWrap sx={{ minWidth: 0, fontFamily: HEAD, fontWeight: 800, letterSpacing: "-0.01em", fontSize: { xs: "1.1rem", md: "1.3rem" } }}>

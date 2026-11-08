@@ -4,7 +4,7 @@ import { lazy } from "react";
 import PageBoundary from "./components/PageBoundary";
 
 import {
-  BrowserRouter as Router,
+  HashRouter as Router,
   Routes,
   Route,
   Navigate,

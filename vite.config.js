@@ -9,4 +9,5 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.{js,jsx}'],
   },
+  base: './',
 })

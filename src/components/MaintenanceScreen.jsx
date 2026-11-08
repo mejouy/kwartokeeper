@@ -8,6 +8,7 @@ import RefreshIcon from "@mui/icons-material/Refresh";
 import { signOut } from "firebase/auth";
 import { auth } from "../config/firebase";
 import { t } from "../i18n";
+import BrandLogo from "./BrandLogo";
 
 const HEAD = '"Inter", sans-serif';
 
@@ -16,7 +17,7 @@ export default function MaintenanceScreen({ settings }) {
   return (
     <Box sx={{ minHeight: "100dvh", display: "grid", placeItems: "center", px: 2, py: 4, bgcolor: "#faf7f3" }}>
       <Box sx={{ width: "100%", maxWidth: 460, textAlign: "center", bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: "22px", p: { xs: 3, sm: 4 } }}>
-        <Box component="img" src="/KwartoKeeper-Icon.png" alt={t("KwartoKeeper")} sx={{ height: 36, width: 36, mb: 2 }} />
+        <BrandLogo variant="icon" appearance="light" alt={t("KwartoKeeper")} sx={{ height: 36, width: 36, mb: 2 }} />
         <Box sx={{ width: 64, height: 64, borderRadius: "18px", mx: "auto", mb: 2, display: "grid", placeItems: "center", bgcolor: "rgba(237,108,2,.12)", color: "warning.main" }}>
           <ConstructionOutlinedIcon sx={{ fontSize: 32 }} />
         </Box>

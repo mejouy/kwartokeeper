@@ -7,6 +7,7 @@ import { Box, Typography, ButtonBase, GlobalStyles } from '@mui/material';
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
 import { enter } from './authStyles';
 import { t } from "../i18n";
+import BrandLogo from './BrandLogo';
 
 const ORANGE = '#ff4500';
 const INK = '#202020';
@@ -144,7 +145,7 @@ export default function AuthLayout({ title, subtitle, lit, children }) {
           {/* The stacked dark logo is square and its wordmark gets unreadably small,
               so use the icon plus a text wordmark that stays crisp at any size. */}
           <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, md: 1.25 }, minWidth: 0 }}>
-            <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt="" aria-hidden="true" sx={{ display: 'block', height: { xs: 32, md: 40 }, width: { xs: 32, md: 40 }, flexShrink: 0 }} />
+            <BrandLogo variant="icon" onDark alt="" aria-hidden="true" sx={{ display: 'block', height: { xs: 32, md: 40 }, width: { xs: 32, md: 40 }, flexShrink: 0 }} />
             <Typography component="span" sx={{ fontFamily: HEAD, fontWeight: 800, letterSpacing: '-0.02em', fontSize: { xs: 18, md: 21 }, color: '#fff', whiteSpace: 'nowrap' }}>
               {t("Kwarto")}<Box component="span" sx={{ color: ORANGE }}>{t("Keeper")}</Box>
             </Typography>

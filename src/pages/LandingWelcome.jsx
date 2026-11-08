@@ -15,6 +15,7 @@ import PersonOutlineRoundedIcon from '@mui/icons-material/PersonOutlineRounded';
 import ArrowForwardRoundedIcon from '@mui/icons-material/ArrowForwardRounded';
 import MenuRoundedIcon from '@mui/icons-material/MenuRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
+import BrandLogo from '../components/BrandLogo';
 
 const ORANGE = '#ff4500';
 const ORANGE_SOFT = '#ff8a5c';
@@ -471,7 +472,7 @@ export default function LandingWelcome() {
               aria-label="KwartoKeeper, back to top"
               sx={{ mr: 'auto', display: 'flex', p: 0, border: 0, bgcolor: 'transparent', cursor: 'pointer' }}
             >
-              <Box component="img" src="/KwartoKeeper-Primary-Logo.png" alt="KwartoKeeper" sx={{ display: 'block', height: { xs: 30, sm: 38 }, width: 'auto' }} />
+              <BrandLogo appearance="light" variant="icon" sx={{ display: 'block', height: { xs: 30, sm: 38 }, width: { xs: 30, sm: 38 } }} />
             </Box>
 
             <Box component="nav" sx={{ display: { xs: 'none', md: 'flex' }, gap: 0.5, mr: 2 }}>
@@ -529,7 +530,7 @@ export default function LandingWelcome() {
       <Drawer anchor="top" open={menuOpen} onClose={() => setMenuOpen(false)}>
         <Box sx={{ px: 2.5, pt: 2, pb: 3 }}>
           <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 1 }}>
-            <Box component="img" src="/KwartoKeeper-Primary-Logo.png" alt="KwartoKeeper" sx={{ height: 30, width: 'auto' }} />
+            <BrandLogo appearance="light" variant="icon" sx={{ height: 30, width: 30 }} />
             <IconButton aria-label="Close menu" onClick={() => setMenuOpen(false)}>
               <CloseRoundedIcon />
             </IconButton>
@@ -883,7 +884,7 @@ export default function LandingWelcome() {
         <Container maxWidth="lg" sx={{ position: 'relative' }}>
           <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr 1fr', md: '2fr 1fr 1fr' }, columnGap: { xs: 3, md: 6 }, rowGap: { xs: 5, md: 0 } }}>
             <Box sx={{ gridColumn: { xs: '1 / -1', md: 'auto' } }}>
-              <Box component="img" src="/KwartoKeeper-DarkMode.png" alt="KwartoKeeper" sx={{ display: 'block', height: { xs: 56, md: 64 }, width: 'auto' }} />
+              <BrandLogo onDark sx={{ display: 'block', height: { xs: 56, md: 64 }, width: 'auto' }} />
               <Typography sx={{ mt: 2.5, maxWidth: 340, fontFamily: HEAD, fontWeight: 700, fontSize: { xs: 15.5, md: 16.5 }, lineHeight: 1.45, color: '#fff' }}>
                 Know every room, every bed and every payment.
               </Typography>

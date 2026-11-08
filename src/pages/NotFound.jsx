@@ -3,12 +3,14 @@ import { Button, Container, Typography, Paper } from "@mui/material";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import HomeIcon from "@mui/icons-material/Home";
 import { t } from "../i18n";
+import BrandLogo from "../components/BrandLogo";
 
 export default function NotFound() {
   const navigate = useNavigate();
 
   return (
-    <Container maxWidth="sm" sx={{ display: "flex", alignItems: "center", minHeight: "100vh" }}>
+    <Container maxWidth="sm" sx={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh" }}>
+      <BrandLogo sx={{ height: 42, width: "auto", mb: 3 }} />
       <Paper
         elevation={0}
         sx={{

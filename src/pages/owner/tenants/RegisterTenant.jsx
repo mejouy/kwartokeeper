@@ -22,6 +22,7 @@ import EventNoteOutlinedIcon from "@mui/icons-material/EventNoteOutlined";
 import BadgeOutlinedIcon from "@mui/icons-material/BadgeOutlined";
 import PhoneOutlinedIcon from "@mui/icons-material/PhoneOutlined";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import BrandLogo from "../../../components/BrandLogo";
 import { initializeApp, deleteApp, getApps } from "firebase/app";
 import {
   getAuth,
@@ -647,7 +648,7 @@ export default function RegisterTenant() {
         inset: 0,
         zIndex: (t) => t.zIndex.modal - 1,
         bgcolor: "background.default",
-        overflowY: { xs: "auto", md: "hidden" },
+        overflow: "hidden",
         overscrollBehavior: "contain",
         display: "flex",
         flexDirection: { xs: "column", md: "row" },
@@ -668,7 +669,7 @@ export default function RegisterTenant() {
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt={t("KwartoKeeper")} sx={{ height: 28 }} />
+          <BrandLogo variant="icon" onDark alt={t("KwartoKeeper")} sx={{ height: 28 }} />
           <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 700, fontSize: "1rem", flex: 1 }}>
             {t("Register tenant")}
           </Typography>
@@ -723,13 +724,14 @@ export default function RegisterTenant() {
         sx={{
           flex: 1,
           minWidth: 0,
+          minHeight: 0,
           display: "flex",
           flexDirection: "column",
           overflowY: { md: "auto" },
           bgcolor: "background.default",
         }}
       >
-        <Box sx={{ flex: 1, display: "flex", justifyContent: "center", px: { xs: 3, md: 6 }, pt: { xs: 4, md: 6 } }}>
+        <Box sx={{ flex: 1, minHeight: 0, overflowY: { xs: "auto", md: "visible" }, display: "flex", justifyContent: "center", px: { xs: 3, md: 6 }, pt: { xs: 4, md: 6 } }}>
           <Box sx={{ width: "100%", maxWidth: 760 }}>
             {alertMessage && (
               <Alert severity="error" sx={{ mb: 3 }}>
@@ -1002,8 +1004,8 @@ export default function RegisterTenant() {
         {/* Back / Next — pinned to the bottom of the column so it stays reachable on phones */}
         <Box
           sx={{
-            position: "sticky",
-            bottom: 0,
+            position: { xs: "static", md: "sticky" },
+            bottom: { md: 0 },
             bgcolor: "background.default",
             display: "flex",
             justifyContent: "center",
