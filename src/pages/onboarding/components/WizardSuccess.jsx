@@ -8,6 +8,7 @@ import SupervisorAccountOutlinedIcon from "@mui/icons-material/SupervisorAccount
 import ApartmentOutlinedIcon from "@mui/icons-material/ApartmentOutlined";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import { t } from "../../../i18n";
+import BrandLogo from "../../../components/BrandLogo";
 
 // The same facade motif from the login page (window size, gap, and lit
 // pattern), tiled and blurred to sit behind the card as ambient texture —
@@ -212,6 +213,7 @@ export default function WizardSuccess() {
 
         {/* Body */}
         <Box sx={{ px: { xs: 3, sm: 4 }, pt: 3.5, pb: 4, textAlign: "center" }}>
+          <BrandLogo sx={{ height: 34, width: "auto", maxWidth: "100%", mx: "auto", mb: 2.5 }} />
           <Typography
             variant="h5"
             sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, color: "text.primary" }}

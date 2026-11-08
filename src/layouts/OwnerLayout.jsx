@@ -35,6 +35,7 @@ import HourglassTopRoundedIcon from "@mui/icons-material/HourglassTopRounded";
 import MenuIcon from "@mui/icons-material/Menu";
 import { alpha } from "@mui/material/styles";
 import NotificationFeed from "../components/NotificationFeed";
+import BrandLogo from "../components/BrandLogo";
 
 // Firebase Auth imports
 import { onAuthStateChanged, signOut } from "firebase/auth";
@@ -229,12 +230,7 @@ export default function OwnerLayout() {
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* Brand header — same height as the app bar so the divider lines up */}
       <Toolbar sx={{ px: 2.5, height: BAR_H, minHeight: BAR_H }}>
-        <Box
-          component="img"
-          src="/KwartoKeeper-Secondary-Logo.png"
-          alt={t("KwartoKeeper")}
-          sx={{ display: "block", height: { xs: 34, md: 44 }, maxWidth: "100%", width: "auto", objectFit: "contain" }}
-        />
+        <BrandLogo appearance="light" alt={t("KwartoKeeper")} sx={{ display: "block", height: { xs: 34, md: 44 }, maxWidth: "100%", width: "auto", objectFit: "contain" }} />
       </Toolbar>
       <Divider />
 
@@ -353,12 +349,7 @@ export default function OwnerLayout() {
         <Toolbar sx={{ height: BAR_H, minHeight: BAR_H, gap: 1.5, px: { xs: 2, sm: 3 } }}>
           {/* Phones: brand mark replaces the (now unneeded) hamburger. The
               drawer opens from "Menu" in the bottom bar. */}
-          <Box
-            component="img"
-            src="/KwartoKeeper-Icon.png"
-            alt={t("KwartoKeeper")}
-            sx={{ display: { xs: "block", md: "none" }, height: 30, width: 30, flexShrink: 0 }}
-          />
+          <BrandLogo appearance="light" variant="icon" alt={t("KwartoKeeper")} sx={{ display: { xs: "block", md: "none" }, height: 30, width: 30, flexShrink: 0 }} />
           {/* The page's main heading for screen readers (the overview has its own) */}
           {currentTitle && (
             <Typography

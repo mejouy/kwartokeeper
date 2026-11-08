@@ -35,6 +35,7 @@ import SecurityOutlinedIcon from "@mui/icons-material/SecurityOutlined";
 import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
 import PhoneOutlinedIcon from "@mui/icons-material/PhoneOutlined";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
+import BrandLogo from "../../../components/BrandLogo";
 import { collection, query, where, getDocs } from "firebase/firestore";
 import { auth, db } from "../../../config/firebase";
 import { useAuth } from "../../../context/AuthContext";
@@ -635,7 +636,7 @@ export default function InviteCaretaker() {
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt={t("KwartoKeeper")} sx={{ height: 28 }} />
+          <BrandLogo variant="icon" onDark alt={t("KwartoKeeper")} sx={{ height: 28 }} />
           <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 700, fontSize: "1rem", flex: 1 }}>
             {t("Invite caretaker")}
           </Typography>

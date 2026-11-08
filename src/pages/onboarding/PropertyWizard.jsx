@@ -5,6 +5,7 @@ import { alpha } from '@mui/material/styles';
 import CloseIcon from '@mui/icons-material/Close';
 import CheckIcon from '@mui/icons-material/Check';
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import BrandLogo from '../../components/BrandLogo';
 
 import Step1Basics from './components/Step1Basics';
 import Step2Rules from './components/Step2Policies';
@@ -310,7 +311,7 @@ export default function PropertyWizard() {
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt={t("KwartoKeeper")} sx={{ height: 30 }} />
+          <BrandLogo variant="icon" onDark alt={t("KwartoKeeper")} sx={{ height: 30 }} />
           <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: '1rem', flex: 1 }}>{t("Property setup")}</Typography>
           <IconButton aria-label={t("Leave property setup")} onClick={leave} size="small" sx={{ color: '#cadcf6', '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,.08)' } }}>
             <CloseIcon fontSize="small" />
@@ -344,7 +345,7 @@ export default function PropertyWizard() {
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-          <Box component="img" src="/KwartoKeeper-Icon.png" alt={t("KwartoKeeper")} sx={{ height: 26, width: 26, objectFit: 'contain' }} />
+          <BrandLogo variant="icon" appearance="light" alt={t("KwartoKeeper")} sx={{ height: 26, width: 26, objectFit: 'contain' }} />
           <Box sx={{ flex: 1, minWidth: 0 }}>
             <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: '0.95rem', lineHeight: 1.2 }}>{t("Property setup")}</Typography>
             <Typography variant="caption" color="text.secondary" noWrap component="div">

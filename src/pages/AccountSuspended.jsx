@@ -4,6 +4,7 @@ import { signOut } from "firebase/auth";
 import { auth } from "../config/firebase"; // Adjust path to your firebase config
 import { useNavigate } from "react-router-dom";
 import { t } from "../i18n";
+import BrandLogo from "../components/BrandLogo";
 
 export default function AccountSuspended() {
   const navigate = useNavigate();
@@ -19,7 +20,8 @@ export default function AccountSuspended() {
 
   return (
     <Container maxWidth="sm">
-      <Box sx={{ mt: 10, display: "flex", justifyContent: "center" }}>
+      <Box sx={{ mt: 6, display: "flex", flexDirection: "column", alignItems: "center" }}>
+        <BrandLogo sx={{ height: 42, width: "auto", mb: 3 }} />
         <Paper 
           elevation={3} 
           sx={{ 

@@ -4,6 +4,7 @@ import { Box, Typography, Button, Container, GlobalStyles } from "@mui/material"
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
 import { t } from "../../i18n";
+import BrandLogo from "../../components/BrandLogo";
 
 // Shown right after an owner registers, before the setup wizard,
 // so the jump into a multi-step form isn't sudden.
@@ -141,12 +142,7 @@ export default function OwnerWelcome() {
           px: { xs: 2.5, sm: 4 },
         }}
       >
-        <Box
-          component="img"
-          src="/KwartoKeeper-DarkMode-Icon.png"
-          alt={t("KwartoKeeper")}
-          sx={{ height: { xs: 30, md: 38 }, alignSelf: "flex-start" }}
-        />
+        <BrandLogo variant="icon" onDark alt={t("KwartoKeeper")} sx={{ height: { xs: 30, md: 38 }, alignSelf: "flex-start" }} />
 
         <Box
           sx={{
