@@ -5,6 +5,7 @@ import { Box, Typography, IconButton, Button, CircularProgress } from "@mui/mate
 import { alpha } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
 import RemoveIcon from "@mui/icons-material/Remove";
+import { t } from "../../../i18n";
 
 const HEAD = '"Inter", sans-serif';
 
@@ -12,7 +13,7 @@ export function StepHeader({ step, total, title, subtitle }) {
   return (
     <Box sx={{ mb: { xs: 2.5, sm: 3 } }}>
       <Typography sx={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", textTransform: "uppercase", color: "primary.main" }}>
-        Step {step} of {total}
+        {t("Step")}{" "}{step}{" "}{t("of")}{" "}{total}
       </Typography>
       <Typography component="h1" sx={{ fontFamily: HEAD, fontWeight: 900, letterSpacing: "-0.02em", fontSize: { xs: "1.55rem", sm: "1.9rem" }, lineHeight: 1.2, mt: 0.5 }}>
         {title}
@@ -51,7 +52,7 @@ export function FormCard({ icon: Icon, title, description, optional, action, chi
             <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.05rem", lineHeight: 1.3 }}>{title}</Typography>
             {optional && (
               <Box component="span" sx={{ px: 0.85, height: 20, display: "inline-flex", alignItems: "center", borderRadius: 99, fontSize: 11.5, fontWeight: 700, color: "text.secondary", bgcolor: (t) => alpha(t.palette.text.primary, 0.06) }}>
-                Optional
+                {t("Optional")}
               </Box>
             )}
           </Box>

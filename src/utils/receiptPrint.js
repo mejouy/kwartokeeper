@@ -4,7 +4,9 @@
 const esc = (v) =>
   String(v ?? "—").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
-export const vatLabel = (v) => (v === "vat" ? "VAT Registered" : v === "non_vat" ? "NON-VAT Registered" : "");
+const peso = (n) => new Intl.NumberFormat("en-PH", { style: "currency", currency: "PHP", minimumFractionDigits: 2 }).format(Number(n) || 0);
+
+export const vatLabel =(v) => (v === "vat" ? "VAT Registered" : v === "non_vat" ? "NON-VAT Registered" : "");
 
 // Snapshot of the owner's business details, saved on the payment when the receipt number is issued
 export const issuerFromProfile = (p = {}) => ({
@@ -38,7 +40,8 @@ export function buildReceiptHtml(r) {
   <div class="row"><span class="label">Received from</span><span>${esc(r.tenant)}</span></div>
   <div class="row"><span class="label">Property</span><span>${esc(r.property)}</span></div>
   <div class="row"><span class="label">Room</span><span>${esc(r.room)}</span></div>
-  <div class="row"><span class="label">In payment of</span><span>${r.partial ? "Partial rent" : "Rent"} for ${esc(r.period)}</span></div>
+  <div class="row"><span class="label">In payment of</span><span>${r.partial ? "Partial rent" : "Rent"}${r.bill?.fees?.length ? " and fees" : ""} for ${esc(r.period)}</span></div>
+  ${r.bill?.fees?.length ? `<div class="row"><span class="label">Billed for the month</span><span style="text-align:right">${[["Rent", r.bill.rent], ...r.bill.fees.map((f) => [f.label, f.amount])].map(([l, a]) => `${esc(l)}: ${esc(peso(a))}`).join("<br>")}<br><strong>Total: ${esc(peso(r.bill.total))}</strong></span></div>` : ""}
   <div class="row"><span class="label">Date received</span><span>${esc(r.dateText)}</span></div>
   <div class="row"><span class="label">Payment method</span><span>${esc(r.method)}</span></div>
   <div class="amount">${esc(r.amountText)}</div>

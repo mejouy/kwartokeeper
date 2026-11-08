@@ -18,6 +18,8 @@
  *   node scripts/sync-auth-accounts.cjs --key C:\path\to\key.json            (preview, changes nothing)
  *   node scripts/sync-auth-accounts.cjs --key C:\path\to\key.json --apply    (writes the changes)
  *
+ * Or let GitHub run it every 3 hours for you: .github/workflows/sync-auth-accounts.yml
+ *
  * What it writes on a profile whose account is gone:
  *   accountRemoved: "deleted" | "disabled", accountRemovedAt, previousStatus
  *   tenants & caretakers → status "Inactive"; owners → status "suspended"
@@ -29,6 +31,8 @@ const admin = require(path.join(__dirname, "..", "functions", "node_modules", "f
 
 const args = process.argv.slice(2);
 const apply = args.includes("--apply");
+// --quiet: counts only, no names or emails (for logs other people can see, e.g. GitHub Actions)
+const quiet = args.includes("--quiet");
 const keyIdx = args.indexOf("--key");
 const keyPath = keyIdx >= 0 ? args[keyIdx + 1] : process.env.GOOGLE_APPLICATION_CREDENTIALS;
 
@@ -107,8 +111,8 @@ async function main() {
     console.log("\nEverything is in sync. Nothing to change.");
     return;
   }
-  console.log(`\n${changes.length} profile(s) to update:`);
-  changes.forEach((c) => console.log("  " + c.label));
+  console.log(`\n${changes.length} profile(s) to update${quiet ? "." : ":"}`);
+  if (!quiet) changes.forEach((c) => console.log("  " + c.label));
 
   if (!apply) {
     console.log("\nPreview only. Check the list above, then run again with --apply.");

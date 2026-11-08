@@ -11,12 +11,13 @@ export const isReceiptable = (status) => RECEIPT_STATUSES.includes(String(status
 export const formatReceiptNo = (prefix, seq) => `${String(prefix || "").trim()}${String(seq).padStart(6, "0")}`;
 
 // Reserve the next number inside a transaction. Do all other reads first, then call this, then write.
-export async function reserveReceiptNo(tx, db, ownerUid) {
+// paymentId: the payment that gets the number (a caretaker must name it, see firestore.rules)
+export async function reserveReceiptNo(tx, db, ownerUid, paymentId = "") {
   const ref = doc(db, "users", ownerUid);
   const snap = await tx.get(ref);
   const data = snap.exists() ? snap.data() : {};
   const seq = Math.max(1, Math.floor(Number(data.receiptNextNo)) || 1);
-  tx.set(ref, { receiptNextNo: seq + 1 }, { merge: true });
+  tx.set(ref, { receiptNextNo: seq + 1, ...(paymentId ? { receiptLastPaymentId: paymentId } : {}) }, { merge: true });
   return { receiptNo: formatReceiptNo(data.receiptPrefix, seq), receiptSeq: seq, receiptIssuedAt: new Date().toISOString(),
     // frozen copy of who issued it, so later edits to the owner's details don't change old receipts
     receiptIssuer: issuerFromProfile(data),

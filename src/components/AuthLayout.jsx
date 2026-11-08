@@ -6,6 +6,7 @@ import { useNavigate } from 'react-router-dom';
 import { Box, Typography, ButtonBase, GlobalStyles } from '@mui/material';
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
 import { enter } from './authStyles';
+import { t } from "../i18n";
 
 const ORANGE = '#ff4500';
 const INK = '#202020';
@@ -47,7 +48,7 @@ function RoomSquares() {
   return (
     <Box
       role="img"
-      aria-label="Rooms in a dormitory, coloured by how full they are"
+      aria-label={t("Rooms in a dormitory, coloured by how full they are")}
       sx={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: { md: 1.5, lg: 2 }, width: '100%', maxWidth: 300, mx: 'auto' }}
     >
       {ROOMS.map((status, i) => (
@@ -99,7 +100,7 @@ function BackHome() {
       }}
     >
       <ArrowBackRoundedIcon sx={{ fontSize: 16 }} />
-      Home
+      {t("Home")}
     </ButtonBase>
   );
 }
@@ -145,7 +146,7 @@ export default function AuthLayout({ title, subtitle, lit, children }) {
           <Box sx={{ display: 'flex', alignItems: 'center', gap: { xs: 1, md: 1.25 }, minWidth: 0 }}>
             <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt="" aria-hidden="true" sx={{ display: 'block', height: { xs: 32, md: 40 }, width: { xs: 32, md: 40 }, flexShrink: 0 }} />
             <Typography component="span" sx={{ fontFamily: HEAD, fontWeight: 800, letterSpacing: '-0.02em', fontSize: { xs: 18, md: 21 }, color: '#fff', whiteSpace: 'nowrap' }}>
-              Kwarto<Box component="span" sx={{ color: ORANGE }}>Keeper</Box>
+              {t("Kwarto")}<Box component="span" sx={{ color: ORANGE }}>{t("Keeper")}</Box>
             </Typography>
           </Box>
           <BackHome />

@@ -47,14 +47,16 @@ import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
 import { useAuth } from "../../../context/AuthContext";
 import { emailCaretakerResetLink } from "../../../services/caretakerService";
 import { isRemovedAccount, removedLabel } from "../../../utils/accountState";
+import CaretakerActivity from "./CaretakerActivity";
+import { t } from "../../../i18n";
 
 // Same wording as the Invite caretaker form
 const PERMISSIONS = [
-  { key: "manageTenants", label: "Manage tenants", desc: "Register tenants and assign rooms", icon: PeopleAltOutlinedIcon },
-  { key: "logOccupancy", label: "Log occupancy", desc: "Daily occupancy and curfew checks", icon: NightsStayOutlinedIcon },
-  { key: "handleReports", label: "Handle reports", desc: "Receive and update repair reports", icon: BuildOutlinedIcon },
-  { key: "viewFinancials", label: "View financials", desc: "See rent payments and record cash payments", icon: PaymentsOutlinedIcon },
-  { key: "modifyLayout", label: "Modify layout", desc: "Change rooms, beds and rates", icon: MeetingRoomOutlinedIcon },
+  { key: "manageTenants", label: t("Manage tenants"), desc: "Register tenants and assign rooms", icon: PeopleAltOutlinedIcon },
+  { key: "logOccupancy", label: t("Log occupancy"), desc: "Daily occupancy and curfew checks", icon: NightsStayOutlinedIcon },
+  { key: "handleReports", label: t("Handle reports"), desc: "Receive and update repair reports", icon: BuildOutlinedIcon },
+  { key: "viewFinancials", label: t("View financials"), desc: "See rent payments and record cash payments", icon: PaymentsOutlinedIcon },
+  { key: "modifyLayout", label: t("Modify layout"), desc: "Change rooms, beds and rates", icon: MeetingRoomOutlinedIcon },
 ];
 const EMPTY_PERMISSIONS = Object.fromEntries(PERMISSIONS.map((p) => [p.key, false]));
 
@@ -298,9 +300,11 @@ export default function CaretakerDetail() {
         if (caretakerSnap.exists()) {
           await updateDoc(caretakerDocRef, updatedPayload);
         } else {
-          const byUser = await getDocs(query(collection(db, "caretakers"), where("userId", "==", caretakerId)));
+          // Only the owner's own caretaker records can be read (database rules)
+          const mine = where("ownerUid", "==", ownerUid);
+          const byUser = await getDocs(query(collection(db, "caretakers"), mine, where("userId", "==", caretakerId)));
           const target = byUser.empty
-            ? await getDocs(query(collection(db, "caretakers"), where("email", "==", (caretaker.email || "").trim().toLowerCase())))
+            ? await getDocs(query(collection(db, "caretakers"), mine, where("email", "==", (caretaker.email || "").trim().toLowerCase())))
             : byUser;
           if (!target.empty) await updateDoc(doc(db, "caretakers", target.docs[0].id), updatedPayload);
         }
@@ -327,12 +331,12 @@ export default function CaretakerDetail() {
   if (!caretakerId || error || (!loading && !caretaker)) {
     return (
       <Box sx={{ maxWidth: 520, mx: "auto", mt: { xs: 4, md: 8 }, textAlign: "center", px: 2 }}>
-        <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.2rem", mb: 0.5 }}>Can't open this caretaker</Typography>
+        <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.2rem", mb: 0.5 }}>{t("Can't open this caretaker")}</Typography>
         <Typography color="text.secondary" sx={{ mb: 3 }}>
-          {!caretakerId ? "This link is missing the caretaker." : error || "Caretaker details are unavailable."}
+          {!caretakerId ? t("This link is missing the caretaker.") : error || t("Caretaker details are unavailable.")}
         </Typography>
         <Button variant="contained" startIcon={<ArrowBackIcon />} onClick={() => navigate("/owner/caretakers")} sx={{ fontWeight: 700, borderRadius: R.sm }}>
-          Back to caretakers
+          {t("Back to caretakers")}
         </Button>
       </Box>
     );
@@ -365,7 +369,7 @@ export default function CaretakerDetail() {
   const tiles = [
     {
       icon: HomeWorkOutlinedIcon,
-      label: "Assigned property",
+      label: t("Assigned property"),
       value: property ? propertyNameOf(property) : propertyMissing ? "Property unavailable" : "Not assigned",
       sub: property ? formatPropertyAddress(property) : propertyMissing ? "The property couldn't be found" : "Assign one with Edit details",
       warn: !property,
@@ -373,14 +377,14 @@ export default function CaretakerDetail() {
     },
     {
       icon: SecurityOutlinedIcon,
-      label: "Access",
+      label: t("Access"),
       value: `${grantedCount} of ${permissionList.length} permissions`,
       sub: grantedCount === 0 ? "They can't do anything yet" : grantedCount === permissionList.length ? "Full access" : "Limited access",
       warn: grantedCount === 0,
     },
     {
       icon: isPending ? MarkEmailUnreadOutlinedIcon : VerifiedUserOutlinedIcon,
-      label: "Account",
+      label: t("Account"),
       value: isPending ? "Hasn't signed in yet" : "Signed in",
       sub: [addedOn && `Added ${addedOn}`, formatDate(caretaker.updatedAt) && `updated ${formatDate(caretaker.updatedAt)}`].filter(Boolean).join(" · ") || "—",
       warn: isPending,
@@ -390,7 +394,7 @@ export default function CaretakerDetail() {
   return (
     <Container maxWidth="lg" disableGutters sx={{ py: 0 }}>
       <Button startIcon={<ArrowBackIcon />} onClick={() => navigate("/owner/caretakers")} sx={{ mb: 1.25, ml: -1, color: "text.secondary", fontWeight: 600 }}>
-        Caretakers
+        {t("Caretakers")}
       </Button>
 
       {/* ───── Header: who, status, and the three key facts ───── */}
@@ -410,7 +414,7 @@ export default function CaretakerDetail() {
                 <Pill label={isPending ? "Not logged in yet" : "Active"} tone={isPending ? "warning" : "success"} />
               </Box>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, overflowWrap: "anywhere" }}>
-                Caretaker · {[caretaker.phone, caretaker.email].filter(Boolean).join(" · ") || "No contact details"}
+                {t("Caretaker ·")}{" "}{[caretaker.phone, caretaker.email].filter(Boolean).join(" · ") || t("No contact details")}
               </Typography>
             </Box>
           </Box>
@@ -426,10 +430,10 @@ export default function CaretakerDetail() {
               }}
               sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 42, px: 2, borderColor: "divider", bgcolor: "background.default", flex: { xs: 1, sm: "none" } }}
             >
-              Reset password
+              {t("Reset password")}
             </Button>
             <Button variant="contained" disableElevation startIcon={<EditOutlinedIcon />} onClick={handleOpenEdit} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 42, px: 2.5, flex: { xs: 1, sm: "none" } }}>
-              Edit details
+              {t("Edit details")}
             </Button>
           </Box>
         </Box>
@@ -472,13 +476,13 @@ export default function CaretakerDetail() {
 
       {isRemovedAccount(caretaker) && (
         <Alert severity="error" sx={{ mb: 2, borderRadius: "14px" }}>
-          <strong>{removedLabel(caretaker)}</strong> They no longer appear in lists, counts or announcements. Their records are kept for your history.
+          <strong>{removedLabel(caretaker)}</strong>{" "}{t("They no longer appear in lists, counts or announcements. Their records are kept for your history.")}
         </Alert>
       )}
 
       {isPending && !isRemovedAccount(caretaker) && (
         <Alert severity="info" icon={<MarkEmailUnreadOutlinedIcon />} sx={{ mb: 2.5, borderRadius: R.md }}>
-          {displayName} hasn't signed in yet. They log in with the email and temporary password from their invite, then set their own password.
+          {displayName}{" "}{t("hasn't signed in yet. They log in with the email and temporary password from their invite, then set their own password.")}
         </Alert>
       )}
 
@@ -490,14 +494,14 @@ export default function CaretakerDetail() {
               <SecurityOutlinedIcon sx={{ fontSize: 20 }} />
             </Box>
             <Box sx={{ minWidth: 0 }}>
-              <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.08rem" }}>What they can do</Typography>
+              <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.08rem" }}>{t("What they can do")}</Typography>
               <Typography variant="body2" color="text.secondary">
-                {grantedCount === 0 ? "Nothing yet. Turn on what they should handle." : `${grantedCount} of ${permissionList.length} allowed`}
+                {grantedCount === 0 ? t("Nothing yet. Turn on what they should handle.") : `${grantedCount} of ${permissionList.length} allowed`}
               </Typography>
             </Box>
           </Box>
           <Button size="small" startIcon={<EditOutlinedIcon />} onClick={handleOpenEdit} sx={{ fontWeight: 700, flexShrink: 0 }}>
-            Change
+            {t("Change")}
           </Button>
         </Box>
 
@@ -531,13 +535,16 @@ export default function CaretakerDetail() {
                 </Box>
                 <Box sx={{ ...row, gap: 0.5, flexShrink: 0, fontSize: 12.5, fontWeight: 700, color: on ? "success.dark" : "text.disabled" }}>
                   {on && <CheckIcon sx={{ fontSize: 16 }} />}
-                  {on ? "Allowed" : "Off"}
+                  {on ? t("Allowed") : t("Off")}
                 </Box>
               </Box>
             );
           })}
         </Box>
       </Box>
+
+      {/* ───── What they changed (activity log) ───── */}
+      <CaretakerActivity ownerUid={ownerUid} caretakerId={caretakerId} panelSx={panelSx} />
 
       {/* ───── Edit dialog (full-screen on phones) ───── */}
       <Dialog
@@ -557,13 +564,13 @@ export default function CaretakerDetail() {
             </Avatar>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block", lineHeight: 1.2 }}>
-                Edit caretaker
+                {t("Edit caretaker")}
               </Typography>
               <Typography noWrap sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.2rem", letterSpacing: "-0.01em" }}>
-                {formData.name || "Unnamed caretaker"}
+                {formData.name || t("Unnamed caretaker")}
               </Typography>
             </Box>
-            <IconButton onClick={() => setOpenEdit(false)} aria-label="Close" disabled={saving} sx={{ bgcolor: "action.hover" }}>
+            <IconButton onClick={() => setOpenEdit(false)} aria-label={t("Close")} disabled={saving} sx={{ bgcolor: "action.hover" }}>
               <CloseIcon />
             </IconButton>
           </Box>
@@ -577,23 +584,23 @@ export default function CaretakerDetail() {
           )}
 
           <Box sx={{ px: { xs: 2, sm: 3 } }}>
-            <FormSection first icon={PersonOutlineOutlinedIcon} title="Contact" description="How you and the tenants reach them.">
+            <FormSection first icon={PersonOutlineOutlinedIcon} title={t("Contact")} description="How you and the tenants reach them.">
               <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <TextField required label="Full name" name="name" value={formData.name} onChange={handleChange} fullWidth error={Boolean(formErrors.name)} helperText={formErrors.name || ""} />
+                <TextField required label={t("Full name")} name="name" value={formData.name} onChange={handleChange} fullWidth error={Boolean(formErrors.name)} helperText={formErrors.name || ""} />
                 <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
-                  <TextField label="Phone number" name="phone" type="tel" value={formData.phone} onChange={handleChange} fullWidth error={Boolean(formErrors.phone)} helperText={formErrors.phone || ""} />
-                  <TextField label="Email address" name="email" type="email" value={formData.email} onChange={handleChange} fullWidth error={Boolean(formErrors.email)} helperText={formErrors.email || ""} />
+                  <TextField label={t("Phone number")} name="phone" type="tel" value={formData.phone} onChange={handleChange} fullWidth error={Boolean(formErrors.phone)} helperText={formErrors.phone || ""} />
+                  <TextField label={t("Email address")} name="email" type="email" value={formData.email} onChange={handleChange} fullWidth error={Boolean(formErrors.email)} helperText={formErrors.email || ""} />
                 </Box>
                 <Typography variant="caption" color="text.secondary">
-                  Changing the email here updates their profile only. They still sign in with the email from their invite.
+                  {t("Changing the email here updates their profile only. They still sign in with the email from their invite.")}
                 </Typography>
               </Box>
             </FormSection>
 
-            <FormSection icon={HomeWorkOutlinedIcon} title="Property" description="The one property they look after.">
+            <FormSection icon={HomeWorkOutlinedIcon} title={t("Property")} description="The one property they look after.">
               <TextField
                 select
-                label="Assigned property"
+                label={t("Assigned property")}
                 name="assignedPropertyId"
                 value={formData.assignedPropertyId}
                 onChange={handleChange}
@@ -601,7 +608,7 @@ export default function CaretakerDetail() {
                 slotProps={{ select: { displayEmpty: true }, inputLabel: { shrink: true } }}
                 helperText={!formData.assignedPropertyId ? "Without a property they can't see any tenants or rooms." : ""}
               >
-                <MenuItem value="">Not assigned</MenuItem>
+                <MenuItem value="">{t("Not assigned")}</MenuItem>
                 {ownerProperties.map((prop) => (
                   <MenuItem key={prop.id} value={prop.id}>
                     {propertyNameOf(prop)}
@@ -610,17 +617,17 @@ export default function CaretakerDetail() {
               </TextField>
             </FormSection>
 
-            <FormSection icon={SecurityOutlinedIcon} title="Permissions" description="Turn on only what they need. You can change this any time.">
+            <FormSection icon={SecurityOutlinedIcon} title={t("Permissions")} description="Turn on only what they need. You can change this any time.">
               <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 1 }}>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  {formGranted} of {PERMISSIONS.length} allowed
+                  {formGranted}{" "}{t("of")}{" "}{PERMISSIONS.length}{" "}{t("allowed")}
                 </Typography>
                 <Box sx={{ display: "flex", gap: 0.5 }}>
                   <Button size="small" onClick={() => setAllPermissions(true)} disabled={formGranted === PERMISSIONS.length} sx={{ fontWeight: 700 }}>
-                    Allow all
+                    {t("Allow all")}
                   </Button>
                   <Button size="small" color="inherit" onClick={() => setAllPermissions(false)} disabled={formGranted === 0} sx={{ fontWeight: 700 }}>
-                    None
+                    {t("None")}
                   </Button>
                 </Box>
               </Box>
@@ -662,7 +669,7 @@ export default function CaretakerDetail() {
 
         <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 1.75, gap: 1, borderTop: "1px solid", borderColor: "divider", bgcolor: (t) => alpha(t.palette.background.paper, 0.35) }}>
           <Button onClick={() => setOpenEdit(false)} color="inherit" disabled={saving} sx={{ fontWeight: 700, borderRadius: R.sm, flex: { xs: 1, sm: "none" } }}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button
             variant="contained"
@@ -672,7 +679,7 @@ export default function CaretakerDetail() {
             startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <SaveOutlinedIcon />}
             sx={{ px: 3, fontWeight: 700, borderRadius: R.sm, flex: { xs: 1, sm: "none" } }}
           >
-            {saving ? "Saving…" : "Save changes"}
+            {saving ? t("Saving…") : t("Save changes")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -690,10 +697,10 @@ export default function CaretakerDetail() {
             <LockResetOutlinedIcon />
           </Box>
           <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.2rem", lineHeight: 1.3 }}>
-            Send {caretaker?.name || caretaker?.fullName || "this caretaker"} a password reset link?
+            {t("Send")}{" "}{caretaker?.name || caretaker?.fullName || t("this caretaker")}{" "}{t("a password reset link?")}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75 }}>
-            The first temporary password was only shown once, so it can&apos;t be sent again. Instead, they get an email with a link to choose a new password themselves.
+            {t("The first temporary password was only shown once, so it can't be sent again. Instead, they get an email with a link to choose a new password themselves.")}
           </Typography>
         </Box>
         <DialogContent sx={{ pt: 1.5 }}>
@@ -705,17 +712,17 @@ export default function CaretakerDetail() {
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
             <Box sx={{ p: 1.75, borderRadius: R.md, border: "1px solid", borderColor: "divider", bgcolor: (t) => alpha(t.palette.background.paper, 0.35) }}>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block" }}>
-                Sent to
+                {t("Sent to")}
               </Typography>
-              <Typography sx={{ fontWeight: 800, fontSize: 15, overflowWrap: "anywhere" }}>{caretaker?.email || "No email on file"}</Typography>
+              <Typography sx={{ fontWeight: 800, fontSize: 15, overflowWrap: "anywhere" }}>{caretaker?.email || t("No email on file")}</Typography>
               <Box component="ol" sx={{ m: 0, mt: 1.25, pl: 2.25, display: "grid", gap: 0.4, color: "text.secondary", fontSize: 13.5 }}>
-                <li>They open the email (check Spam too) and tap the link.</li>
-                <li>They choose a new password.</li>
-                <li>They sign in with it. Their old password stops working.</li>
+                <li>{t("They open the email (check Spam too) and tap the link.")}</li>
+                <li>{t("They choose a new password.")}</li>
+                <li>{t("They sign in with it. Their old password stops working.")}</li>
               </Box>
               {!caretaker?.email && (
                 <Typography variant="caption" color="error" sx={{ display: "block", mt: 1 }}>
-                  Add their email with Edit details first.
+                  {t("Add their email with Edit details first.")}
                 </Typography>
               )}
               <Button
@@ -727,14 +734,14 @@ export default function CaretakerDetail() {
                 onClick={sendResetLink}
                 sx={{ mt: 1.25, fontWeight: 700, borderRadius: R.sm, minHeight: 42 }}
               >
-                {resetBusy === "email" ? "Sending…" : "Send reset link"}
+                {resetBusy === "email" ? t("Sending…") : t("Send reset link")}
               </Button>
             </Box>
           </Box>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2.5 }}>
           <Button color="inherit" onClick={() => setResetOpen(false)} disabled={Boolean(resetBusy)} sx={{ fontWeight: 700 }}>
-            Cancel
+            {t("Cancel")}
           </Button>
         </DialogActions>
       </Dialog>

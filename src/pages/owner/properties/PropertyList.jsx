@@ -31,6 +31,7 @@ import { onAuthStateChanged } from "firebase/auth";
 import { getPropertyCoverPhotoUrl } from "../../../utils/getPropertyCoverPhotoUrl";
 import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
 import { occupancyOf as bedOccupancy } from "../../../utils/occupancy";
+import { t } from "../../../i18n";
 
 const INK = "#202020";
 const ORANGE = "#ff4500";
@@ -87,10 +88,10 @@ function MiniSquares({ pct }) {
 function PortfolioHeader({ totals, total, onAdd, loading }) {
   const open = Math.max(totals.beds - totals.occupied, 0);
   const tiles = [
-    { label: "Properties", icon: <HomeWorkOutlinedIcon />, value: totals.activeCount, suffix: totals.activeCount !== total ? `of ${total}` : "" },
-    { label: "Beds filled", icon: <BedOutlinedIcon />, value: totals.occupied, suffix: `/ ${totals.beds}` },
-    { label: "Beds open", icon: <MeetingRoomOutlinedIcon />, value: open, accent: open > 0 },
-    { label: "Occupancy", icon: <PieChartOutlineRoundedIcon />, value: `${totals.pct}%`, squares: true },
+    { label: t("Properties"), icon: <HomeWorkOutlinedIcon />, value: totals.activeCount, suffix: totals.activeCount !== total ? `of ${total}` : "" },
+    { label: t("Beds filled"), icon: <BedOutlinedIcon />, value: totals.occupied, suffix: `/ ${totals.beds}` },
+    { label: t("Beds open"), icon: <MeetingRoomOutlinedIcon />, value: open, accent: open > 0 },
+    { label: t("Occupancy"), icon: <PieChartOutlineRoundedIcon />, value: `${totals.pct}%`, squares: true },
   ];
 
   return (
@@ -103,7 +104,7 @@ function PortfolioHeader({ totals, total, onAdd, loading }) {
 
       <Box sx={{ position: "relative", display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: { xs: "stretch", sm: "center" }, justifyContent: "space-between", gap: { xs: 1.5, sm: 2 }, mb: { xs: 2, sm: 2.5 } }}>
         <Typography color="text.secondary" sx={{ minWidth: 0, fontSize: { xs: 14, sm: 15 } }}>
-          Manage buildings, rooms, and bed capacity
+          {t("Manage buildings, rooms, and bed capacity")}
         </Typography>
         <Button
           variant="contained"
@@ -111,7 +112,7 @@ function PortfolioHeader({ totals, total, onAdd, loading }) {
           onClick={onAdd}
           sx={{ flexShrink: 0, fontWeight: 700, borderRadius: R.sm, minHeight: 44, boxShadow: "0 10px 22px -14px rgba(255,69,0,.9)" }}
         >
-          Add Property
+          {t("Add Property")}
         </Button>
       </Box>
 
@@ -191,7 +192,6 @@ function PropertyTile({ p, onOpen }) {
       onClick={onOpen}
       role="link"
       tabIndex={0}
-      aria-label={`Open ${propertyName}`}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
           e.preventDefault();
@@ -238,11 +238,11 @@ function PropertyTile({ p, onOpen }) {
         {/* type + status labels */}
         <Box sx={{ position: "absolute", top: 10, left: 10, right: 10, ...row, gap: 0.75, flexWrap: "wrap" }}>
           <Box sx={{ px: 1, py: 0.3, borderRadius: "6px", bgcolor: "rgba(255,255,255,.94)", fontSize: 11.5, fontWeight: 700, color: INK }}>
-            {p.propertyType || "Dormitory"}
+            {p.propertyType || t("Dormitory")}
           </Box>
           {inactive && (
             <Box sx={{ px: 1, py: 0.3, borderRadius: "6px", bgcolor: "rgba(32,32,32,.88)", border: "1px solid rgba(255,255,255,.25)", fontSize: 11.5, fontWeight: 700, color: "#fff" }}>
-              Inactive
+              {t("Inactive")}
             </Box>
           )}
         </Box>
@@ -291,7 +291,7 @@ function PropertyTile({ p, onOpen }) {
             <>
               <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 0.75 }}>
                 <Typography variant="caption" sx={{ fontWeight: 600, color: "text.secondary" }}>
-                  {p.occupiedBeds || 0} of {p.totalBeds} beds occupied
+                  {p.occupiedBeds || 0}{" "}{t("of")}{" "}{p.totalBeds}{" "}{t("beds occupied")}
                 </Typography>
                 <Typography variant="caption" sx={{ fontWeight: 800 }}>
                   {occ}%
@@ -306,7 +306,7 @@ function PropertyTile({ p, onOpen }) {
             </>
           ) : (
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-              No beds set up yet
+              {t("No beds set up yet")}
             </Typography>
           )}
         </Box>
@@ -337,9 +337,9 @@ function AddTile({ onAdd }) {
       <Box sx={{ width: 52, height: 52, borderRadius: R.md, display: "grid", placeItems: "center", bgcolor: "rgba(255,69,0,.1)", color: "primary.main" }}>
         <AddHomeWorkOutlinedIcon />
       </Box>
-      <Typography sx={{ fontFamily: HEAD, fontWeight: 800, color: "inherit" }}>Add a property</Typography>
+      <Typography sx={{ fontFamily: HEAD, fontWeight: 800, color: "inherit" }}>{t("Add a property")}</Typography>
       <Typography variant="caption" sx={{ color: "text.secondary", maxWidth: 220, textAlign: "center" }}>
-        Set up its rooms and beds in a few steps
+        {t("Set up its rooms and beds in a few steps")}
       </Typography>
     </ButtonBase>
   );
@@ -530,13 +530,13 @@ export default function PropertyList() {
           <SearchIcon sx={{ color: "text.secondary" }} />
           <InputBase
             fullWidth
-            placeholder="Search by name, type or address"
+            placeholder={t("Search by name, type or address")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             inputProps={{ "aria-label": "Search properties" }}
           />
           {search && (
-            <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
+            <IconButton size="small" aria-label={t("Clear search")} onClick={() => setSearch("")}>
               <CloseIcon fontSize="small" />
             </IconButton>
           )}
@@ -554,26 +554,26 @@ export default function PropertyList() {
           <Box sx={{ width: 64, height: 64, borderRadius: R.md, mx: "auto", mb: 2, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
             <HomeWorkOutlinedIcon sx={{ fontSize: 32, color: "primary.main" }} />
           </Box>
-          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 0.5 }}>No properties yet</Typography>
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 0.5 }}>{t("No properties yet")}</Typography>
           <Typography color="text.secondary" variant="body2" sx={{ mb: 2.5 }}>
-            Add your first property to start tracking rooms, beds, and tenants.
+            {t("Add your first property to start tracking rooms, beds, and tenants.")}
           </Typography>
           <Button variant="contained" startIcon={<AddIcon />} onClick={addProperty} sx={{ fontWeight: 700, borderRadius: R.sm }}>
-            Add Property
+            {t("Add Property")}
           </Button>
         </Paper>
       ) : filtered.length === 0 ? (
         <Paper elevation={0} sx={{ ...panelSx, py: 5, px: 2, textAlign: "center" }}>
-          <Typography sx={{ fontWeight: 700, overflowWrap: "anywhere" }}>No matches for “{search}”</Typography>
+          <Typography sx={{ fontWeight: 700, overflowWrap: "anywhere" }}>{t("No matches for “")}{search}”</Typography>
           <Button size="small" onClick={() => setSearch("")} sx={{ mt: 1 }}>
-            Clear search
+            {t("Clear search")}
           </Button>
         </Paper>
       ) : (
         <>
           {search && (
             <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
-              {filtered.length} of {properties.length} properties
+              {filtered.length}{" "}{t("of")}{" "}{properties.length}{" "}{t("properties")}
             </Typography>
           )}
           <Box sx={GRID}>

@@ -8,7 +8,8 @@
 // opening the form never counts as an unsaved change.
 import { useEffect, useState } from "react";
 import { Box, TextField, MenuItem, CircularProgress, InputAdornment } from "@mui/material";
-import { regions, provinces, cities, barangays } from "select-philippines-address";
+import { regions, provinces, cities, barangays } from "../utils/phAddress";
+import { t } from "../i18n";
 
 // The package returns an error message string instead of a list on failure
 const asList = (res) => (Array.isArray(res) ? res : []);
@@ -167,7 +168,7 @@ export default function AddressFields({ value, onChange, fieldSx, columns, error
         <TextField
           select
           fullWidth
-          label="Region"
+          label={t("Region")}
           value={regionList && regionCode ? regionCode : ""}
           onChange={handleRegion}
           disabled={!regionList?.length}
@@ -184,7 +185,7 @@ export default function AddressFields({ value, onChange, fieldSx, columns, error
         <TextField
           select
           fullWidth
-          label="Province"
+          label={t("Province")}
           value={provinceList.length && provinceCode ? provinceCode : ""}
           onChange={handleProvince}
           disabled={!regionCode || !provinceList.length}
@@ -201,7 +202,7 @@ export default function AddressFields({ value, onChange, fieldSx, columns, error
         <TextField
           select
           fullWidth
-          label="City / municipality"
+          label={t("City / municipality")}
           value={cityList.length && cityCode ? cityCode : ""}
           onChange={handleCity}
           disabled={!provinceCode || !cityList.length}
@@ -218,7 +219,7 @@ export default function AddressFields({ value, onChange, fieldSx, columns, error
         <TextField
           select
           fullWidth
-          label="Barangay"
+          label={t("Barangay")}
           value={barangayOptions.length ? value.barangay || "" : ""}
           onChange={handleBarangay}
           disabled={!cityCode || !barangayOptions.length}
@@ -235,8 +236,8 @@ export default function AddressFields({ value, onChange, fieldSx, columns, error
 
       <TextField
         fullWidth
-        label="Street / building no."
-        placeholder="House/bldg no., street, subdivision"
+        label={t("Street / building no.")}
+        placeholder={t("House/bldg no., street, subdivision")}
         value={value.street || ""}
         onChange={(e) => onChange({ street: e.target.value })}
         error={Boolean(errors.street)}

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
+import PageBoundary from "../components/PageBoundary";
 import {
   Box,
   Drawer,
@@ -40,6 +41,10 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, onSnapshot } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
 import { ownerAccessOf } from "../utils/ownerAccess";
+import { checkLeaseEndsOnOwnerAppOpen } from "../utils/leaseEndNotifications";
+import { checkRentOnOwnerAppOpen } from "../utils/rentReminders";
+import { t } from "../i18n";
+import LanguageSwitch from "../components/LanguageSwitch";
 
 const drawerWidth = 288;
 const BAR_H = { xs: 56, md: 72 }; // shared by the top bar and the sidebar header so their dividers line up
@@ -92,29 +97,29 @@ const BOTTOM_NAV_PATHS = ["/owner", "/owner/properties", "/owner/tenants", "/own
 const MENU_GROUPS = [
   {
     heading: null,
-    items: [{ text: "Overview", path: "/owner", aliases: ["/owner/dashboard"], icon: <DashboardOutlinedIcon /> }],
+    items: [{ text: t("Overview"), path: "/owner", aliases: ["/owner/dashboard"], icon: <DashboardOutlinedIcon /> }],
   },
   {
     heading: "Manage",
     items: [
-      { text: "Properties", path: "/owner/properties", icon: <HomeWorkOutlinedIcon /> },
-      { text: "Tenants", path: "/owner/tenants", icon: <PeopleOutlinedIcon /> },
-      { text: "Caretakers", path: "/owner/caretakers", icon: <AssignmentIndOutlinedIcon /> },
+      { text: t("Properties"), path: "/owner/properties", icon: <HomeWorkOutlinedIcon /> },
+      { text: t("Tenants"), path: "/owner/tenants", icon: <PeopleOutlinedIcon /> },
+      { text: t("Caretakers"), path: "/owner/caretakers", icon: <AssignmentIndOutlinedIcon /> },
     ],
   },
   {
     heading: "Money & upkeep",
     items: [
-      { text: "Payments", path: "/owner/payments", icon: <PaymentsOutlinedIcon /> },
-      { text: "Maintenance", path: "/owner/maintenance", icon: <BuildOutlinedIcon /> },
-      { text: "Reports", path: "/owner/reports", icon: <AssessmentOutlinedIcon /> },
+      { text: t("Payments"), path: "/owner/payments", icon: <PaymentsOutlinedIcon /> },
+      { text: t("Maintenance"), path: "/owner/maintenance", icon: <BuildOutlinedIcon /> },
+      { text: t("Reports"), path: "/owner/reports", icon: <AssessmentOutlinedIcon /> },
     ],
   },
   {
     heading: "Other",
     items: [
-      { text: "Announcements", path: "/owner/announcements", icon: <CampaignOutlinedIcon /> },
-      { text: "Account", path: "/owner/account", icon: <ManageAccountsOutlinedIcon /> },
+      { text: t("Announcements"), path: "/owner/announcements", icon: <CampaignOutlinedIcon /> },
+      { text: t("Account"), path: "/owner/account", icon: <ManageAccountsOutlinedIcon /> },
     ],
   },
 ];
@@ -127,8 +132,8 @@ const PENDING_GROUPS = [
     heading: null,
     items: [
       MENU_GROUPS[0].items[0],
-      { text: "Property setup", path: "/setup", icon: <AddHomeWorkOutlinedIcon /> },
-      { text: "Account", path: "/owner/account", icon: <ManageAccountsOutlinedIcon /> },
+      { text: t("Property setup"), path: "/setup", icon: <AddHomeWorkOutlinedIcon /> },
+      { text: t("Account"), path: "/owner/account", icon: <ManageAccountsOutlinedIcon /> },
     ],
   },
 ];
@@ -160,6 +165,10 @@ export default function OwnerLayout() {
         setApprovalStatus("");
         return;
       }
+      // Lease-end reminders (30, 7, 3 days and the day itself), once a day when the app opens
+      checkLeaseEndsOnOwnerAppOpen(user.uid, user.uid).catch((error) => console.warn("Unable to check lease-end notifications:", error?.code || error));
+      // Who's overdue on rent (at most one note a week)
+      checkRentOnOwnerAppOpen(user.uid).catch((error) => console.warn("Unable to check rent reminders:", error?.code || error));
       unsubProfile = onSnapshot(
         doc(db, "users", user.uid),
         (snapshot) => {
@@ -223,14 +232,14 @@ export default function OwnerLayout() {
         <Box
           component="img"
           src="/KwartoKeeper-Secondary-Logo.png"
-          alt="KwartoKeeper"
+          alt={t("KwartoKeeper")}
           sx={{ display: "block", height: { xs: 34, md: 44 }, maxWidth: "100%", width: "auto", objectFit: "contain" }}
         />
       </Toolbar>
       <Divider />
 
       {/* Main navigation */}
-      <Box component="nav" aria-label="Owner pages" sx={{ flexGrow: 1, overflowY: "auto", py: 1.5 }}>
+      <Box component="nav" aria-label={t("Owner pages")} sx={{ flexGrow: 1, overflowY: "auto", py: 1.5 }}>
         {groups.map((group, gIdx) => (
           <Box key={group.heading || gIdx} sx={{ mt: gIdx ? 1.5 : 0 }}>
             {group.heading && (
@@ -283,36 +292,37 @@ export default function OwnerLayout() {
             <HourglassTopRoundedIcon sx={{ fontSize: 20, color: "warning.main", mt: "1px" }} />
             <Box>
               <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                {isRejectedOwner ? "Documents declined" : "Pending approval"}
+                {isRejectedOwner ? t("Documents declined") : t("Pending approval")}
               </Typography>
               <Typography variant="caption" color="text.secondary" sx={{ display: "block", lineHeight: 1.45 }}>
                 {isRejectedOwner
-                  ? "Upload new documents from your dashboard or Account. The rest of the menu unlocks once they're approved."
-                  : "The rest of the menu unlocks as soon as an admin approves your account."}
+                  ? t("Upload new documents from your dashboard or Account. The rest of the menu unlocks once they're approved.")
+                  : t("The rest of the menu unlocks as soon as an admin approves your account.")}
               </Typography>
             </Box>
           </Box>
         )}
       </Box>
 
-      {/* Signed-in owner + log out */}
+      {/* Language, signed-in owner + log out (the same panel opens from Menu on phones) */}
       <Divider />
       <Box sx={{ p: 1.5, pb: "calc(12px + env(safe-area-inset-bottom, 0px))" }}>
+        <LanguageSwitch sx={{ mb: 1.25, width: "100%", "& > button": { flex: 1 } }} />
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, p: 1, borderRadius: "12px", bgcolor: (theme) => alpha(theme.palette.background.paper, 0.6) }}>
           <Avatar sx={{ width: 38, height: 38, bgcolor: "primary.main", color: "#fff", fontFamily: HEAD, fontWeight: 800, fontSize: 14 }}>
             {initialsOf(profile.name)}
           </Avatar>
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography variant="body2" noWrap sx={{ fontWeight: 700 }}>
-              {profile.name || "Owner"}
+              {profile.name || t("Owner")}
             </Typography>
             <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-              {profile.email || "Owner account"}
+              {profile.email || t("Owner account")}
             </Typography>
           </Box>
-          <Tooltip title="Log out">
+          <Tooltip title={t("Log out")}>
             <IconButton
-              aria-label="Log out"
+              aria-label={t("Log out")}
               onClick={handleLogout}
               sx={{ color: "error.main", flexShrink: 0, "&:hover": { bgcolor: "rgba(211, 47, 47, 0.08)" } }}
             >
@@ -346,12 +356,13 @@ export default function OwnerLayout() {
           <Box
             component="img"
             src="/KwartoKeeper-Icon.png"
-            alt="KwartoKeeper"
+            alt={t("KwartoKeeper")}
             sx={{ display: { xs: "block", md: "none" }, height: 30, width: 30, flexShrink: 0 }}
           />
+          {/* The page's main heading for screen readers (the overview has its own) */}
           {currentTitle && (
             <Typography
-              component="div"
+              component="h1"
               noWrap
               sx={{ minWidth: 0, fontFamily: HEAD, fontWeight: 800, letterSpacing: "-0.01em", fontSize: { xs: "1.1rem", md: "1.3rem" } }}
             >
@@ -403,7 +414,9 @@ export default function OwnerLayout() {
         }}
       >
         <Box sx={{ height: BAR_H, mt: "env(safe-area-inset-top, 0px)" }} />
-        <Outlet />
+        <PageBoundary>
+          <Outlet />
+        </PageBoundary>
       </Box>
 
       {/* Phone-only bottom navigation */}
@@ -448,7 +461,7 @@ export default function OwnerLayout() {
           {bottomItems.map((item) => (
             <BottomNavigationAction key={item.text} label={item.text} icon={item.icon} />
           ))}
-          <BottomNavigationAction label="Menu" icon={<MenuIcon />} />
+          <BottomNavigationAction label={t("Menu")} icon={<MenuIcon />} />
         </BottomNavigation>
       </Paper>
     </Box>

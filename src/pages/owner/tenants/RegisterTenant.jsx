@@ -37,15 +37,17 @@ import {
   reconcilePropertyOccupancy,
 } from "../../../utils/reconcilePropertyOccupancy";
 import { isRoomUnderMaintenance, MAINTENANCE_ROOM_MESSAGE } from "../../../utils/roomStatus";
+import { findDuplicatePerson } from "../../../utils/duplicates";
+import { t } from "../../../i18n";
 
 // ---------------------------------------------------------------------------
 // Same layout as the property setup (PropertyWizard): dark sidebar with the
 // step list and dorm facade on the left, white content column on the right.
 // ---------------------------------------------------------------------------
 const STEPS = [
-  { title: "Tenant details", heading: "Who is moving in?", sub: "Contact details and a valid ID, so you can verify the tenant.", Icon: PersonOutlinedIcon },
-  { title: "Room & bed", heading: "Where will they stay?", sub: "Pick the property, room and bed to assign.", Icon: BedOutlinedIcon },
-  { title: "Lease terms", heading: "How long, and from when?", sub: "Set the lease, then review everything before registering.", Icon: EventNoteOutlinedIcon },
+  { title: t("Tenant details"), heading: "Who is moving in?", sub: t("Contact details and a valid ID, so you can verify the tenant."), Icon: PersonOutlinedIcon },
+  { title: t("Room & bed"), heading: "Where will they stay?", sub: t("Pick the property, room and bed to assign."), Icon: BedOutlinedIcon },
+  { title: t("Lease terms"), heading: "How long, and from when?", sub: t("Set the lease, then review everything before registering."), Icon: EventNoteOutlinedIcon },
 ];
 
 const MAX_ID_PHOTO_MB = 8;
@@ -83,7 +85,7 @@ function DormFacade() {
       width="100%"
       style={{ maxWidth: 220, display: "block" }}
       role="img"
-      aria-label="Illustration of a dormitory building at night, with illuminated windows"
+      aria-label={t("Illustration of a dormitory building at night, with illuminated windows")}
     >
       {windows.map((win, i) => (
         <rect
@@ -216,19 +218,19 @@ function Group({ icon, title, children }) {
 }
 
 const ID_TYPES = [
-  { value: "student_id", label: "Student ID" },
-  { value: "national_id", label: "National ID" },
-  { value: "drivers_license", label: "Driver's License" },
-  { value: "passport", label: "Passport" },
-  { value: "other", label: "Other Valid ID" },
+  { value: "student_id", label: t("Student ID") },
+  { value: "national_id", label: t("National ID") },
+  { value: "drivers_license", label: t("Driver's License") },
+  { value: "passport", label: t("Passport") },
+  { value: "other", label: t("Other Valid ID") },
 ];
 
 const LEASE_DURATIONS = [
-  { value: "1_month", label: "1 Month" },
-  { value: "3_months", label: "3 Months" },
-  { value: "6_months", label: "6 Months" },
-  { value: "12_months", label: "12 Months" },
-  { value: "custom", label: "Custom..." },
+  { value: "1_month", label: t("1 Month") },
+  { value: "3_months", label: t("3 Months") },
+  { value: "6_months", label: t("6 Months") },
+  { value: "12_months", label: t("12 Months") },
+  { value: "custom", label: t("Custom...") },
 ];
 
 function generateTempPassword() {
@@ -399,7 +401,7 @@ export default function RegisterTenant() {
     e.target.value = ""; // allows re-picking the same file
     if (!file) return;
     if (!file.type.startsWith("image/")) {
-      setProblem({ field: "idPhoto", message: "Please choose an image file (JPG or PNG)." });
+      setProblem({ field: "idPhoto", message: t("Please choose an image file (JPG or PNG).") });
       return;
     }
     if (file.size > MAX_ID_PHOTO_MB * 1024 * 1024) {
@@ -413,27 +415,27 @@ export default function RegisterTenant() {
   // Same rules as before, now checked one step at a time.
   const validateStep = (s) => {
     if (s === 0) {
-      if (!form.fullName.trim()) return { field: "fullName", message: "Full name is required." };
-      if (!form.email.trim()) return { field: "email", message: "Email is required." };
-      if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) return { field: "email", message: "Please enter a valid email address." };
-      if (!form.phone.trim()) return { field: "phone", message: "Mobile phone is required." };
-      if (!form.idType) return { field: "idType", message: "Please select an ID Type." };
-      if (!form.idNumber.trim()) return { field: "idNumber", message: "ID Number is required." };
-      if (!idPhotoFile) return { field: "idPhoto", message: "Please upload a photo of the ID." };
+      if (!form.fullName.trim()) return { field: "fullName", message: t("Full name is required.") };
+      if (!form.email.trim()) return { field: "email", message: t("Email is required.") };
+      if (!/^\S+@\S+\.\S+$/.test(form.email.trim())) return { field: "email", message: t("Please enter a valid email address.") };
+      if (!form.phone.trim()) return { field: "phone", message: t("Mobile phone is required.") };
+      if (!form.idType) return { field: "idType", message: t("Please select an ID Type.") };
+      if (!form.idNumber.trim()) return { field: "idNumber", message: t("ID Number is required.") };
+      if (!idPhotoFile) return { field: "idPhoto", message: t("Please upload a photo of the ID.") };
     }
     if (s === 1) {
-      if (!form.propertyId) return { field: "propertyId", message: "Please select a property." };
-      if (!form.roomId) return { field: "roomId", message: "Please select a room." };
+      if (!form.propertyId) return { field: "propertyId", message: t("Please select a property.") };
+      if (!form.roomId) return { field: "roomId", message: t("Please select a room.") };
       if (isRoomUnderMaintenance(rooms.find((r) => r.roomName === form.roomId))) {
         return { field: "roomId", message: MAINTENANCE_ROOM_MESSAGE };
       }
-      if (bedOptions.length > 0 && !form.bedId) return { field: "bedId", message: "Please assign a bed." };
+      if (bedOptions.length > 0 && !form.bedId) return { field: "bedId", message: t("Please assign a bed.") };
     }
     if (s === 2) {
-      if (!form.leaseStartDate) return { field: "leaseStartDate", message: "Lease start date is required." };
-      if (!form.leaseDuration) return { field: "leaseDuration", message: "Lease duration is required." };
+      if (!form.leaseStartDate) return { field: "leaseStartDate", message: t("Lease start date is required.") };
+      if (!form.leaseDuration) return { field: "leaseDuration", message: t("Lease duration is required.") };
       if (form.leaseDuration === "custom" && !form.customLeaseDuration.trim()) {
-        return { field: "customLeaseDuration", message: "Please specify the custom lease duration." };
+        return { field: "customLeaseDuration", message: t("Please specify the custom lease duration.") };
       }
     }
     return null;
@@ -444,12 +446,30 @@ export default function RegisterTenant() {
     scrollToTop();
   };
 
-  const handleNext = () => {
+  // Same mobile number or ID as one of the owner's current tenants or caretakers
+  const findDuplicate = () =>
+    findDuplicatePerson(auth.currentUser?.uid, { email: form.email, phone: form.phone, idType: form.idType, idNumber: form.idNumber }).catch((err) => {
+      console.warn("Duplicate check skipped:", err?.code || err);
+      return null;
+    });
+
+  const handleNext = async () => {
+    if (loading) return;
     const found = validateStep(step);
     if (found) {
       setProblem(found);
       scrollToTop();
       return;
+    }
+    if (step === 0) {
+      setLoading(true);
+      const dup = await findDuplicate();
+      setLoading(false);
+      if (dup) {
+        setProblem(dup);
+        scrollToTop();
+        return;
+      }
     }
     setProblem(null);
     goToStep(step + 1);
@@ -483,9 +503,18 @@ export default function RegisterTenant() {
       }
     }
     setProblem(null);
+    if (loading) return; // ignore double taps / double Enter
 
     setLoading(true);
     try {
+      // 1b. Nobody else already uses this number or ID (checked again: another tab may have added them)
+      const dup = await findDuplicate();
+      if (dup) {
+        setProblem(dup);
+        goToStep(0);
+        return;
+      }
+
       // 2. Re-check the room with the latest data before anything is uploaded
       //    or created: it may have filled up or been put under maintenance
       //    since this form was opened.
@@ -639,12 +668,12 @@ export default function RegisterTenant() {
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt="KwartoKeeper" sx={{ height: 28 }} />
+          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt={t("KwartoKeeper")} sx={{ height: 28 }} />
           <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 700, fontSize: "1rem", flex: 1 }}>
-            Register tenant
+            {t("Register tenant")}
           </Typography>
           <IconButton
-            aria-label="Cancel registration"
+            aria-label={t("Cancel registration")}
             onClick={() => navigate(-1)}
             disabled={loading}
             size="small"
@@ -657,7 +686,7 @@ export default function RegisterTenant() {
         {/* Mobile step indicator */}
         <Box sx={{ display: { xs: "block", md: "none" } }}>
           <Typography variant="body2" sx={{ color: "#cadcf6", mb: 1 }}>
-            Step {step + 1} of {STEPS.length} — {STEPS[step].title}
+            {t("Step")}{" "}{step + 1}{" "}{t("of")}{" "}{STEPS.length} — {STEPS[step].title}
           </Typography>
           <Box sx={{ display: "flex", gap: 0.75 }}>
             {STEPS.map(({ title }, i) => (
@@ -722,15 +751,15 @@ export default function RegisterTenant() {
                 {/* ---------------- STEP 1: TENANT ---------------- */}
                 {step === 0 && (
                   <>
-                    <FormRow label="Full name" required>
-                      <TextField fullWidth placeholder="e.g. Juan Dela Cruz" value={form.fullName} onChange={handleChange("fullName")} autoComplete="off" {...flag("fullName")} />
+                    <FormRow label={t("Full name")} required>
+                      <TextField fullWidth placeholder={t("e.g. Juan Dela Cruz")} value={form.fullName} onChange={handleChange("fullName")} autoComplete="off" {...flag("fullName")} />
                     </FormRow>
 
-                    <FormRow label="Email" required>
+                    <FormRow label={t("Email")} required>
                       <TextField fullWidth type="email" placeholder="name@example.com" value={form.email} onChange={handleChange("email")} autoComplete="off" {...flag("email")} />
                     </FormRow>
 
-                    <FormRow label="Mobile phone" required>
+                    <FormRow label={t("Mobile phone")} required>
                       <TextField
                         fullWidth
                         type="tel"
@@ -750,19 +779,19 @@ export default function RegisterTenant() {
                       />
                     </FormRow>
 
-                    <FormRow label="ID details" required top>
-                      <Group icon={<BadgeOutlinedIcon sx={{ fontSize: 18, color: "primary.main" }} />} title="A valid student or government ID">
-                        <TextField select fullWidth label="ID type" value={form.idType} onChange={handleChange("idType")} {...flag("idType")}>
+                    <FormRow label={t("ID details")} required top>
+                      <Group icon={<BadgeOutlinedIcon sx={{ fontSize: 18, color: "primary.main" }} />} title={t("A valid student or government ID")}>
+                        <TextField select fullWidth label={t("ID type")} value={form.idType} onChange={handleChange("idType")} {...flag("idType")}>
                           {ID_TYPES.map((opt) => (
                             <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
                           ))}
                         </TextField>
                         <TextField
                           fullWidth
-                          label="ID number"
+                          label={t("ID number")}
                           value={form.idNumber}
                           onChange={handleChange("idNumber")}
-                          helperText="Letters, numbers and hyphens only"
+                          helperText={t("Letters, numbers and hyphens only")}
                           {...flag("idNumber")}
                         />
 
@@ -782,7 +811,7 @@ export default function RegisterTenant() {
                             <Box
                               component="img"
                               ref={idPreviewRef}
-                              alt="ID preview"
+                              alt={t("ID preview")}
                               sx={{ width: 56, height: 56, borderRadius: "4px", objectFit: "cover", flexShrink: 0 }}
                             />
                             <Box sx={{ flex: 1, minWidth: 0 }}>
@@ -790,12 +819,12 @@ export default function RegisterTenant() {
                                 {idPhotoFile.name}
                               </Typography>
                               <Typography variant="caption" color="success.main" sx={{ display: "flex", alignItems: "center", gap: 0.5, fontWeight: 700 }}>
-                                <CheckIcon sx={{ fontSize: 14 }} /> ID photo added
+                                <CheckIcon sx={{ fontSize: 14 }} />{" "}{t("ID photo added")}
                               </Typography>
                             </Box>
                             <IconButton
                               size="small"
-                              aria-label="Remove ID photo"
+                              aria-label={t("Remove ID photo")}
                               onClick={() => setIdPhotoFile(null)}
                               sx={{ flexShrink: 0, "&:hover": { bgcolor: "rgba(255, 69, 0, 0.08)", color: "primary.main" } }}
                             >
@@ -806,6 +835,7 @@ export default function RegisterTenant() {
                           <Box>
                             <Button
                               component="label"
+                              role={undefined}
                               variant="outlined"
                               startIcon={<CloudUploadOutlinedIcon />}
                               sx={{
@@ -820,12 +850,12 @@ export default function RegisterTenant() {
                                 "&:hover": { borderColor: "primary.main", bgcolor: "background.paper" },
                               }}
                             >
-                              Upload ID photo
+                              {t("Upload ID photo")}
                               <Box component="span" sx={{ color: "primary.main", ml: 0.5 }}>*</Box>
                               <input type="file" accept="image/*" hidden onChange={handleIdPhoto} />
                             </Button>
                             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
-                              Required. A clear photo of the front, JPG or PNG up to {MAX_ID_PHOTO_MB} MB.
+                              {t("Required. A clear photo of the front, JPG or PNG up to")}{" "}{MAX_ID_PHOTO_MB} MB.
                             </Typography>
                           </Box>
                         )}
@@ -837,7 +867,7 @@ export default function RegisterTenant() {
                 {/* ---------------- STEP 2: ROOM & BED ---------------- */}
                 {step === 1 && (
                   <>
-                    <FormRow label="Property" required>
+                    <FormRow label={t("Property")} required>
                       <TextField
                         select
                         fullWidth
@@ -852,7 +882,7 @@ export default function RegisterTenant() {
                       </TextField>
                     </FormRow>
 
-                    <FormRow label="Room" required>
+                    <FormRow label={t("Room")} required>
                       <TextField
                         select
                         fullWidth
@@ -872,14 +902,14 @@ export default function RegisterTenant() {
                                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
                                   {r.roomName}
                                   <Typography component="span" variant="body2" color="text.secondary">
-                                    {" "}· Floor {r.floor}
+                                    {" "}{t("· Floor")}{" "}{r.floor}
                                   </Typography>
                                 </Typography>
                                 <Typography variant="caption" color={inMaintenance ? "warning.main" : isFull ? "error" : "text.secondary"}>
                                   {inMaintenance
                                     ? `Under maintenance${r.maintenanceNote ? ` · ${r.maintenanceNote}` : ""}`
                                     : isFull
-                                    ? "Fully occupied"
+                                    ? t("Fully occupied")
                                     : `${availableBeds} of ${r.capacity} beds available`}
                                   {!inMaintenance && r.monthlyRatePerBed !== undefined && ` · ₱${r.monthlyRatePerBed}/bed`}
                                 </Typography>
@@ -891,7 +921,7 @@ export default function RegisterTenant() {
                     </FormRow>
 
                     {bedOptions.length > 0 && (
-                      <FormRow label="Bed / space" required>
+                      <FormRow label={t("Bed / space")} required>
                         <TextField select fullWidth value={form.bedId} onChange={handleChange("bedId")} disabled={!form.roomId} {...flag("bedId")}>
                           {bedOptions.map((bed) => (
                             <MenuItem key={bed} value={bed}>{bed}</MenuItem>
@@ -901,12 +931,12 @@ export default function RegisterTenant() {
                     )}
 
                     {selectedRoom && monthlyRate > 0 && (
-                      <FormRow label="Monthly rent">
+                      <FormRow label={t("Monthly rent")}>
                         <Box sx={{ bgcolor: "background.paper", borderRadius: "4px", border: "1px solid", borderColor: "divider", px: 2, py: 1.25 }}>
                           <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800 }}>
                             ₱{monthlyRate.toLocaleString()}
                             <Typography component="span" variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                              {" "}per bed
+                              {" "}{t("per bed")}
                             </Typography>
                           </Typography>
                         </Box>
@@ -918,11 +948,11 @@ export default function RegisterTenant() {
                 {/* ---------------- STEP 3: LEASE ---------------- */}
                 {step === 2 && (
                   <>
-                    <FormRow label="Lease start date" required>
+                    <FormRow label={t("Lease start date")} required>
                       <TextField fullWidth type="date" value={form.leaseStartDate} onChange={handleChange("leaseStartDate")} {...flag("leaseStartDate")} />
                     </FormRow>
 
-                    <FormRow label="Lease duration" required>
+                    <FormRow label={t("Lease duration")} required>
                       <TextField select fullWidth value={form.leaseDuration} onChange={handleChange("leaseDuration")} {...flag("leaseDuration")}>
                         {LEASE_DURATIONS.map((opt) => (
                           <MenuItem key={opt.value} value={opt.value}>{opt.label}</MenuItem>
@@ -932,10 +962,10 @@ export default function RegisterTenant() {
 
                     {/* Custom Lease Input (Only visible if "Custom..." is selected) */}
                     {form.leaseDuration === "custom" && (
-                      <FormRow label="Custom term" required>
+                      <FormRow label={t("Custom term")} required>
                         <TextField
                           fullWidth
-                          placeholder="e.g., 2 Years, Month-to-month, 5 Months"
+                          placeholder={t("e.g., 2 Years, Month-to-month, 5 Months")}
                           value={form.customLeaseDuration}
                           onChange={handleChange("customLeaseDuration")}
                           autoFocus
@@ -944,7 +974,7 @@ export default function RegisterTenant() {
                       </FormRow>
                     )}
 
-                    <FormRow label="Review" top>
+                    <FormRow label={t("Review")} top>
                       <Box sx={{ bgcolor: "background.paper", borderRadius: "4px", border: "1px solid", borderColor: "divider", p: 2 }}>
                         <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                           {reviewRows.map(([label, value]) => (
@@ -958,7 +988,7 @@ export default function RegisterTenant() {
                       <Box sx={{ display: "flex", gap: 1.25, alignItems: "flex-start", color: "text.secondary", mt: 1.5 }}>
                         <InfoOutlinedIcon sx={{ fontSize: 18, mt: "2px", color: "primary.main" }} />
                         <Typography variant="caption" sx={{ fontSize: "0.8rem" }}>
-                          The tenant gets an email with a secure link to set their own password before logging in.
+                          {t("The tenant gets an email with a secure link to set their own password before logging in.")}
                         </Typography>
                       </Box>
                     </FormRow>
@@ -984,7 +1014,7 @@ export default function RegisterTenant() {
         >
           <Box sx={{ width: "100%", maxWidth: 760, display: "flex", justifyContent: "space-between", gap: 2, pt: 2, borderTop: "1px solid", borderColor: "divider" }}>
             <Button variant="outlined" onClick={handleBack} disabled={loading} sx={{ py: 1.5, px: 3, fontWeight: 600 }}>
-              {step === 0 ? "Cancel" : "Back"}
+              {step === 0 ? t("Cancel") : t("Back")}
             </Button>
             <Button
               type={isLast ? "submit" : "button"}
@@ -993,7 +1023,7 @@ export default function RegisterTenant() {
               disabled={loading}
               sx={{ py: 1.5, px: 3, fontWeight: 600, minWidth: { xs: 140, sm: 160 }, bgcolor: "primary.main", "&:hover": { bgcolor: "primary.dark" } }}
             >
-              {loading ? <CircularProgress size={24} color="inherit" /> : isLast ? "Register tenant" : "Next step"}
+              {loading ? <CircularProgress size={24} color="inherit" /> : isLast ? t("Register tenant") : t("Next step")}
             </Button>
           </Box>
         </Box>

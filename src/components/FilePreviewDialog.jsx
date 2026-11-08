@@ -10,6 +10,7 @@ import { Box, Button, CircularProgress, Dialog, DialogActions, DialogContent, Di
 import { useTheme } from "@mui/material/styles";
 import CloseIcon from "@mui/icons-material/Close";
 import OpenInNewIcon from "@mui/icons-material/OpenInNew";
+import { t } from "../i18n";
 
 const isImage = (f) => /^image\//i.test(f?.type || "") || /\.(png|jpe?g|gif|webp|avif)(\?|$)/i.test(f?.url || "");
 
@@ -45,9 +46,9 @@ export default function FilePreviewDialog({ file, onClose }) {
     <Dialog open onClose={onClose} fullScreen={fullScreen} fullWidth maxWidth="md" scroll="paper">
       <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, pr: 1 }}>
         <Typography component="span" sx={{ fontWeight: 800, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {file.name || "House rules document"}
+          {file.name || t("House rules document")}
         </Typography>
-        <IconButton onClick={onClose} aria-label="Close preview" sx={{ width: 44, height: 44 }}>
+        <IconButton onClick={onClose} aria-label={t("Close preview")} sx={{ width: 44, height: 44 }}>
           <CloseIcon />
         </IconButton>
       </DialogTitle>
@@ -57,7 +58,7 @@ export default function FilePreviewDialog({ file, onClose }) {
             <CircularProgress size={28} />
             {slow && (
               <Typography variant="body2" color="text.secondary">
-                Taking long? Some files can't be previewed — use “Open / download” below.
+                {t("Taking long? Some files can't be previewed — use “Open / download” below.")}
               </Typography>
             )}
           </Box>
@@ -70,11 +71,11 @@ export default function FilePreviewDialog({ file, onClose }) {
       </DialogContent>
       <DialogActions sx={{ px: 2, py: 1.25 }}>
         <Button component="a" href={file.url} target="_blank" rel="noopener noreferrer" startIcon={<OpenInNewIcon />} sx={{ minHeight: 44, fontWeight: 700, textTransform: "none" }}>
-          Open / download
+          {t("Open / download")}
         </Button>
         <Box sx={{ flex: 1 }} />
         <Button onClick={onClose} variant="contained" sx={{ minHeight: 44, fontWeight: 700, borderRadius: 2.5 }}>
-          Close
+          {t("Close")}
         </Button>
       </DialogActions>
     </Dialog>

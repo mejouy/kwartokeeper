@@ -97,43 +97,45 @@ async function getOwnerTenants(ownerUid) {
   return [...tenants.values()];
 }
 
-async function getOwnerCaretakers(ownerUid) {
-  const [caretakerSnapshot, userSnapshot] = await Promise.all([
-    getDocs(query(collection(db, "caretakers"), where("ownerUid", "==", ownerUid))),
-    getDocs(query(collection(db, "users"), where("ownerUid", "==", ownerUid))),
+// A caretaker may only read their own property's tenants, so they pass it in
+async function getPropertyTenants(propertyId) {
+  const [tenantSnapshot, userSnapshot] = await Promise.all([
+    getDocs(query(collection(db, "tenants"), where("propertyId", "==", propertyId))),
+    getDocs(query(collection(db, "users"), where("propertyId", "==", propertyId))),
   ]);
-  const caretakers = new Map();
-
+  const tenants = new Map();
   userSnapshot.docs.forEach((document) => {
     const data = document.data();
-    if (data.role === "caretaker") caretakers.set(document.id, { id: document.id, ...data });
+    if (data.role === "tenant") tenants.set(document.id, { id: document.id, ...data });
   });
-  caretakerSnapshot.docs.forEach((document) => {
+  tenantSnapshot.docs.forEach((document) => {
     const data = document.data();
-    const id = data.uid || data.userId || data.caretakerId || document.id;
-    caretakers.set(id, { ...(caretakers.get(id) || {}), id, ...data });
+    const id = data.uid || document.id;
+    tenants.set(id, { ...(tenants.get(id) || {}), id, ...data });
   });
-
-  return [...caretakers.values()].filter((caretaker) =>
-    !INACTIVE.has(String(caretaker.status || "Active").trim().toLowerCase())
-  );
+  return [...tenants.values()];
 }
 
-export async function checkLeaseEndsOnOwnerAppOpen(ownerUid, requesterId = ownerUid) {
+/**
+ * Owner: checks all their tenants. Caretaker: pass `caretaker` ({ propertyId, name })
+ * and only their property's tenants are checked.
+ */
+export async function checkLeaseEndsOnOwnerAppOpen(ownerUid, requesterId = ownerUid, caretaker = null) {
   if (!ownerUid || !requesterId) return;
+  if (requesterId !== ownerUid && !caretaker?.propertyId) return;
 
   const now = new Date();
   const today = manilaDayNumber(now);
   if (lastCheckedDayByUser.get(requesterId) === today) return;
-  const tenants = (await getOwnerTenants(ownerUid)).filter((tenant) =>
+  const isOwner = requesterId === ownerUid;
+  const tenants = (await (isOwner ? getOwnerTenants(ownerUid) : getPropertyTenants(caretaker.propertyId))).filter((tenant) =>
     !INACTIVE.has(String(tenant.status || "Active").trim().toLowerCase())
   );
-  const caretakers = await getOwnerCaretakers(ownerUid);
+  const caretakers = isOwner ? [] : [{ id: requesterId, assignedPropertyId: caretaker.propertyId, name: caretaker.name || "" }];
   const notificationsRef = collection(db, "notifications");
   const requesterNotifications = await getDocs(
     query(notificationsRef, where("userId", "==", requesterId))
   );
-  const isOwner = requesterId === ownerUid;
 
   for (const tenant of tenants) {
     const endDate = leaseEndDate(tenant);

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Box, Typography, Button, Container, GlobalStyles } from "@mui/material";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
+import { t } from "../../i18n";
 
 // Shown right after an owner registers, before the setup wizard,
 // so the jump into a multi-step form isn't sudden.
@@ -14,16 +15,16 @@ const LINE = "rgba(255,255,255,0.12)";
 
 const STEPS = [
   {
-    title: "Basic details",
-    body: "Name your property, add its address and tell us how it's run.",
+    title: t("Basic details"),
+    body: t("Name your property, add its address and tell us how it's run."),
   },
   {
-    title: "Rules and amenities",
-    body: "How many floors, what's included (like Wi-Fi or laundry), curfew and house rules.",
+    title: t("Rules and amenities"),
+    body: t("How many floors, what's included (like Wi-Fi or laundry), curfew and house rules."),
   },
   {
-    title: "Rooms and beds",
-    body: "How many rooms each floor has, the beds in each, and the rate per bed.",
+    title: t("Rooms and beds"),
+    body: t("How many rooms each floor has, the beds in each, and the rate per bed."),
   },
 ];
 
@@ -65,7 +66,7 @@ function Building() {
       viewBox={`0 0 ${w} ${h}`}
       width="100%"
       role="img"
-      aria-label="A dormitory building at night. Rooms light up one by one."
+      aria-label={t("A dormitory building at night. Rooms light up one by one.")}
       style={{ display: "block", maxWidth: "100%" }}
     >
       {cells.map((c, i) => (
@@ -143,7 +144,7 @@ export default function OwnerWelcome() {
         <Box
           component="img"
           src="/KwartoKeeper-DarkMode-Icon.png"
-          alt="KwartoKeeper"
+          alt={t("KwartoKeeper")}
           sx={{ height: { xs: 30, md: 38 }, alignSelf: "flex-start" }}
         />
 
@@ -178,13 +179,12 @@ export default function OwnerWelcome() {
                 mb: 1.5,
               }}
             >
-              {firstName ? `Welcome, ${firstName}.` : "Welcome to KwartoKeeper."}
+              {firstName ? `Welcome, ${firstName}.` : t("Welcome to KwartoKeeper.")}
               <br />
-              Let's set up your property.
+              {t("Let's set up your property.")}
             </Typography>
             <Typography sx={{ color: SOFT, maxWidth: 420, lineHeight: 1.6 }}>
-              Your account is ready. Three short steps and a few minutes, then you can
-              add tenants and caretakers.
+              {t("Your account is ready. Three short steps and a few minutes, then you can add tenants and caretakers.")}
             </Typography>
           </Box>
 
@@ -255,10 +255,10 @@ export default function OwnerWelcome() {
               }}
             >
               <Typography sx={{ fontWeight: 600, fontSize: "0.95rem", mb: 0.5 }}>
-                We review every new owner account
+                {t("We review every new owner account")}
               </Typography>
               <Typography sx={{ color: SOFT, fontSize: "0.88rem", lineHeight: 1.55 }}>
-                You can finish setup now. We'll let you know once you're approved.
+                {t("You can finish setup now. We'll let you know once you're approved.")}
               </Typography>
             </Box>
 
@@ -278,7 +278,7 @@ export default function OwnerWelcome() {
                 "&:hover": { bgcolor: "#e03d00" },
               }}
             >
-              Start setting up
+              {t("Start setting up")}
             </Button>
           </Box>
         </Box>
@@ -310,7 +310,7 @@ export default function OwnerWelcome() {
             "&:hover": { bgcolor: "#e03d00" },
           }}
         >
-          Start setting up
+          {t("Start setting up")}
         </Button>
       </Box>
     </Box>

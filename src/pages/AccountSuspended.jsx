@@ -3,6 +3,7 @@ import BlockIcon from "@mui/icons-material/Block";
 import { signOut } from "firebase/auth";
 import { auth } from "../config/firebase"; // Adjust path to your firebase config
 import { useNavigate } from "react-router-dom";
+import { t } from "../i18n";
 
 export default function AccountSuspended() {
   const navigate = useNavigate();
@@ -31,10 +32,10 @@ export default function AccountSuspended() {
         >
           <BlockIcon sx={{ fontSize: 60, color: "error.main", mb: 2 }} />
           <Typography variant="h5" sx={{ fontWeight: "bold" }} gutterBottom>
-            Account Suspended
+            {t("Account Suspended")}
           </Typography>
           <Typography variant="body1" color="text.secondary" sx={{ mb: 4 }}>
-            Your account has been suspended by an administrator. You currently do not have access to the platform's features. Please contact support for more information.
+            {t("Your account has been suspended by an administrator. You currently do not have access to the platform's features. Please contact support for more information.")}
           </Typography>
           <Button 
             variant="contained" 
@@ -42,7 +43,7 @@ export default function AccountSuspended() {
             onClick={handleLogout}
             fullWidth
           >
-            Sign Out
+            {t("Sign Out")}
           </Button>
         </Paper>
       </Box>

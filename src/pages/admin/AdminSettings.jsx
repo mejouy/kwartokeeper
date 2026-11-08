@@ -19,6 +19,9 @@ import { alpha } from "@mui/material/styles";
 import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined";
 import ConstructionOutlinedIcon from "@mui/icons-material/ConstructionOutlined";
 import SupportAgentOutlinedIcon from "@mui/icons-material/SupportAgentOutlined";
+import BackupOutlinedIcon from "@mui/icons-material/BackupOutlined";
+import BackupButton from "../../components/BackupButton";
+import { downloadPlatformBackup } from "../../utils/backup";
 import VerifiedUserOutlinedIcon from "@mui/icons-material/VerifiedUserOutlined";
 import HomeWorkOutlinedIcon from "@mui/icons-material/HomeWorkOutlined";
 import { doc, getDoc, setDoc } from "firebase/firestore";
@@ -279,6 +282,10 @@ export default function AdminSettings() {
               sx={fieldSx}
             />
           </Box>
+        </Section>
+
+        <Section icon={BackupOutlinedIcon} title="Backup" description="The free Firebase plan has no automatic backups. Download a copy of the whole platform now and then.">
+          <BackupButton onDownload={downloadPlatformBackup} label="Download platform backup" note="Every owner, property, tenant, caretaker, payment, fee, repair request, curfew record and activity entry, as one file. Photos and documents stay online; the file keeps their links. Notifications are left out." />
         </Section>
 
         {/* Save bar, only when something changed. Sits above the phone bottom bar. */}

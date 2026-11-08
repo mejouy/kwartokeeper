@@ -6,70 +6,29 @@
 // Tabs other than the overview only exist when the owner granted the matching
 // permission (manageTenants / logOccupancy / handleReports / viewFinancials).
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useOutletContext } from "react-router-dom";
-import {
-  Alert,
-  Avatar,
-  Box,
-  Button,
-  Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Divider,
-  Drawer,
-  Fab,
-  GlobalStyles,
-  IconButton,
-  InputAdornment,
-  LinearProgress,
-  Paper,
-  Skeleton,
-  Snackbar,
-  Switch,
-  FormControlLabel,
-  TextField,
-  Typography,
-  useMediaQuery,
-} from "@mui/material";
+import { Alert, Avatar, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Fab, IconButton, Paper, Skeleton, Snackbar, Switch, FormControlLabel, TextField, Typography, useMediaQuery } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import HomeWorkOutlinedIcon from "@mui/icons-material/HomeWorkOutlined";
-import MeetingRoomOutlinedIcon from "@mui/icons-material/MeetingRoomOutlined";
 import PeopleAltOutlinedIcon from "@mui/icons-material/PeopleAltOutlined";
-import SearchIcon from "@mui/icons-material/Search";
 import CloseIcon from "@mui/icons-material/Close";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import PaymentIcon from "@mui/icons-material/Payment";
 import AddIcon from "@mui/icons-material/Add";
-import PlaceOutlinedIcon from "@mui/icons-material/PlaceOutlined";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import FilePreviewDialog from "../../components/FilePreviewDialog";
-import PolicyOutlinedIcon from "@mui/icons-material/PolicyOutlined";
 import ScheduleIcon from "@mui/icons-material/Schedule";
-import PhoneOutlinedIcon from "@mui/icons-material/PhoneOutlined";
-import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
-import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import ErrorOutlinedIcon from "@mui/icons-material/ErrorOutlined";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
-import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
 import WifiOffOutlinedIcon from "@mui/icons-material/WifiOffOutlined";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
-import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
-import HistoryIcon from "@mui/icons-material/History";
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
-import GridViewOutlinedIcon from "@mui/icons-material/GridViewOutlined";
-import TouchAppOutlinedIcon from "@mui/icons-material/TouchAppOutlined";
 import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import AddPhotoAlternateOutlinedIcon from "@mui/icons-material/AddPhotoAlternateOutlined";
-import CloudOffOutlinedIcon from "@mui/icons-material/CloudOffOutlined";
 import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
-import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
-
 import { onAuthStateChanged } from "firebase/auth";
-import { addDoc, collection, deleteDoc, deleteField, doc, getDoc, onSnapshot, query, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { collection, deleteDoc, deleteField, doc, getDoc, onSnapshot, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { reserveReceiptNo } from "../../utils/receipt";
 import { auth, db } from "../../config/firebase";
 import { notifyMaintenanceStatusChanged, notifyCashPaymentRecorded } from "../../services/notificationService";
 import { uploadToCloudinary } from "../../utils/cloudinary";
@@ -77,856 +36,20 @@ import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
 import { getPropertyCoverPhotoUrl } from "../../utils/getPropertyCoverPhotoUrl";
 import { normalizePayment } from "../../utils/normalizePayment";
 import { withoutRemoved } from "../../utils/accountState";
+import { billSnapshot, chargesFor, isActiveCharge, monthBill } from "../../utils/charges";
+import { BillBreakdown } from "../../components/Fees";
+import { logActivity } from "../../services/activityLog";
+import { BOTTOM_NAV_H, row, cardSx, TAB_IDS, NOTICE_DELAY_MS, CHECK_WORD, SMS_URL, HISTORY_NIGHTS, EMPTY_OBJ, CURFEW_WINDOW_MIN, NOTICE_TYPES, DEFAULT_CASH_NOTE, peso, localDateKey, periodLabel, normPeriod, rememberPendingMarks, forgetPendingMarks, readPendingMarks, getTimestampMillis, fmtDate, firstName, initials, payKind, isReceived, LIST_PAGE, ROOM_PAGE, NIGHT_PAGE, isInactiveStatus, addressText, AnimationStyles, Pill, EmptyState, Facts, useOnline, useToday, TabErrorBoundary, parseClock, useClock, buzz, ROOM_STATUS, roomStatusOf, sendNoticeSms } from "./caretakerParts";
+import CaretakerOverviewTab from "./CaretakerOverviewTab";
+import CaretakerDirectoryView from "./CaretakerDirectoryView";
+import CaretakerCurfewView from "./CaretakerCurfewView";
+import CaretakerCurfewHistoryView from "./CaretakerCurfewHistoryView";
+import CaretakerMaintenanceTab from "./CaretakerMaintenanceTab";
+import CaretakerPaymentsTab from "./CaretakerPaymentsTab";
+import CaretakerRoomsTab from "./CaretakerRoomsTab";
+// Translation is "tr" here: this file also uses "t" for tenants and the theme
+import { t as tr } from "../../i18n";
 
-/* ---------------------------------------------------------------------------
-   Constants + small helpers
---------------------------------------------------------------------------- */
-const RULES_PREVIEW = 4; // rules shown before "Show all"
-const BOTTOM_NAV_H = 66; // height of the phone bottom bar in AppShell (CaretakerLayout)
-const row = { display: "flex", alignItems: "center" };
-const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
-
-const TAB_IDS = ["overview", "tenants", "maintenance", "payments", "rooms"];
-const NOTICE_DELAY_MS = 6000; // time to undo a mark before the automatic notice goes out
-const CHECK_WORD = { present: "in", late: "late", out: "out" };
-const SMS_URL = typeof import.meta !== "undefined" ? import.meta.env?.VITE_SMS_WORKER_URL || "" : "";
-const HISTORY_NIGHTS = 14;
-const EMPTY_OBJ = Object.freeze({});
-const STATUS_OPTIONS = ["Pending", "In Progress", "Resolved"];
-const STATUS_TONE = { Pending: "warning", "In Progress": "info", Resolved: "success", Cancelled: "default" };
-const TIER_TONE = { High: "error", Medium: "warning", Low: "default" };
-const CHECK_OPTIONS = [
-  { id: "present", label: "In", tone: "success" },
-  { id: "late", label: "Late", tone: "warning" },
-  { id: "out", label: "Out", tone: "error" },
-];
-const CURFEW_WINDOW_MIN = 420; // a curfew "night" runs for 7 hours after the curfew time
-const NOTICE_TYPES = [
-  { id: "info", label: "Info" },
-  { id: "warning", label: "Warning" },
-  { id: "error", label: "Urgent" },
-];
-const timeOf = (value) => {
-  const ms = getTimestampMillis(value);
-  return ms ? new Date(ms).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "";
-};
-const DEFAULT_CASH_NOTE = "Cash payment collected by caretaker";
-
-const peso = (n) => `₱${Number(n || 0).toLocaleString()}`;
-
-const localDateKey = (d = new Date()) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const periodLabel = (d) => d.toLocaleString("en-US", { month: "long", year: "numeric" });
-const normPeriod = (s) => String(s || "").trim().toLowerCase();
-
-function getTimestampMillis(value) {
-  if (!value) return 0;
-  if (typeof value?.toMillis === "function") return value.toMillis();
-  // "2026-10-05" (date inputs) is read as a LOCAL date, not UTC midnight
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    const [y, m, d] = value.split("-").map(Number);
-    return new Date(y, m - 1, d).getTime();
-  }
-  const time = new Date(value).getTime();
-  return Number.isNaN(time) ? 0 : time;
-}
-
-const fmtDate = (value, opts = { month: "short", day: "numeric", year: "numeric" }) => {
-  const ms = getTimestampMillis(value);
-  return ms ? new Date(ms).toLocaleDateString("en-US", opts) : "";
-};
-
-function timeAgo(value) {
-  const ms = getTimestampMillis(value);
-  if (!ms) return "";
-  const mins = Math.max(0, Math.round((Date.now() - ms) / 60000));
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs} h ago`;
-  const days = Math.round(hrs / 24);
-  return days < 30 ? `${days} d ago` : fmtDate(ms);
-}
-
-const firstName = (name) => String(name || "").trim().split(/\s+/)[0] || "there";
-const initials = (name) =>
-  String(name || "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
-    .join("") || "T";
-const greeting = () => {
-  const h = new Date().getHours();
-  return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
-};
-
-const payKind = (p) => {
-  const k = String(p.status || "pending").toLowerCase();
-  if (k === "paid") return "paid";
-  if (k === "partial") return "partial"; // received, but a balance is still owed
-  if (k === "rejected" || k === "cancelled") return "rejected";
-  return "pending";
-};
-const isReceived = (p) => ["paid", "partial"].includes(payKind(p));
-const PAY_TONE = { paid: "success", partial: "warning", pending: "warning", rejected: "error" };
-const PAY_LABEL = { paid: "Paid", partial: "Partial", pending: "Pending", rejected: "Rejected" };
-const LIST_PAGE = 6; // long lists show this many at a time
-const ROOM_PAGE = 8; // room groups in the tenant directory
-const NIGHT_PAGE = 7; // nights in curfew history
-
-const isInactiveStatus = (s) => /inactive|terminated|moved/i.test(String(s || ""));
-
-// Strings or objects that Firestore might hold -> a one-line label
-function addressText(addr, fallback = "") {
-  if (!addr) return fallback;
-  if (typeof addr === "string") return addr;
-  return [addr.street, addr.barangay, addr.cityMunicipality, addr.province].filter(Boolean).join(", ") || fallback;
-}
-
-/* ---------------------------------------------------------------------------
-   Visuals
---------------------------------------------------------------------------- */
-// Fade/slide-up on first paint; off for "reduce motion" users.
-const AnimationStyles = (
-  <GlobalStyles
-    styles={{
-      "@keyframes kkPop": { from: { opacity: 0, transform: "scale(0.6)" }, to: { opacity: 1, transform: "scale(1)" } },
-      "@keyframes kkFadeUp": { from: { opacity: 0, transform: "translateY(10px)" }, to: { opacity: 1, transform: "translateY(0)" } },
-      "@keyframes kkCheck": { from: { strokeDashoffset: 30 }, to: { strokeDashoffset: 0 } },
-      // Snappier taps on phones: no 300ms delay, no grey flash
-      "button, [role='button'], a": { WebkitTapHighlightColor: "transparent", touchAction: "manipulation" },
-      "@media (prefers-reduced-motion: reduce)": {
-        "*, *::before, *::after": { animationDuration: "0.001ms !important", transitionDuration: "0.001ms !important" },
-      },
-    }}
-  />
-);
-const rise = (i = 0) => ({ animation: `kkFadeUp .45s ease-out ${i * 70}ms both` });
-
-function Pill({ label, tone = "default", icon, sx }) {
-  return (
-    <Chip
-      label={label}
-      icon={icon}
-      size="small"
-      sx={{
-        fontWeight: 700,
-        "& .MuiChip-icon": { fontSize: 15, ml: 0.75, color: "inherit" },
-        bgcolor: (t) => (tone === "default" ? alpha(t.palette.text.primary, 0.07) : alpha(t.palette[tone].main, 0.13)),
-        color: (t) => (tone === "default" ? t.palette.text.secondary : t.palette[tone].dark),
-        ...sx,
-      }}
-    />
-  );
-}
-
-function Panel({ title, icon, action, children, sx }) {
-  return (
-    <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 3 }, ...sx }}>
-      <Box sx={{ ...row, justifyContent: "space-between", gap: 1.5, mb: 2 }}>
-        <Box sx={{ ...row, gap: 1.25, minWidth: 0 }}>
-          {icon && (
-            <Box sx={{ width: 34, height: 34, borderRadius: 2, flexShrink: 0, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main" }}>
-              {icon}
-            </Box>
-          )}
-          <Typography variant="h6" noWrap sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 700, fontSize: "1.05rem" }}>
-            {title}
-          </Typography>
-        </Box>
-        {action}
-      </Box>
-      {children}
-    </Paper>
-  );
-}
-
-function EmptyState({ icon, title, body, action }) {
-  return (
-    <Box sx={{ textAlign: "center", py: { xs: 3, sm: 4 }, px: 2 }}>
-      <Box sx={{ width: 56, height: 56, borderRadius: "50%", mx: "auto", mb: 1.5, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
-        {icon}
-      </Box>
-      <Typography sx={{ fontWeight: 700 }}>{title}</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-        {body}
-      </Typography>
-      {action}
-    </Box>
-  );
-}
-
-function Facts({ items }) {
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column" }}>
-      {items.map((it, i) => (
-        <Box
-          key={it.label}
-          sx={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 0.9fr) minmax(0, 1.4fr)",
-            gap: 1.5,
-            py: 1.1,
-            borderTop: i === 0 ? "none" : "1px solid",
-            borderColor: "divider",
-          }}
-        >
-          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
-            {it.label}
-          </Typography>
-          <Typography variant="body2" sx={{ fontWeight: 700, overflowWrap: "anywhere", color: it.color }}>
-            {it.value}
-          </Typography>
-        </Box>
-      ))}
-    </Box>
-  );
-}
-
-function AttentionBanner({ tone = "warning", icon, title, body, actionLabel, onAction, secondaryLabel, onSecondary }) {
-  const Icon = icon || (tone === "error" ? ErrorOutlinedIcon : tone === "info" ? InfoOutlinedIcon : WarningAmberOutlinedIcon);
-  return (
-    <Box
-      sx={{
-        ...row,
-        alignItems: "flex-start",
-        gap: 1.25,
-        p: 1.5,
-        borderRadius: 3,
-        border: "1px solid",
-        borderColor: (t) => alpha(t.palette[tone].main, 0.45),
-        bgcolor: (t) => alpha(t.palette[tone].main, 0.07),
-      }}
-    >
-      <Box sx={{ color: `${tone}.main`, display: "flex", pt: 0.25 }}>
-        <Icon />
-      </Box>
-      <Box sx={{ minWidth: 0, flex: 1 }}>
-        <Typography sx={{ fontWeight: 800, lineHeight: 1.25 }}>{title}</Typography>
-        {body && (
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, overflowWrap: "anywhere" }}>
-            {body}
-          </Typography>
-        )}
-        {(actionLabel || secondaryLabel) && (
-          <Box sx={{ display: "flex", gap: 1, mt: 1, flexWrap: "wrap" }}>
-            {actionLabel && (
-              <Button size="small" variant="contained" color={tone} onClick={onAction} sx={{ fontWeight: 700, borderRadius: 2, minHeight: 38, textTransform: "none" }}>
-                {actionLabel}
-              </Button>
-            )}
-            {secondaryLabel && (
-              <Button size="small" onClick={onSecondary} sx={{ fontWeight: 700, borderRadius: 2, minHeight: 38, textTransform: "none", color: "text.secondary" }}>
-                {secondaryLabel}
-              </Button>
-            )}
-          </Box>
-        )}
-      </Box>
-    </Box>
-  );
-}
-
-function useOnline() {
-  const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
-  useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
-    return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
-    };
-  }, []);
-  return online;
-}
-
-function useToday() {
-  const [dayKey, setDayKey] = useState(() => new Date().toDateString());
-  useEffect(() => {
-    let timer;
-    const refresh = () => setDayKey(new Date().toDateString());
-    const schedule = () => {
-      const now = new Date();
-      const next = new Date(now);
-      next.setHours(24, 0, 5, 0);
-      timer = setTimeout(() => {
-        refresh();
-        schedule();
-      }, next - now);
-    };
-    const onVisible = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
-    schedule();
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => new Date(), [dayKey]);
-}
-
-// If one tab throws, the rest of the app keeps working
-class TabErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false };
-  }
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-  componentDidCatch(error) {
-    console.error("Caretaker dashboard error:", error);
-  }
-  componentDidUpdate(prev) {
-    if (this.state.hasError && prev.resetKey !== this.props.resetKey) this.setState({ hasError: false });
-  }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <Paper elevation={0} sx={cardSx}>
-          <EmptyState
-            icon={<ErrorOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />}
-            title="Something went wrong"
-            body="This section couldn't be shown. Your information is safe."
-            action={
-              <Button variant="contained" startIcon={<RefreshOutlinedIcon />} onClick={() => window.location.reload()} sx={{ mt: 2, fontWeight: 700, borderRadius: 2.5, minHeight: 46 }}>
-                Reload
-              </Button>
-            }
-          />
-        </Paper>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-
-// "10:00 PM" -> minutes after midnight (null if it can't be read)
-function parseClock(label) {
-  const m = String(label || "").trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-  if (!m) return null;
-  let h = Number(m[1]);
-  const min = Number(m[2]);
-  const ap = (m[3] || "").toUpperCase();
-  if (ap === "PM" && h < 12) h += 12;
-  if (ap === "AM" && h === 12) h = 0;
-  if (h > 23 || min > 59) return null;
-  return h * 60 + min;
-}
-
-// Ticks every 30s while enabled (used for the curfew countdown)
-function useClock(enabled) {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    if (!enabled) return undefined;
-    const tick = () => setNow(new Date());
-    const id = setInterval(tick, 30000);
-    document.addEventListener("visibilitychange", tick);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", tick);
-    };
-  }, [enabled]);
-  return now;
-}
-
-
-/* ---------------------------------------------------------------------------
-   Small building blocks
---------------------------------------------------------------------------- */
-// Tappable summary tile (opens the matching tab)
-function StatTile({ title, value, subtitle, icon, onClick, tone }) {
-  return (
-    <Box
-      component={onClick ? "button" : "div"}
-      type={onClick ? "button" : undefined}
-      onClick={onClick}
-      sx={{
-        ...cardSx,
-        p: { xs: 1.5, sm: 2 },
-        textAlign: "left",
-        font: "inherit",
-        color: "text.primary",
-        cursor: onClick ? "pointer" : "default",
-        minWidth: 0,
-        "&:active": onClick ? { transform: "scale(0.98)" } : undefined,
-        "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
-      }}
-    >
-      <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 1 }}>
-        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }} noWrap>
-          {title}
-        </Typography>
-        <Box sx={{ width: 30, height: 30, flexShrink: 0, borderRadius: 2, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main" }}>{icon}</Box>
-      </Box>
-      <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, fontSize: { xs: "1.5rem", sm: "1.75rem" }, lineHeight: 1.15, color: tone ? `${tone}.main` : undefined }} noWrap>
-        {value}
-      </Typography>
-      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.25 }} noWrap>
-        {subtitle}
-      </Typography>
-    </Box>
-  );
-}
-
-function QuickAction({ icon, label, onClick, href, disabled, badge }) {
-  return (
-    <Box
-      component={href ? "a" : "button"}
-      type={href ? undefined : "button"}
-      href={href}
-      onClick={onClick}
-      disabled={href ? undefined : disabled}
-      aria-disabled={disabled || undefined}
-      sx={{
-        ...cardSx,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 0.75,
-        minHeight: 84,
-        px: 0.5,
-        py: 1.25,
-        font: "inherit",
-        color: disabled ? "text.disabled" : "text.primary",
-        textDecoration: "none",
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.55 : 1,
-        pointerEvents: disabled && href ? "none" : undefined,
-        position: "relative",
-        "&:active": disabled ? undefined : { transform: "scale(0.97)" },
-        "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
-      }}
-    >
-      <Box sx={{ width: 38, height: 38, borderRadius: "50%", ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main" }}>{icon}</Box>
-      <Typography variant="caption" sx={{ fontWeight: 700, lineHeight: 1.15, textAlign: "center" }}>
-        {label}
-      </Typography>
-      {badge > 0 && (
-        <Box sx={{ position: "absolute", top: 6, right: 10, minWidth: 18, height: 18, px: 0.5, borderRadius: 9, bgcolor: "primary.main", color: "#fff", fontSize: 11, fontWeight: 800, ...row, justifyContent: "center" }}>
-          {badge > 9 ? "9+" : badge}
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-function RoomHeader({ title, meta, action }) {
-  return (
-    <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 0.75, px: 0.5, minHeight: 34 }}>
-      <Box sx={{ ...row, gap: 0.75, minWidth: 0 }}>
-        <MeetingRoomOutlinedIcon sx={{ fontSize: 18, color: "text.secondary" }} />
-        <Typography sx={{ fontWeight: 800 }} noWrap>
-          {title}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" noWrap>
-          {meta}
-        </Typography>
-      </Box>
-      {action}
-    </Box>
-  );
-}
-
-// [[room, tenants], ...] in the order the list already has
-const groupByRoom = (list) => {
-  const m = new Map();
-  list.forEach((t) => {
-    const k = t.roomNumber || "";
-    if (!m.has(k)) m.set(k, []);
-    m.get(k).push(t);
-  });
-  return [...m.entries()];
-};
-
-// A tiny tap-confirmation on phones that support it
-const buzz = () => {
-  try {
-    navigator.vibrate?.(12);
-  } catch {
-    /* not supported */
-  }
-};
-
-function FilterChips({ options, value, onChange, flush }) {
-  return (
-    <Box sx={{ display: "flex", gap: 1, overflowX: "auto", mx: flush ? 0 : { xs: -2, sm: 0 }, px: flush ? 0 : { xs: 2, sm: 0 }, mb: flush ? 0 : { xs: 2, sm: 2.5 }, scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
-      {options.map((f) => {
-        const on = value === f.id;
-        return (
-          <Box
-            key={f.id}
-            component="button"
-            type="button"
-            onClick={() => onChange(f.id)}
-            aria-pressed={on}
-            sx={{
-              ...row,
-              gap: 0.75,
-              flexShrink: 0,
-              height: 38,
-              px: 1.5,
-              borderRadius: 99,
-              font: "inherit",
-              fontSize: 13.5,
-              fontWeight: 700,
-              cursor: "pointer",
-              border: "1px solid",
-              borderColor: on ? "text.primary" : "divider",
-              bgcolor: on ? "text.primary" : "background.default",
-              color: on ? "background.default" : "text.secondary",
-            }}
-          >
-            {f.label}
-            <Box component="span" sx={{ opacity: 0.65, fontWeight: 600 }}>{f.n}</Box>
-          </Box>
-        );
-      })}
-    </Box>
-  );
-}
-
-function SearchBox({ value, onChange, placeholder }) {
-  return (
-    <TextField
-      fullWidth
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder}
-      slotProps={{
-        htmlInput: { "aria-label": placeholder },
-        input: {
-          sx: { borderRadius: 3, bgcolor: "background.default" },
-          startAdornment: (
-            <InputAdornment position="start">
-              <SearchIcon fontSize="small" />
-            </InputAdornment>
-          ),
-          endAdornment: value ? (
-            <InputAdornment position="end">
-              <IconButton size="small" aria-label="Clear search" onClick={() => onChange("")}>
-                <CloseIcon fontSize="small" />
-              </IconButton>
-            </InputAdornment>
-          ) : null,
-        },
-      }}
-    />
-  );
-}
-
-// Same look as the owner's room map: a coloured tile per room
-const ROOM_STATUS = {
-  vacant: { fill: "rgba(202, 220, 246, 0.55)", label: "Vacant", text: "text.primary" },
-  partial: { fill: "rgba(255, 69, 0, 0.45)", label: "Partially occupied", text: "text.primary" },
-  full: { fill: "#ff4500", label: "Fully occupied", text: "#ffffff" },
-};
-const roomStatusOf = (capacity, taken) => (taken === 0 ? "vacant" : Number(capacity) > 0 && taken >= Number(capacity) ? "full" : "partial");
-
-function RoomTile({ room, taken, selected, onClick }) {
-  const status = roomStatusOf(room.capacity, taken);
-  const style = ROOM_STATUS[status];
-  const capacity = Number(room.capacity) || 0;
-  return (
-    <Box
-      component="button"
-      type="button"
-      onClick={onClick}
-      aria-label={`${room.roomName}, ${style.label}, ${taken} of ${capacity} beds`}
-      aria-pressed={selected}
-      sx={{
-        height: 64,
-        minWidth: 0,
-        borderRadius: 2,
-        border: "none",
-        outline: selected ? "2px solid" : "none",
-        outlineColor: "text.primary",
-        outlineOffset: 2,
-        bgcolor: style.fill,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        gap: 0.25,
-        px: 0.5,
-        fontFamily: "inherit",
-        transition: "transform 0.12s ease",
-        "&:hover": { transform: "scale(1.05)" },
-        "&:focus-visible": { outline: "2px solid", outlineColor: "text.primary", outlineOffset: 2 },
-      }}
-    >
-      <Typography noWrap sx={{ fontWeight: 800, fontSize: "0.78rem", color: style.text, lineHeight: 1.1, maxWidth: "100%" }}>
-        {room.roomName}
-      </Typography>
-      {capacity > 0 && (
-        <Typography sx={{ fontSize: "0.66rem", fontWeight: 600, color: style.text, opacity: 0.8, lineHeight: 1 }}>
-          {taken}/{capacity}
-        </Typography>
-      )}
-    </Box>
-  );
-}
-
-function TenantCard({ t, rentState, showRent, onClick }) {
-  return (
-    <Box sx={{ ...cardSx, ...row, minWidth: 0, opacity: t.inactive ? 0.7 : 1 }}>
-      <Box
-        component="button"
-        type="button"
-        onClick={onClick}
-        aria-label={`Open details for ${t.name}`}
-        sx={{
-          ...row,
-          gap: 1.5,
-          p: 1.5,
-          flex: 1,
-          minWidth: 0,
-          textAlign: "left",
-          font: "inherit",
-          color: "text.primary",
-          bgcolor: "transparent",
-          border: 0,
-          borderRadius: "inherit",
-          cursor: "pointer",
-          "&:active": { bgcolor: "action.hover" },
-          "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 },
-        }}
-      >
-        <Avatar sx={{ width: 44, height: 44, fontWeight: 800, bgcolor: "rgba(255, 69, 0, 0.12)", color: "primary.main" }}>{initials(t.name)}</Avatar>
-        <Box sx={{ minWidth: 0, flex: 1 }}>
-          <Typography sx={{ fontWeight: 800, lineHeight: 1.25 }} noWrap>
-            {t.name}
-          </Typography>
-          <Typography variant="body2" color="text.secondary" noWrap>
-            {t.roomNumber ? `Room ${t.roomNumber}` : "No room yet"}
-            {t.bedId ? ` · Bed ${t.bedId}` : ""}
-          </Typography>
-          <Box sx={{ display: "flex", gap: 0.5, mt: 0.5, flexWrap: "wrap" }}>
-            {t.inactive && <Pill label={t.status} />}
-            {showRent && !t.inactive && t.roomNumber && (
-              <Pill label={rentState === "paid" ? "Rent paid" : rentState === "pending" ? "Rent pending" : "Unpaid"} tone={rentState === "paid" ? "success" : rentState === "pending" ? "warning" : "error"} />
-            )}
-          </Box>
-        </Box>
-      </Box>
-    </Box>
-  );
-}
-
-function RequestCard({ t, busy, onStatus, compact }) {
-  const tier = t.priority?.tier || "Low";
-  const status = t.status || "Pending";
-  const [allUpdates, setAllUpdates] = useState(false);
-  const updates = Array.isArray(t.followUps) ? t.followUps : [];
-  // Newest update shows; the rest stay folded so busy requests don't get huge
-  const shownUpdates = allUpdates ? updates : updates.slice(-1);
-  return (
-    <Paper elevation={0} sx={{ ...cardSx, p: 1.75, minWidth: 0 }}>
-      <Box sx={{ ...row, alignItems: "flex-start", justifyContent: "space-between", gap: 1, mb: 0.5 }}>
-        <Box sx={{ minWidth: 0 }}>
-          <Typography sx={{ fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{t.title || "Maintenance request"}</Typography>
-          <Typography variant="caption" color="text.secondary">
-            {t.tenantName || "Tenant"}
-            {t.roomNumber ? ` · Room ${t.roomNumber}` : ""}
-            {t.createdAt ? ` · ${timeAgo(t.createdAt)}` : ""}
-          </Typography>
-        </Box>
-        <Pill label={`${tier} priority`} tone={TIER_TONE[tier] || "default"} />
-      </Box>
-
-      {t.description && (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75, overflowWrap: "anywhere", display: "-webkit-box", WebkitLineClamp: compact ? 2 : 6, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-          {t.description}
-        </Typography>
-      )}
-
-      {t.photoUrl && !compact && (
-        <Box component="a" href={t.photoUrl} target="_blank" rel="noopener noreferrer" sx={{ display: "block", mt: 1.25 }}>
-          <Box component="img" src={t.photoUrl} alt="Photo attached to the request" loading="lazy" sx={{ display: "block", width: "100%", maxHeight: 180, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider" }} />
-        </Box>
-      )}
-
-      {!compact && updates.length > 0 && (
-        <Box sx={{ mt: 1.25, p: 1.25, borderRadius: 2, bgcolor: (th) => alpha(th.palette.info.main, 0.08) }}>
-          <Box sx={{ ...row, justifyContent: "space-between", gap: 1 }}>
-            <Typography variant="caption" sx={{ fontWeight: 800, color: "info.dark" }}>
-              {updates.length === 1 ? "Update from the tenant" : allUpdates ? `${updates.length} updates from the tenant` : "Latest update from the tenant"}
-            </Typography>
-            {updates.length > 1 && (
-              <Button size="small" onClick={() => setAllUpdates((v) => !v)} sx={{ minHeight: 28, py: 0, px: 1, fontWeight: 700, fontSize: 12, textTransform: "none" }}>
-                {allUpdates ? "Latest only" : `See all ${updates.length}`}
-              </Button>
-            )}
-          </Box>
-          {shownUpdates.map((f, i) => (
-            <Box key={i} sx={{ mt: 0.5 }}>
-              {f.text && (
-                <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
-                  {f.text}
-                </Typography>
-              )}
-              {f.photoUrl && (
-                <Box component="a" href={f.photoUrl} target="_blank" rel="noopener noreferrer" sx={{ display: "inline-block", mt: 0.5 }}>
-                  <Box component="img" src={f.photoUrl} alt="Photo added by the tenant" loading="lazy" sx={{ display: "block", width: 88, height: 88, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider" }} />
-                </Box>
-              )}
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
-                {f.at ? timeAgo(f.at) : ""}
-              </Typography>
-            </Box>
-          ))}
-        </Box>
-      )}
-
-      {onStatus ? (
-        <Box sx={{ display: "flex", gap: 0.75, mt: 1 }} role="group" aria-label="Request status">
-          {STATUS_OPTIONS.map((opt) => {
-            const current = status === opt;
-            return (
-              <Button
-                key={opt}
-                size="small"
-                disabled={busy}
-                aria-pressed={current}
-                variant={current ? "contained" : "outlined"}
-                color={current ? STATUS_TONE[opt] : "inherit"}
-                onClick={() => onStatus(t, opt)}
-                sx={{ flex: 1, minWidth: 0, minHeight: 40, px: 0.5, fontWeight: 700, fontSize: { xs: 12.5, sm: 13.5 }, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", borderRadius: 2, textTransform: "none", borderColor: current ? undefined : "divider", color: current ? undefined : "text.secondary" }}
-              >
-                {opt}
-              </Button>
-            );
-          })}
-        </Box>
-      ) : (
-        <Box sx={{ mt: 1 }}>
-          <Pill label={status} tone={STATUS_TONE[status] || "default"} />
-        </Box>
-      )}
-    </Paper>
-  );
-}
-
-function CheckRow({ t, entry, past, onSet, onNotice }) {
-  const status = entry?.status || "";
-  const accent = status === "present" ? "success.main" : status === "late" ? "warning.main" : status === "out" ? "error.main" : "divider";
-  const flagged = past && (status === "out" || status === "late");
-  return (
-    <Box
-      sx={{
-        ...cardSx,
-        ...row,
-        gap: 1,
-        p: 1,
-        pl: 1.5,
-        minWidth: 0,
-        borderLeft: "4px solid",
-        borderLeftColor: accent,
-        bgcolor: flagged ? (theme) => alpha(theme.palette[status === "out" ? "error" : "warning"].main, 0.05) : "background.default",
-      }}
-    >
-      <Box sx={{ minWidth: 0, flex: 1 }}>
-        <Typography sx={{ fontWeight: 800, lineHeight: 1.25 }} noWrap>
-          {t.name}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-          {t.bedId ? `Bed ${t.bedId}` : `Room ${t.roomNumber}`}
-          {status && timeOf(entry.at) ? ` · ${timeOf(entry.at)}` : ""}
-          {entry?.noticeSent ? " · notified" : ""}
-        </Typography>
-      </Box>
-      <Box sx={{ display: "flex", gap: 0.5, flexShrink: 0 }} role="group" aria-label={`Curfew check for ${t.name}`}>
-        {CHECK_OPTIONS.map((o) => {
-          const current = status === o.id;
-          return (
-            <Button
-              key={o.id}
-              aria-pressed={current}
-              variant={current ? "contained" : "outlined"}
-              color={current ? o.tone : "inherit"}
-              disableElevation
-              onClick={() => onSet(t, o.id)}
-              sx={{ minWidth: 0, width: { xs: 42, sm: 46 }, height: 44, px: 0, fontWeight: 800, fontSize: "0.8rem", borderRadius: 2, textTransform: "none", borderColor: current ? undefined : "divider", color: current ? undefined : "text.secondary" }}
-            >
-              {o.label}
-            </Button>
-          );
-        })}
-      </Box>
-      <IconButton aria-label={`Send a notice to ${t.name}`} onClick={() => onNotice(t)} sx={{ width: { xs: 34, sm: 40 }, height: 40, flexShrink: 0, color: "primary.main" }}>
-        <NotificationsActiveOutlinedIcon fontSize="small" />
-      </IconButton>
-    </Box>
-  );
-}
-
-function PayRow({ p }) {
-  const kind = payKind(p);
-  return (
-    <Box sx={{ ...cardSx, ...row, gap: 1.5, p: 1.5, minWidth: 0 }}>
-      <Box sx={{ minWidth: 0, flex: 1 }}>
-        <Typography sx={{ fontWeight: 800, lineHeight: 1.25 }} noWrap>
-          {p.tenantName || "Tenant"}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-          {p.periodMonth || "Period not set"} · {p.paymentMethod || "Online"}
-          {fmtDate(p.paymentDate || p.createdAt) ? ` · ${fmtDate(p.paymentDate || p.createdAt, { month: "short", day: "numeric" })}` : ""}
-        </Typography>
-        {(p.recordedByName || p.proofUrl) && (
-          <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-            {p.recordedByName ? `Recorded by ${p.recordedByName}` : ""}
-            {p.recordedByName && p.proofUrl ? " · " : ""}
-            {p.proofUrl && (
-              <Box component="a" href={p.proofUrl} target="_blank" rel="noopener noreferrer" sx={{ color: "primary.main", fontWeight: 700 }}>
-                Receipt photo
-              </Box>
-            )}
-          </Typography>
-        )}
-      </Box>
-      <Box sx={{ textAlign: "right", flexShrink: 0 }}>
-        <Typography sx={{ fontWeight: 800 }}>{peso(p.amount)}</Typography>
-        <Pill label={PAY_LABEL[kind]} tone={PAY_TONE[kind]} />
-      </Box>
-    </Box>
-  );
-}
-
-// Texts the same notice through the SMS worker (see sms-worker/SETUP.md). Never throws.
-async function sendNoticeSms({ tenantIds, title, message, propertyId }) {
-  if (!SMS_URL) return { ok: false, error: "Texting isn't set up yet." };
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 20000);
-  try {
-    const idToken = await auth.currentUser?.getIdToken();
-    if (!idToken) return { ok: false, error: "You're signed out." };
-    const res = await fetch(`${SMS_URL.replace(/\/+$/, "")}/notice`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
-      body: JSON.stringify({ tenantIds, title, message, propertyId }),
-      signal: controller.signal,
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.ok) return { ok: true, sent: data.sent || 0, skipped: data.skipped || 0, failed: data.failed || 0 };
-    return { ok: false, error: data.error || "The SMS service didn't accept it." };
-  } catch (err) {
-    return { ok: false, error: err?.name === "AbortError" ? "It took too long." : "Couldn't reach the SMS service." };
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-/* ---------------------------------------------------------------------------
-   Page
---------------------------------------------------------------------------- */
 export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -964,6 +87,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const [userTenants, setUserTenants] = useState([]);
   const [legacyTenants, setLegacyTenants] = useState([]);
   const [tickets, setTickets] = useState([]);
+  // The owner's extra fees for this property (electricity, Wi-Fi...), on top of rent
+  const [charges, setCharges] = useState([]);
   const [payments, setPayments] = useState([]);
   const [coverFailed, setCoverFailed] = useState(false);
   const [occ, setOcc] = useState({ key: "", entries: {}, meta: {}, error: false });
@@ -1066,6 +191,29 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           return;
         }
         setProperty({ id: propSnap.id, ...propSnap.data() });
+        // Live from here on: rooms, rates, curfew time and house rules the owner changes show right away
+        unsubs.push(
+          onSnapshot(
+            doc(db, "properties", propertyId),
+            (snap) => {
+              if (!cancelled && snap.exists()) setProperty({ id: snap.id, ...snap.data() });
+            },
+            (err) => console.warn("Property updates unavailable:", err?.code || err)
+          )
+        );
+        // The owner changed this caretaker's property or permissions: reload so every tab follows
+        const accessKey = (d) => JSON.stringify([d.assignedPropertyId || d.propertyId || "", d.permissions || {}]);
+        // Compared with the same record the listener watches, so a mismatch with the older caretakers record can never cause a reload loop
+        const startedWith = accessKey(userSnap.exists() ? userSnap.data() : {});
+        unsubs.push(
+          onSnapshot(
+            doc(db, "users", user.uid),
+            (snap) => {
+              if (!cancelled && snap.exists() && !snap.metadata.hasPendingWrites && accessKey(snap.data()) !== startedWith) window.location.reload();
+            },
+            (err) => console.warn("Account updates unavailable:", err?.code || err)
+          )
+        );
 
         const fail = (label) => (err) => {
           console.error(`Caretaker ${label} listener failed:`, err);
@@ -1103,6 +251,16 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
               fail("payments")
             )
           );
+          if (data.ownerUid) {
+            unsubs.push(
+              onSnapshot(
+                query(collection(db, "charges"), where("ownerUid", "==", data.ownerUid), where("propertyId", "==", propertyId)),
+                (snap) => setCharges(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isActiveCharge)),
+                // Fees are extra: not being able to read them must not break the page
+                (err) => console.warn("Fees unavailable:", err?.code || err)
+              )
+            );
+          }
         }
       } catch (err) {
         console.error("Failed to load caretaker dashboard:", err);
@@ -1152,7 +310,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
     });
     return withoutRemoved([...map.values()])
       .map((t) => {
-        const roomNumber = String(t.roomNumber || t.roomId || t.room || "");
+        const roomNumber = String(t.roomId || t.roomNumber || t.room || "");
         const room = rooms.find((r) => r.roomName === roomNumber || r.id === roomNumber);
         const status = t.status || "Active";
         return {
@@ -1160,7 +318,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           name: t.name || t.fullName || "Tenant",
           roomNumber,
           bedId: t.bedId || t.bedNumber || t.bed || "",
-          phone: t.contact || t.phone || t.phoneNumber || t.contactNumber || "",
+          phone: t.phone || t.contactNumber || t.contact || t.phoneNumber || "",
           status,
           inactive: isInactiveStatus(status),
           leaseStartDate: t.leaseStartDate || t.leaseStart || t.startDate || t.moveInDate || "",
@@ -1191,6 +349,13 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   }, [tenants, search, tenantFilter]);
 
   // ---- derived: rent this month
+  // One month for one tenant: rent + the owner's fees, less what was received
+  const billOf = (t, period) =>
+    monthBill(
+      t.rent,
+      chargesFor(charges, t.id, period),
+      payments.filter((p) => p.tenantId === t.id && normPeriod(p.periodMonth) === normPeriod(period))
+    );
   const rentState = (() => {
     const rank = { paid: 4, pending: 3, partial: 2, rejected: 1 };
     const m = {};
@@ -1199,6 +364,12 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       const k = payKind(p);
       if (!m[p.tenantId] || rank[k] > rank[m[p.tenantId]]) m[p.tenantId] = k;
     });
+    // Fees count too: rent marked paid with fees still open is part-paid
+    rentTenants.forEach((t) => {
+      const bill = billOf(t, currentPeriod);
+      if (bill.settled) m[t.id] = "paid";
+      else if (m[t.id] === "paid") m[t.id] = "partial";
+    });
     return m;
   })();
   const unpaidTenants = rentTenants.filter((t) => !["paid", "pending"].includes(rentState[t.id]));
@@ -1206,8 +377,6 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const paidCount = rentTenants.filter((t) => rentState[t.id] === "paid").length;
   // Money received this month: full and partial payments (same rule as the owner's Payments page)
   const collected = payments.filter((p) => normPeriod(p.periodMonth) === periodKey && isReceived(p)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const receivedFrom = (tenantId, period) =>
-    payments.filter((p) => p.tenantId === tenantId && normPeriod(p.periodMonth) === normPeriod(period) && isReceived(p)).reduce((s, p) => s + (Number(p.amount) || 0), 0);
 
   const sortedPayments = useMemo(() => [...payments].sort((a, b) => getTimestampMillis(b.paymentDate || b.createdAt) - getTimestampMillis(a.paymentDate || a.createdAt)), [payments]);
   const payCounts = useMemo(
@@ -1295,6 +464,10 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
 
   const ownerUidValue = property?.ownerUid || profile.ownerUid || "";
 
+  // Recorded for the owner (Caretakers → this caretaker → Activity). Best effort.
+  const logAction = (category, summary, extra = {}) =>
+    logActivity({ ownerUid: profile.ownerUid || ownerUidValue, actorName: profile.name, category, summary, propertyId: property?.id || "", propertyName, ...extra });
+
   // Leaving the page shouldn't swallow an automatic notice that was waiting out its undo window
   useEffect(
     () => () => {
@@ -1326,6 +499,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         ...(next === "Resolved" ? { resolvedAt: serverTimestamp() } : {}),
       });
       notifyMaintenanceStatusChanged(t, next, "caretaker");
+      logAction("repair", `Changed repair request "${t.title || "Untitled"}" from ${prev} to ${next}`, { action: "repair.status", targetId: t.id, targetName: t.title || "", details: { from: prev, to: next } });
       const tenantId = t.tenantUid || t.tenantId;
       if (tenantId && property?.id) {
         const title = t.title || "your request";
@@ -1368,26 +542,44 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
     }
   };
 
-  const writeChecks = (entries, extra = {}) => {
+  // `night` is only passed when re-sending marks saved on this phone from an earlier night
+  const writeChecks = (entries, extra = {}, night = nightKey) => {
     if (!property?.id) return;
+    // A copy stays on this phone until the server has it, so marks made offline
+    // survive closing the app (sent again by the effect below)
+    const version = rememberPendingMarks(uid, property.id, night, entries);
     setDoc(
-      doc(db, "occupancy_logs", `${property.id}_${nightKey}`),
-      { propertyId: property.id, propertyName, ownerUid: ownerUidValue, date: nightKey, curfewTime: curfewTime || "", entries, updatedAt: serverTimestamp(), recordedBy: uid, recordedByName: profile.name, ...extra },
+      doc(db, "occupancy_logs", `${property.id}_${night}`),
+      { propertyId: property.id, propertyName, ownerUid: ownerUidValue, date: night, curfewTime: curfewTime || "", entries, updatedAt: serverTimestamp(), recordedBy: uid, recordedByName: profile.name, ...extra },
       { merge: true }
-    ).catch((err) => {
-      console.error("Failed to save curfew check:", err);
-      notify("Couldn't save that check. Please try again.", "error");
-    });
+    )
+      .then(() => forgetPendingMarks(uid, property.id, night, version))
+      .catch((err) => {
+        console.error("Failed to save curfew check:", err);
+        notify("Couldn't save that check. Please try again.", "error");
+      });
     // Each tenant also gets a private record of their own night, so they can see it without seeing anyone else's
     Object.entries(entries).forEach(([tenantId, e]) => {
       if (!e || typeof e !== "object" || !e.status) return;
       setDoc(
-        doc(db, "curfew_records", `${property.id}_${nightKey}_${tenantId}`),
-        { tenantId, propertyId: property.id, ownerUid: ownerUidValue, date: nightKey, curfewTime: curfewTime || "", status: e.status, name: e.name || "", roomNumber: e.roomNumber || "", at: e.at || serverTimestamp(), recordedBy: uid, recordedByName: profile.name },
+        doc(db, "curfew_records", `${property.id}_${night}_${tenantId}`),
+        { tenantId, propertyId: property.id, ownerUid: ownerUidValue, date: night, curfewTime: curfewTime || "", status: e.status, name: e.name || "", roomNumber: e.roomNumber || "", at: e.at || serverTimestamp(), recordedBy: uid, recordedByName: profile.name },
         { merge: true }
       ).catch((err) => console.warn("Tenant curfew record not saved:", err?.code || err));
     });
   };
+
+  // Back online (or the app was reopened): send marks that never reached the server
+  const resentPending = useRef(false);
+  useEffect(() => {
+    if (!online || !uid || !property?.id || !canOccupancy || resentPending.current) return;
+    resentPending.current = true;
+    Object.entries(readPendingMarks(uid, property.id)).forEach(([night, stored]) => writeChecks(stored, {}, night));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [online, uid, property?.id, canOccupancy]);
+  useEffect(() => {
+    if (!online) resentPending.current = false;
+  }, [online]);
 
   const undoChecks = (prev) => {
     Object.keys(prev).forEach((id) => {
@@ -1398,6 +590,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       }
     });
     writeChecks(Object.fromEntries(Object.entries(prev).map(([id, e]) => [id, e ? { ...e, noticeSent: e.noticeSent ?? deleteField() } : deleteField()])));
+    const undone = Object.keys(prev).map((id) => tenants.find((x) => x.id === id)?.name).filter(Boolean);
+    if (undone.length) logAction("curfew", `Undid the curfew mark for ${undone.length === 1 ? undone[0] : `${undone.length} tenants`}`, { action: "curfew.undo" });
     Object.entries(prev).forEach(([tenantId, e]) => {
       if (!e && property?.id) deleteDoc(doc(db, "curfew_records", `${property.id}_${nightKey}_${tenantId}`)).catch(() => {});
     });
@@ -1436,6 +630,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
     }
     buzz();
     writeChecks({ [t.id]: entry });
+    logAction("curfew", `Marked ${t.name}${t.roomNumber ? ` (Room ${t.roomNumber})` : ""} as ${CHECK_WORD[status]}${existing?.status ? ` (was ${CHECK_WORD[existing.status] || existing.status})` : ""}`, { action: "curfew.mark", targetId: t.id, targetName: t.name, details: { status, ...(existing?.status ? { was: existing.status } : {}) } });
     notify(`${firstName(t.name)} marked ${CHECK_WORD[status]}${willNotify ? ". Notifying them in a moment" : ""}.`, "success", () => undoChecks({ [t.id]: existing || null }));
   };
 
@@ -1444,6 +639,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
     buzz();
     const prev = Object.fromEntries(list.map((t) => [t.id, occEntries[t.id] || null]));
     writeChecks(Object.fromEntries(list.map((t) => [t.id, { name: t.name, roomNumber: t.roomNumber, status: "present", at: serverTimestamp(), by: profile.name }])));
+    logAction("curfew", `Marked ${list.length === 1 ? list[0].name : `${list.length} tenants`} as in`, { action: "curfew.mark_many" });
     notify(message, "success", () => undoChecks(prev));
   };
 
@@ -1501,6 +697,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       await pushNotices(notice.recipients.map((r) => ({ userId: r.id, kind: "notice", type: notice.type, title, message })));
       if (notice.reminder) writeChecks({}, { reminderSentAt: serverTimestamp() });
       const n = notice.recipients.length;
+      logAction("notice", `Sent the notice "${title}" to ${n === 1 ? notice.recipients[0].name || "1 tenant" : `${n} tenants`}`, { action: "notice.send", details: { message: message.slice(0, 200) } });
       let smsNote = "";
       if (notice.sms && SMS_URL) {
         const res = await sendNoticeSms({ tenantIds: notice.recipients.map((r) => r.id), title, message, propertyId: property.id });
@@ -1522,14 +719,17 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const cashPaid = cashExisting.some((p) => payKind(p) === "paid");
   const cashPending = cashExisting.some((p) => payKind(p) === "pending");
   const cashReceivedBefore = cashExisting.filter(isReceived).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  const cashBalance = cashTenant?.rent ? Math.max(Math.round((cashTenant.rent - cashReceivedBefore) * 100) / 100, 0) : null;
+  // What's still owed for that month: rent + fees, less what was already received
+  const cashBill = cashTenant ? billOf(cashTenant, cash.periodMonth) : null;
+  const cashBalance = cashBill && cashBill.total > 0 ? cashBill.balance : null;
   const cashAmountNum = Number(cash.amount) || 0;
   // Less than what's still owed for that month = a partial payment
   const cashStatus = cashBalance !== null && cashAmountNum > 0 && cashAmountNum < cashBalance ? "Partial" : "Paid";
 
   const openCash = (tenantId = "") => {
     const t = tenants.find((x) => x.id === tenantId);
-    setCash({ tenantId, amount: t?.rent ? String(t.rent) : "", periodMonth: currentPeriod, paymentDate: dayKey, notes: DEFAULT_CASH_NOTE });
+    const owed = t ? billOf(t, currentPeriod).balance : 0;
+    setCash({ tenantId, amount: owed > 0 ? String(owed) : t?.rent ? String(t.rent) : "", periodMonth: currentPeriod, paymentDate: dayKey, notes: DEFAULT_CASH_NOTE });
     setCashProof(null);
     setAmountTouched(false);
     setCashErrors({});
@@ -1555,8 +755,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   };
   const pickCashTenant = (id) => {
     const t = tenants.find((x) => x.id === id);
-    // Suggest what's still owed for the month (the full rent if nothing was paid yet)
-    const owed = t?.rent ? Math.max(t.rent - receivedFrom(id, cash.periodMonth), 0) : 0;
+    // Suggest what's still owed for the month (rent + fees if nothing was paid yet)
+    const owed = t ? billOf(t, cash.periodMonth).balance : 0;
     setCash((c) => ({ ...c, tenantId: id, amount: !amountTouched && owed > 0 ? String(owed) : c.amount }));
     setCashErrors((e) => ({ ...e, tenantId: undefined }));
   };
@@ -1588,7 +788,10 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           return;
         }
       }
-      const cashRef = await addDoc(collection(db, "payments"), {
+      // The property's owner: their receipt counter numbers this receipt right away
+      const cashOwnerUid = property.ownerUid || cashTenant.ownerUid || profile.ownerUid || "";
+      const cashRef = doc(collection(db, "payments"));
+      const cashPayment = {
         tenantId: cashTenant.id,
         tenantName: cashTenant.name,
         propertyId: property.id,
@@ -1600,15 +803,31 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         status: cashStatus,
         verificationStatus: "Approved",
         remarks: cash.notes.trim(),
-        ownerUid: cashTenant.ownerUid || property.ownerUid || profile.ownerUid || "",
+        // What the month was billed at (rent + fees), for the receipt
+        bill: billSnapshot(cashTenant.rent, chargesFor(charges, cashTenant.id, cash.periodMonth)),
+        ownerUid: cashOwnerUid,
         paymentDate: new Date(`${cash.paymentDate}T12:00:00`),
         createdAt: serverTimestamp(),
         recordedBy: uid,
         recordedByName: profile.name,
         recordedByRole: "caretaker",
         ...(proofUrl ? { proofUrl } : {}),
-      });
+      };
+      let receiptNo = "";
+      try {
+        await runTransaction(db, async (tx) => {
+          const issued = await reserveReceiptNo(tx, db, cashOwnerUid, cashRef.id);
+          receiptNo = issued.receiptNo;
+          tx.set(cashRef, { ...cashPayment, ...issued });
+        });
+      } catch (receiptErr) {
+        // Couldn't take a number (e.g. no access to the counter): save it anyway; the owner numbers it later
+        console.warn("Receipt number not issued:", receiptErr?.code || receiptErr);
+        receiptNo = "";
+        await setDoc(cashRef, cashPayment);
+      }
       const leftAfter = cashBalance !== null ? Math.max(cashBalance - cashAmountNum, 0) : 0;
+      logAction("payment", `Recorded ${peso(cash.amount)} cash from ${cashTenant.name} for ${cash.periodMonth}${cashStatus === "Partial" ? ` (partial, ${peso(leftAfter)} left)` : ""}`, { action: "payment.cash", targetId: cashRef.id, targetName: cashTenant.name, details: { amount: Number(cash.amount), period: cash.periodMonth, status: cashStatus } });
       pushNotices([
         {
           userId: cashTenant.id,
@@ -1618,8 +837,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           title: cashStatus === "Partial" ? "Partial cash payment recorded" : "Cash payment recorded",
           message:
             cashStatus === "Partial"
-              ? `Your caretaker recorded your ${peso(cash.amount)} cash payment for ${cash.periodMonth}. ${peso(leftAfter)} is still due for that month.`
-              : `Your caretaker recorded your ${peso(cash.amount)} cash payment for ${cash.periodMonth}. Thank you!`,
+              ? `Your caretaker recorded your ${peso(cash.amount)} cash payment for ${cash.periodMonth}. ${peso(leftAfter)} is still due for that month.${receiptNo ? ` Receipt No. ${receiptNo} is in your Payments tab.` : ""}`
+              : `Your caretaker recorded your ${peso(cash.amount)} cash payment for ${cash.periodMonth}. Thank you!${receiptNo ? ` Receipt No. ${receiptNo} is in your Payments tab.` : ""}`,
         },
       ]).catch((err) => console.warn("Cash notice failed:", err?.code || err));
       notifyCashPaymentRecorded(
@@ -1635,7 +854,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         "caretaker",
       );
       setCashOpen(false);
-      notify(`Recorded ${peso(cash.amount)} from ${cashTenant.name}${cashStatus === "Partial" ? " as a partial payment" : ""}.`);
+      notify(`Recorded ${peso(cash.amount)} from ${cashTenant.name}${cashStatus === "Partial" ? " as a partial payment" : ""}${receiptNo ? ` · Receipt No. ${receiptNo}` : ""}.`);
     } catch (err) {
       console.error("Failed to record cash payment:", err);
       setCashErrors({ form: "Couldn't record the payment. Please try again." });
@@ -1723,7 +942,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           body={loadError || "Ask the property owner to assign a facility to your caretaker account."}
           action={
             <Button variant="contained" startIcon={<RefreshOutlinedIcon />} onClick={retryLoad} sx={{ mt: 2, fontWeight: 700, borderRadius: 2.5, minHeight: 46 }}>
-              {loadError ? "Try again" : "Check again"}
+              {loadError ? tr("Try again") : tr("Check again")}
             </Button>
           }
         />
@@ -1735,11 +954,11 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
     <Paper elevation={0} sx={{ ...cardSx, borderStyle: "dashed" }}>
       <EmptyState
         icon={<InfoOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />}
-        title="Not enabled for your account"
+        title={tr("Not enabled for your account")}
         body={`${what} access hasn't been turned on by the property owner.`}
         action={
           <Button variant="outlined" onClick={() => goTab("overview")} sx={{ mt: 2, fontWeight: 700, borderRadius: 2.5 }}>
-            Back to overview
+            {tr("Back to overview")}
           </Button>
         }
       />
@@ -1757,11 +976,11 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       icon: ScheduleIcon,
       title: checkCounts.out > 0 ? `${checkCounts.out} ${checkCounts.out === 1 ? "tenant is" : "tenants are"} out past curfew` : "Curfew has started",
       body: `${uncheckedCount} of ${checkTenants.length} ${uncheckedCount === 1 ? "tenant isn't" : "tenants aren't"} checked yet.`,
-      actionLabel: "Open curfew check",
+      actionLabel: tr("Open curfew check"),
       onAction: openCurfewCheck,
     });
   } else if (canOccupancy && curfewPhase === "before" && minsUntil <= 60 && uncheckedCount > 0) {
-    attention.push({ key: "curfew", tone: "info", icon: ScheduleIcon, title: `Curfew in ${minsLabel(minsUntil)}`, body: "Get ready for tonight's check, or send everyone a reminder.", actionLabel: "Open curfew check", onAction: openCurfewCheck });
+    attention.push({ key: "curfew", tone: "info", icon: ScheduleIcon, title: `Curfew in ${minsLabel(minsUntil)}`, body: tr("Get ready for tonight's check, or send everyone a reminder."), actionLabel: tr("Open curfew check"), onAction: openCurfewCheck });
   }
   if (canReports && highTickets.length > 0) {
     attention.push({
@@ -1769,7 +988,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       tone: "error",
       title: highTickets.length === 1 ? "1 high-priority request" : `${highTickets.length} high-priority requests`,
       body: highTickets[0].title ? `Most urgent: ${highTickets[0].title}${highTickets[0].roomNumber ? ` (Room ${highTickets[0].roomNumber})` : ""}` : undefined,
-      actionLabel: "Review",
+      actionLabel: tr("Review"),
       onAction: () => goTab("maintenance"),
     });
   }
@@ -1778,604 +997,148 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       key: "unpaid",
       tone: "warning",
       title: unpaidTenants.length === 1 ? `1 tenant hasn't paid for ${currentPeriod}` : `${unpaidTenants.length} tenants haven't paid for ${currentPeriod}`,
-      actionLabel: "See who",
+      actionLabel: tr("See who"),
       onAction: () => goTab("payments"),
     });
   }
   if (listenError) {
-    attention.push({ key: "listen", tone: "warning", title: "Some information couldn't be loaded", body: "Check your connection or ask the owner to review your access.", actionLabel: "Retry", onAction: retryLoad });
+    attention.push({ key: "listen", tone: "warning", title: tr("Some information couldn't be loaded"), body: tr("Check your connection or ask the owner to review your access."), actionLabel: tr("Retry"), onAction: retryLoad });
   }
 
   const quickActions = [
-    canOccupancy && { key: "curfew", icon: <ScheduleIcon fontSize="small" />, label: "Curfew check", badge: pastCurfew ? checkCounts.out : 0, onClick: openCurfewCheck },
-    canReports && { key: "requests", icon: <BuildOutlinedIcon fontSize="small" />, label: "Requests", badge: activeTickets.length, onClick: () => goTab("maintenance") },
-    canFinancials && { key: "cash", icon: <PaymentIcon fontSize="small" />, label: "Record cash", onClick: () => openCash() },
-    canTenants && { key: "tenants", icon: <PeopleAltOutlinedIcon fontSize="small" />, label: "Tenants", onClick: openDirectory },
+    canOccupancy && { key: "curfew", icon: <ScheduleIcon fontSize="small" />, label: tr("Curfew check"), badge: pastCurfew ? checkCounts.out : 0, onClick: openCurfewCheck },
+    canReports && { key: "requests", icon: <BuildOutlinedIcon fontSize="small" />, label: tr("Requests"), badge: activeTickets.length, onClick: () => goTab("maintenance") },
+    canFinancials && { key: "cash", icon: <PaymentIcon fontSize="small" />, label: tr("Record cash"), onClick: () => openCash() },
+    canTenants && { key: "tenants", icon: <PeopleAltOutlinedIcon fontSize="small" />, label: tr("Tenants"), onClick: openDirectory },
   ].filter(Boolean);
 
   const overview = (
-    <>
-      {/* Hero: the facility's cover photo */}
-      <Box
-        sx={{
-          position: "relative",
-          overflow: "hidden",
-          bgcolor: "#202020",
-          color: "#fff",
-          borderRadius: 4,
-          p: { xs: 2, sm: 4 },
-          mb: { xs: 2, sm: 3 },
-          minHeight: { xs: 190, sm: 230 },
-          display: "flex",
-          alignItems: "flex-end",
-          ...rise(0),
-        }}
-      >
-        {hasCover ? (
-          <>
-            <Box component="img" src={coverUrl} alt="" onError={() => setCoverFailed(true)} sx={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
-            <Box sx={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,20,20,0.3) 0%, rgba(20,20,20,0.88) 75%)" }} />
-          </>
-        ) : (
-          <Box sx={{ position: "absolute", top: -140, right: -100, width: 380, height: 380, borderRadius: "50%", background: "radial-gradient(circle, rgba(255, 69, 0, 0.22), transparent 70%)", pointerEvents: "none" }} />
-        )}
-        <Box sx={{ position: "relative", minWidth: 0 }}>
-          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mb: 1.5 }}>
-            <Chip size="small" label="Caretaker" sx={{ fontWeight: 700, bgcolor: "rgba(255,255,255,0.16)", color: "#fff" }} />
-            {curfewTime && <Chip size="small" icon={<ScheduleIcon />} label={curfewPhase === "active" ? "Curfew in effect" : curfewPhase === "before" && minsUntil <= 120 ? `Curfew in ${minsLabel(minsUntil)}` : `Curfew ${curfewTime}`} sx={{ fontWeight: 700, bgcolor: "rgba(255,255,255,0.16)", color: "#fff", "& .MuiChip-icon": { color: "inherit" } }} />}
-          </Box>
-          <Typography component="h1" sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, color: "#fff", fontSize: { xs: "1.45rem", sm: "2.1rem" }, lineHeight: 1.15, overflowWrap: "anywhere" }}>
-            {greeting()}, {firstName(profile.name)}
-          </Typography>
-          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.85)", mt: 0.75, overflowWrap: "anywhere" }}>
-            {propertyName}
-            {address ? ` · ${address}` : ""}
-          </Typography>
-        </Box>
-      </Box>
-
-      {attention.length > 0 && (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mb: { xs: 2, sm: 3 } }}>
-          {(attentionOpen ? attention : attention.slice(0, 2)).map(({ key, ...a }) => (
-            <AttentionBanner key={key} {...a} />
-          ))}
-          {attention.length > 2 && (
-            <Button
-              onClick={() => setAttentionOpen((v) => !v)}
-              color="inherit"
-              aria-expanded={attentionOpen}
-              endIcon={<ExpandMoreIcon sx={{ transform: attentionOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />}
-              sx={{ alignSelf: "flex-start", fontWeight: 700, minHeight: 36, py: 0.5, px: 1.5, borderRadius: 99, textTransform: "none", color: "text.secondary" }}
-            >
-              {attentionOpen ? "Show fewer" : `${attention.length - 2} more to check`}
-            </Button>
-          )}
-        </Box>
-      )}
-
-      {/* The things a caretaker does most, one thumb-tap away */}
-      {quickActions.length > 0 && (
-        <Box sx={{ display: "grid", gridTemplateColumns: `repeat(${quickActions.length}, minmax(0, 1fr))`, gap: { xs: 1, sm: 1.5 }, mb: { xs: 2, sm: 3 }, ...rise(1) }}>
-          {quickActions.map(({ key, ...q }) => (
-            <QuickAction key={key} {...q} />
-          ))}
-        </Box>
-      )}
-
-      {/* Where things stand (tap a tile to open it) */}
-      {(() => {
-        const tiles = [
-          { key: "beds", title: "Beds filled", value: `${bedsUsed}/${totalBeds}`, subtitle: `${occupiedRooms} of ${totalRooms} rooms in use`, icon: <MeetingRoomOutlinedIcon fontSize="small" />, onClick: canTenantsTab ? () => goTab("tenants") : undefined },
-          { key: "residents", title: "Residents", value: activeTenants.length, subtitle: "Active tenants", icon: <PeopleAltOutlinedIcon fontSize="small" />, onClick: canTenantsTab ? openDirectory : undefined },
-          canOccupancy &&
-            curfewTime && {
-              key: "tonight",
-              title: "Tonight",
-              value: `${checkedCount}/${checkTenants.length}`,
-              subtitle: checkCounts.out > 0 ? `${checkCounts.out} out past curfew` : uncheckedCount > 0 ? `${uncheckedCount} not checked yet` : "Everyone checked",
-              tone: checkCounts.out > 0 ? "error" : undefined,
-              icon: <ScheduleIcon fontSize="small" />,
-              onClick: openCurfewCheck,
-            },
-          canReports && {
-            key: "requests",
-            title: "Open requests",
-            value: activeTickets.length,
-            subtitle: highTickets.length ? `${highTickets.length} high priority` : "None urgent",
-            tone: highTickets.length ? "error" : undefined,
-            icon: <BuildOutlinedIcon fontSize="small" />,
-            onClick: () => goTab("maintenance"),
-          },
-          canFinancials && { key: "rent", title: `${currentPeriod.split(" ")[0]} rent`, value: peso(collected), subtitle: `${paidCount} of ${rentTenants.length} paid`, icon: <PaymentIcon fontSize="small" />, onClick: () => goTab("payments") },
-        ].filter(Boolean);
-        return (
-          <Box
-            sx={{
-              display: "grid",
-              gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: `repeat(${Math.min(tiles.length, 5)}, minmax(0, 1fr))` },
-              gap: { xs: 1.25, md: 2 },
-              mb: { xs: 2, sm: 3 },
-              ...rise(1),
-              // An odd last tile spans the row on phones instead of leaving a hole
-              ...(tiles.length % 2 === 1 ? { "& > :last-of-type": { gridColumn: { xs: "1 / -1", md: "auto" } } } : {}),
-            }}
-          >
-            {tiles.map(({ key, ...t }) => (
-              <StatTile key={key} {...t} />
-            ))}
-          </Box>
-        );
-      })()}
-
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 2, md: 3 }, alignItems: "start" }}>
-        <Box sx={{ display: "flex", flexDirection: "column", gap: { xs: 2, md: 3 }, minWidth: 0 }}>
-          <Panel title="Property" icon={<PlaceOutlinedIcon fontSize="small" />} sx={rise(2)}>
-            <Typography sx={{ fontWeight: 800 }}>{propertyName}</Typography>
-            {address && (
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-                {address}
-              </Typography>
-            )}
-            {property.propertyType && (
-              <Box sx={{ mt: 1 }}>
-                <Pill label={String(property.propertyType)} icon={<HomeWorkOutlinedIcon />} />
-              </Box>
-            )}
-            {amenities.length > 0 && (
-              <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1.5 }}>
-                {amenities.map((a) => (
-                  <Pill key={a} label={a} />
-                ))}
-              </Box>
-            )}
-            {property.emergencyPhone && (
-              <Button component="a" href={`tel:${property.emergencyPhone}`} variant="outlined" color="error" fullWidth startIcon={<PhoneOutlinedIcon />} sx={{ mt: 2, fontWeight: 700, borderRadius: 2.5, minHeight: 46 }}>
-                Emergency: {property.emergencyPhone}
-              </Button>
-            )}
-          </Panel>
-
-          {canReports && (
-            <Panel
-              title="Needs a look"
-              icon={<BuildOutlinedIcon fontSize="small" />}
-              sx={rise(4)}
-              action={
-                activeTickets.length > 0 && (
-                  <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => goTab("maintenance")} sx={{ fontWeight: 700, minHeight: 40 }}>
-                    View all
-                  </Button>
-                )
-              }
-            >
-              {activeTickets.length === 0 ? (
-                <Typography variant="body2" color="text.secondary">
-                  No open maintenance requests.
-                </Typography>
-              ) : (
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
-                  {activeTickets.slice(0, 3).map((t) => (
-                    <RequestCard key={t.id} t={t} compact />
-                  ))}
-                </Box>
-              )}
-            </Panel>
-          )}
-        </Box>
-
-        <Panel title="House rules & curfew" icon={<PolicyOutlinedIcon fontSize="small" />} sx={rise(3)}>
-          {!hasHouseRules ? (
-            <Typography variant="body2" color="text.secondary">
-              The owner hasn't posted house rules for this property yet.
-            </Typography>
-          ) : (
-            <>
-              {curfewTime && (
-                <Box sx={{ ...row, gap: 1.25, p: 1.5, mb: 1.5, borderRadius: 2.5, bgcolor: (t) => alpha(t.palette.primary.main, 0.08) }}>
-                  <ScheduleIcon color="primary" />
-                  <Box>
-                    <Typography sx={{ fontWeight: 800 }}>Curfew at {curfewTime}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Residents should be back by then.
-                    </Typography>
-                  </Box>
-                </Box>
-              )}
-              {rules.length > 0 && (
-                <>
-                  <Box component="ol" sx={{ m: 0, pl: 2.5, display: "flex", flexDirection: "column", gap: 0.9 }}>
-                    {(rulesOpen ? rules : rules.slice(0, RULES_PREVIEW)).map((r, i) => (
-                      <Typography component="li" variant="body2" key={`${i}-${r}`} sx={{ overflowWrap: "anywhere" }}>
-                        {r}
-                      </Typography>
-                    ))}
-                  </Box>
-                  {rules.length > RULES_PREVIEW && (
-                    <Button
-                      size="small"
-                      onClick={() => setRulesOpen((v) => !v)}
-                      aria-expanded={rulesOpen}
-                      endIcon={<ExpandMoreIcon sx={{ transform: rulesOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />}
-                      sx={{ mt: 1, minHeight: 40, fontWeight: 700, textTransform: "none" }}
-                    >
-                      {rulesOpen ? "Show fewer rules" : `Show all ${rules.length} rules`}
-                    </Button>
-                  )}
-                </>
-              )}
-              {ruleFiles.length > 0 && (
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75, mt: rules.length > 0 ? 2 : 0 }}>
-                  {ruleFiles.map((f, i) => (
-                    <Button key={`${i}-${f.url}`} onClick={() => setPreviewFile(f)}
-                      variant="outlined" startIcon={<DescriptionOutlinedIcon />} sx={{ justifyContent: "flex-start", fontWeight: 700, borderRadius: 2.5, minHeight: 44, textTransform: "none" }}>
-                      {f.name || "House rules document"}
-                    </Button>
-                  ))}
-                </Box>
-              )}
-            </>
-          )}
-        </Panel>
-        <FilePreviewDialog file={previewFile} onClose={() => setPreviewFile(null)} />
-      </Box>
-    </>
+    <CaretakerOverviewTab
+      activeTenants={activeTenants}
+      activeTickets={activeTickets}
+      address={address}
+      amenities={amenities}
+      attention={attention}
+      attentionOpen={attentionOpen}
+      bedsUsed={bedsUsed}
+      canFinancials={canFinancials}
+      canOccupancy={canOccupancy}
+      canReports={canReports}
+      canTenantsTab={canTenantsTab}
+      checkCounts={checkCounts}
+      checkTenants={checkTenants}
+      checkedCount={checkedCount}
+      collected={collected}
+      coverUrl={coverUrl}
+      curfewPhase={curfewPhase}
+      curfewTime={curfewTime}
+      currentPeriod={currentPeriod}
+      goTab={goTab}
+      hasCover={hasCover}
+      hasHouseRules={hasHouseRules}
+      highTickets={highTickets}
+      minsLabel={minsLabel}
+      minsUntil={minsUntil}
+      occupiedRooms={occupiedRooms}
+      openCurfewCheck={openCurfewCheck}
+      openDirectory={openDirectory}
+      paidCount={paidCount}
+      previewFile={previewFile}
+      profile={profile}
+      property={property}
+      propertyName={propertyName}
+      quickActions={quickActions}
+      rentTenants={rentTenants}
+      ruleFiles={ruleFiles}
+      rules={rules}
+      rulesOpen={rulesOpen}
+      setAttentionOpen={setAttentionOpen}
+      setCoverFailed={setCoverFailed}
+      setPreviewFile={setPreviewFile}
+      setRulesOpen={setRulesOpen}
+      totalBeds={totalBeds}
+      totalRooms={totalRooms}
+      uncheckedCount={uncheckedCount}
+    />
   );
 
   /* -------------------------------------------------------------------------
      Tenants
   ------------------------------------------------------------------------- */
   const directoryView = (
-    <>
-      {canOccupancy && (
-        <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(3, minmax(0, 1fr))" }, gap: { xs: 1.25, md: 2 }, mb: { xs: 2, sm: 3 } }}>
-          <StatTile title="Total occupants" value={activeTenants.length} subtitle="Active tenants" icon={<PeopleAltOutlinedIcon fontSize="small" />} />
-          <StatTile title="Rooms in use" value={`${occupiedRooms}/${totalRooms}`} subtitle={`${Math.max(0, totalRooms - occupiedRooms)} available`} icon={<MeetingRoomOutlinedIcon fontSize="small" />} />
-          <Box sx={{ gridColumn: { xs: "1 / -1", md: "auto" }, minWidth: 0 }}>
-            <StatTile title="Curfew" value={curfewTime || "Not set"} subtitle={curfewTime ? "Residents back by then" : "No curfew for this property"} icon={<ScheduleIcon fontSize="small" />} />
-          </Box>
-        </Box>
-      )}
-      <Box sx={{ mb: 1.5 }}>
-        <SearchBox
-          value={search}
-          onChange={(v) => {
-            setSearch(v);
-            setRoomsShown(ROOM_PAGE);
-          }}
-          placeholder="Search name or room"
-        />
-      </Box>
-      <FilterChips
-        value={tenantFilter}
-        onChange={(v) => {
-          setTenantFilter(v);
-          setRoomsShown(ROOM_PAGE);
-        }}
-        options={[
-          { id: "active", label: "Active", n: activeTenants.length },
-          { id: "inactive", label: "Inactive", n: tenants.length - activeTenants.length },
-          { id: "all", label: "All", n: tenants.length },
-        ]}
-      />
-      {filteredTenants.length === 0 ? (
-        <Paper elevation={0} sx={{ ...cardSx, borderStyle: "dashed" }}>
-          <EmptyState
-            icon={<PeopleAltOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />}
-            title={search ? "No match" : "No tenants here"}
-            body={search ? `Nobody matches "${search}".` : "Tenants registered by the owner will show up here."}
-            action={
-              search ? (
-                <Button onClick={() => setSearch("")} sx={{ mt: 1.5, fontWeight: 700 }}>
-                  Clear search
-                </Button>
-              ) : undefined
-            }
-          />
-        </Paper>
-      ) : (
-        (() => {
-          const groups = groupByRoom(filteredTenants);
-          const shown = groups.slice(0, roomsShown);
-          const tenantsLeft = groups.slice(roomsShown).reduce((n, [, list]) => n + list.length, 0);
-          return (
-            <>
-              {shown.map(([room, list]) => (
-                <Box key={room || "none"} sx={{ mb: 2 }}>
-                  <RoomHeader title={room ? `Room ${room}` : "No room yet"} meta={`${list.length} ${list.length === 1 ? "tenant" : "tenants"}`} />
-                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))", xl: "repeat(3, minmax(0, 1fr))" }, gap: 1 }}>
-                    {list.map((t) => (
-                      <TenantCard key={t.id} t={t} showRent={canFinancials} rentState={rentState[t.id]} onClick={() => setSelectedTenantId(t.id)} />
-                    ))}
-                  </Box>
-                </Box>
-              ))}
-              {groups.length > ROOM_PAGE && (
-                <Box sx={{ textAlign: "center", mt: 1 }}>
-              <Button size="small" onClick={() => setRoomsShown((n) => (n >= groups.length ? ROOM_PAGE : n + ROOM_PAGE))} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
-                {roomsShown >= groups.length ? "Show fewer rooms" : `Show ${Math.min(ROOM_PAGE, groups.length - roomsShown)} more rooms (${tenantsLeft} ${tenantsLeft === 1 ? "tenant" : "tenants"})`}
-              </Button>
-            </Box>
-              )}
-            </>
-          );
-        })()
-      )}
-    </>
+    <CaretakerDirectoryView
+      activeTenants={activeTenants}
+      canFinancials={canFinancials}
+      canOccupancy={canOccupancy}
+      curfewTime={curfewTime}
+      filteredTenants={filteredTenants}
+      occupiedRooms={occupiedRooms}
+      rentState={rentState}
+      roomsShown={roomsShown}
+      search={search}
+      setRoomsShown={setRoomsShown}
+      setSearch={setSearch}
+      setSelectedTenantId={setSelectedTenantId}
+      setTenantFilter={setTenantFilter}
+      tenantFilter={tenantFilter}
+      tenants={tenants}
+      totalRooms={totalRooms}
+    />
   );
 
   const curfewView = (
-    <>
-      {occError && (
-        <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
-          Tonight's check couldn't be loaded, so saved marks may not show. Ask the owner to review your access.
-        </Alert>
-      )}
-
-      {/* Where tonight stands */}
-      <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 2.5 }, mb: 2, borderColor: pastCurfew && checkCounts.out > 0 ? "error.main" : "divider" }}>
-        <Box sx={{ ...row, justifyContent: "space-between", gap: 1.5, mb: 1.25 }}>
-          <Box sx={{ ...row, gap: 1, minWidth: 0 }}>
-            <ScheduleIcon color={pastCurfew ? "primary" : "action"} fontSize="small" />
-            <Typography sx={{ fontWeight: 800 }}>{curfewHeadline}</Typography>
-          </Box>
-          <Typography variant="body2" sx={{ fontWeight: 700, flexShrink: 0 }}>
-            {checkedCount}/{checkTenants.length}
-          </Typography>
-        </Box>
-        <LinearProgress variant="determinate" value={checkTenants.length ? (checkedCount / checkTenants.length) * 100 : 0} sx={{ height: 8, borderRadius: 4, bgcolor: (t) => alpha(t.palette.text.primary, 0.08) }} />
-        <Box sx={{ display: "flex", gap: 0.75, mt: 1.5, flexWrap: "wrap" }}>
-          <Pill label={`${checkCounts.present} in`} tone="success" />
-          <Pill label={`${checkCounts.late} late`} tone="warning" />
-          <Pill label={`${checkCounts.out} out${pastCurfew && checkCounts.out > 0 ? " past curfew" : ""}`} tone="error" />
-          {uncheckedCount > 0 && <Pill label={`${uncheckedCount} to check`} />}
-        </Box>
-        {curfewPhase === "none" && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>
-            The owner hasn't set a curfew, but you can still log who is in each night.
-          </Typography>
-        )}
-      </Paper>
-
-      {/* Automation + bulk actions */}
-      <Paper elevation={0} sx={{ ...cardSx, p: { xs: 1.5, sm: 2 }, mb: 2 }}>
-        <FormControlLabel
-          control={<Switch checked={autoNotify} onChange={(e) => toggleAutoNotify(e.target.checked)} />}
-          label={
-            <Box>
-              <Typography sx={{ fontWeight: 700, lineHeight: 1.25 }}>Notify automatically</Typography>
-              <Typography variant="caption" color="text.secondary">
-                Tell a tenant when they're marked late or out. The owner is alerted when someone is out.
-              </Typography>
-            </Box>
-          }
-          sx={{ alignItems: "flex-start", m: 0, width: "100%", "& .MuiSwitch-root": { mr: 1 } }}
-        />
-        <Box sx={{ display: "flex", gap: 1, mt: 1.5, flexWrap: "wrap" }}>
-          <Button
-            variant="outlined"
-            startIcon={<CheckCircleOutlinedIcon />}
-            disabled={uncheckedCount === 0}
-            onClick={markAllPresent}
-            sx={{ flex: "1 1 180px", minHeight: 46, fontWeight: 700, borderRadius: 2.5, textTransform: "none" }}
-          >
-            Mark the rest as in
-          </Button>
-          <Button
-            variant="outlined"
-            startIcon={<SendOutlinedIcon />}
-            disabled={remindRecipients.length === 0}
-            onClick={() => openNotice(remindRecipients, reminderPreset)}
-            sx={{ flex: "1 1 180px", minHeight: 46, fontWeight: 700, borderRadius: 2.5, textTransform: "none" }}
-          >
-            Remind {remindRecipients.length} not in
-          </Button>
-        </Box>
-        {occMeta.pending && (
-          <Box sx={{ ...row, gap: 0.75, mt: 1.25, color: online ? "text.secondary" : "warning.main" }}>
-            <CloudOffOutlinedIcon sx={{ fontSize: 16 }} />
-            <Typography variant="caption" sx={{ fontWeight: 700 }}>
-              {online ? "Saving..." : "Not saved yet. It will sync when you're back online. Keep this page open."}
-            </Typography>
-          </Box>
-        )}
-        {occMeta.reminderSentAt && (
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-            Last reminder sent at {timeOf(occMeta.reminderSentAt)}.
-          </Typography>
-        )}
-      </Paper>
-
-      {checkTenants.length === 0 ? (
-        <Paper elevation={0} sx={{ ...cardSx, borderStyle: "dashed" }}>
-          <EmptyState icon={<CheckCircleOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="No residents to check" body="Tenants with an assigned room will appear here." />
-        </Paper>
-      ) : (
-        <>
-          {/* Stays in view while you scroll through the rooms */}
-          <Box
-            sx={{
-              position: "sticky",
-              top: { xs: 56, md: 80 },
-              zIndex: 2,
-              bgcolor: "background.paper",
-              mx: { xs: -2, sm: -3 },
-              px: { xs: 2, sm: 3 },
-              pt: 1.25,
-              pb: 1.25,
-              mb: 1.5,
-              borderBottom: "1px solid",
-              borderColor: "divider",
-            }}
-          >
-            <Box sx={{ ...row, justifyContent: "space-between", mb: 0.75 }}>
-              <Typography variant="caption" sx={{ fontWeight: 800 }}>
-                {checkedCount} of {checkTenants.length} checked
-              </Typography>
-              <Typography variant="caption" color={occMeta.pending && !online ? "warning.main" : "text.secondary"} sx={{ fontWeight: occMeta.pending && !online ? 800 : undefined }}>
-                {occMeta.pending && !online ? "Not saved yet · " : occMeta.pending ? "Saving · " : ""}
-                {checkCounts.out} out · {checkCounts.late} late · {uncheckedCount} to go
-              </Typography>
-            </Box>
-            <LinearProgress variant="determinate" value={(checkedCount / checkTenants.length) * 100} sx={{ height: 5, borderRadius: 3, mb: 1.25, bgcolor: (t) => alpha(t.palette.text.primary, 0.08) }} />
-            <SearchBox value={checkSearch} onChange={setCheckSearch} placeholder="Find a name or room" />
-            <Box sx={{ mt: 1 }}>
-              <FilterChips
-                flush
-                value={checkFilter}
-                onChange={setCheckFilter}
-                options={[
-                  { id: "todo", label: "To check", n: uncheckedCount },
-                  { id: "out", label: "Out", n: checkCounts.out },
-                  { id: "late", label: "Late", n: checkCounts.late },
-                  { id: "present", label: "In", n: checkCounts.present },
-                  { id: "all", label: "All", n: checkTenants.length },
-                ]}
-              />
-            </Box>
-          </Box>
-
-          {shownChecks.length === 0 ? (
-            <Paper elevation={0} sx={cardSx}>
-              <EmptyState
-                icon={<CheckCircleOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />}
-                title={checkQuery ? "No match" : checkFilter === "todo" ? "Everyone is checked" : "Nobody here"}
-                body={checkQuery ? `Nobody matches "${checkSearch}".` : checkFilter === "todo" ? "Nice work. Switch to All to change any mark." : "No tenants match this filter."}
-              />
-            </Paper>
-          ) : (
-            // Walk the building room by room
-            groupByRoom(shownChecks).map(([room, list]) => (
-              <Box key={room || "none"} sx={{ mb: 2 }}>
-                <RoomHeader
-                  title={`Room ${room}`}
-                  meta={`${list.length} ${list.length === 1 ? "tenant" : "tenants"}`}
-                  action={
-                    list.some((t) => statusOf(t) !== "present") && (
-                      <Button size="small" onClick={() => markRoomIn(list)} sx={{ minHeight: 36, fontWeight: 800, textTransform: "none" }}>
-                        All in
-                      </Button>
-                    )
-                  }
-                />
-                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))", xl: "repeat(3, minmax(0, 1fr))" }, gap: 1 }}>
-                  {list.map((t) => (
-                    <CheckRow key={t.id} t={t} entry={entryOf(t)} past={pastCurfew} onSet={setCheck} onNotice={(x) => openNotice([x])} />
-                  ))}
-                </Box>
-              </Box>
-            ))
-          )}
-        </>
-      )}
-    </>
+    <CaretakerCurfewView
+      autoNotify={autoNotify}
+      checkCounts={checkCounts}
+      checkFilter={checkFilter}
+      checkQuery={checkQuery}
+      checkSearch={checkSearch}
+      checkTenants={checkTenants}
+      checkedCount={checkedCount}
+      curfewHeadline={curfewHeadline}
+      curfewPhase={curfewPhase}
+      entryOf={entryOf}
+      markAllPresent={markAllPresent}
+      markRoomIn={markRoomIn}
+      occError={occError}
+      occMeta={occMeta}
+      online={online}
+      openNotice={openNotice}
+      pastCurfew={pastCurfew}
+      remindRecipients={remindRecipients}
+      reminderPreset={reminderPreset}
+      setCheck={setCheck}
+      setCheckFilter={setCheckFilter}
+      setCheckSearch={setCheckSearch}
+      shownChecks={shownChecks}
+      statusOf={statusOf}
+      toggleAutoNotify={toggleAutoNotify}
+      uncheckedCount={uncheckedCount}
+    />
   );
 
   const historyView = (
-    <>
-      <Box sx={{ ...row, justifyContent: "flex-end", mb: 1 }}>
-        <Button size="small" startIcon={<RefreshOutlinedIcon />} onClick={loadHistory} disabled={historyLoading} sx={{ fontWeight: 700, textTransform: "none", minHeight: 40 }}>
-          Refresh
-        </Button>
-      </Box>
-      {historyLoading && !history.loaded ? (
-        <Box sx={{ display: "grid", gap: 1 }}>
-          {[0, 1, 2].map((k) => (
-            <Skeleton key={k} variant="rounded" height={72} sx={{ borderRadius: 3 }} />
-          ))}
-        </Box>
-      ) : history.error ? (
-        <Alert severity="warning" sx={{ borderRadius: 2 }}>
-          Past nights couldn't be loaded. Check your connection and tap Refresh.
-        </Alert>
-      ) : history.nights.length === 0 ? (
-        <Paper elevation={0} sx={{ ...cardSx, borderStyle: "dashed" }}>
-          <EmptyState icon={<HistoryIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="No curfew records yet" body="Nights you record in the Curfew check tab will show up here." />
-        </Paper>
-      ) : (
-        <Box sx={{ display: "grid", gap: 1 }}>
-          {history.nights.slice(0, nightsShown).map((n) => {
-            const list = Object.entries(n.entries || {}).map(([id, e]) => ({ id, ...e }));
-            const count = (k) => list.filter((e) => e.status === k).length;
-            const flagged = list.filter((e) => e.status === "out" || e.status === "late").sort((a, b) => String(a.roomNumber).localeCompare(String(b.roomNumber), undefined, { numeric: true }));
-            const open = openNight === n.key;
-            const [yy, mm, dd] = n.key.split("-").map(Number);
-            return (
-              <Paper key={n.key} elevation={0} sx={{ ...cardSx, overflow: "hidden", borderColor: count("out") > 0 ? "error.main" : "divider" }}>
-                <Box
-                  component="button"
-                  type="button"
-                  onClick={() => setOpenNight(open ? "" : n.key)}
-                  aria-expanded={open}
-                  sx={{ all: "unset", boxSizing: "border-box", width: "100%", cursor: "pointer", p: 1.5, display: "block", minHeight: 56, "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: -2 } }}
-                >
-                  <Box sx={{ ...row, justifyContent: "space-between", gap: 1 }}>
-                    <Typography sx={{ fontWeight: 800 }}>{new Date(yy, mm - 1, dd).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {n.curfewTime ? `Curfew ${n.curfewTime}` : "No curfew"}
-                    </Typography>
-                  </Box>
-                  <Box sx={{ display: "flex", gap: 0.75, mt: 0.75, flexWrap: "wrap" }}>
-                    <Pill label={`${count("present")} in`} tone="success" />
-                    {count("late") > 0 && <Pill label={`${count("late")} late`} tone="warning" />}
-                    {count("out") > 0 && <Pill label={`${count("out")} out`} tone="error" />}
-                  </Box>
-                </Box>
-                {open && (
-                  <Box sx={{ px: 1.5, pb: 1.5, borderTop: "1px solid", borderColor: "divider", pt: 1 }}>
-                    {flagged.length === 0 ? (
-                      <Typography variant="body2" color="text.secondary">
-                        Everyone recorded was in on time.
-                      </Typography>
-                    ) : (
-                      flagged.map((e) => (
-                        <Box key={e.id} sx={{ ...row, justifyContent: "space-between", gap: 1, py: 0.75 }}>
-                          <Box sx={{ minWidth: 0 }}>
-                            <Typography sx={{ fontWeight: 700 }} noWrap>
-                              {e.name || "Tenant"}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-                              Room {e.roomNumber || "N/A"}
-                              {timeOf(e.at) ? ` · ${timeOf(e.at)}` : ""}
-                              {e.noticeSent ? " · notified" : ""}
-                            </Typography>
-                          </Box>
-                          <Pill label={e.status === "out" ? "Out" : "Late"} tone={e.status === "out" ? "error" : "warning"} />
-                        </Box>
-                      ))
-                    )}
-                    {n.recordedByName && (
-                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-                        Recorded by {n.recordedByName}
-                      </Typography>
-                    )}
-                  </Box>
-                )}
-              </Paper>
-            );
-          })}
-          {history.nights.length > NIGHT_PAGE && (
-            <Box sx={{ textAlign: "center", mt: 1 }}>
-              <Button size="small" onClick={() => setNightsShown((n) => (n >= history.nights.length ? NIGHT_PAGE : n + NIGHT_PAGE))} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
-                {nightsShown >= history.nights.length ? "Show fewer nights" : `Show ${Math.min(NIGHT_PAGE, history.nights.length - nightsShown)} older nights`}
-              </Button>
-            </Box>
-          )}
-        </Box>
-      )}
-    </>
+    <CaretakerCurfewHistoryView
+      historyLoading={historyLoading}
+      loadHistory={loadHistory}
+      nightsShown={nightsShown}
+      openNight={openNight}
+      setNightsShown={setNightsShown}
+      setOpenNight={setOpenNight}
+    />
   );
 
   const tenantsTab = (
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        {tenantsViewNow === "curfew" ? "Record who is in tonight, see who is out past curfew, and send notices." : tenantsViewNow === "history" ? `Curfew records for the last ${HISTORY_NIGHTS} nights.` : "Who lives where. Tap a tenant for contact details."}
+        {tenantsViewNow === "curfew" ? tr("Record who is in tonight, see who is out past curfew, and send notices.") : tenantsViewNow === "history" ? `Curfew records for the last ${HISTORY_NIGHTS} nights.` : tr("Who lives where. Tap a tenant for contact details.")}
       </Typography>
       {viewOptions.length > 1 && (
-        <Box sx={{ display: "flex", gap: 0.75, p: 0.5, mb: 2, borderRadius: 3, bgcolor: (t) => alpha(t.palette.text.primary, 0.06) }} role="group" aria-label="Tenants view">
+        <Box sx={{ display: "flex", gap: 0.75, p: 0.5, mb: 2, borderRadius: 3, bgcolor: (t) => alpha(t.palette.text.primary, 0.06) }} role="group" aria-label={tr("Tenants view")}>
           {[
-            { id: "directory", label: "Directory" },
-            { id: "curfew", label: "Curfew check", badge: pastCurfew ? checkCounts.out : 0 },
-            { id: "history", label: "History" },
+            { id: "directory", label: tr("Directory") },
+            { id: "curfew", label: tr("Curfew check"), badge: pastCurfew ? checkCounts.out : 0 },
+            { id: "history", label: tr("History") },
           ]
             .filter((v) => viewOptions.includes(v.id))
             .map((v) => (
@@ -2401,190 +1164,51 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
      Maintenance
   ------------------------------------------------------------------------- */
   const maintenanceTab = (
-    <>
-      <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Reports from residents, most urgent first. Update the status as you work on them.
-      </Typography>
-      {activeTickets.length > 0 && (
-        <FilterChips
-          value={ticketFilter}
-          onChange={setTicketFilter}
-          options={[
-            { id: "open", label: "Open", n: activeTickets.length },
-            { id: "high", label: "High priority", n: highTickets.length },
-            { id: "progress", label: "In progress", n: progressTickets.length },
-          ]}
-        />
-      )}
-      {rankedTickets.length === 0 ? (
-        <Paper elevation={0} sx={{ ...cardSx, borderStyle: "dashed" }}>
-          <EmptyState icon={<BuildOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="No maintenance requests" body="When a resident reports a problem it will show up here." />
-        </Paper>
-      ) : (
-        <>
-          {shownTickets.length === 0 ? (
-            <Paper elevation={0} sx={cardSx}>
-              <EmptyState icon={<CheckCircleOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="All sorted" body={activeTickets.length === 0 ? "No open requests right now." : "Nothing in this filter."} />
-            </Paper>
-          ) : (
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.5, sm: 2 } }}>
-              {shownTickets.slice(0, ticketsShown).map((t, i) => (
-                <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0 }}>
-                  <RequestCard t={t} busy={busyTicket === t.id} onStatus={changeTicketStatus} />
-                </Box>
-              ))}
-            </Box>
-          )}
-          {shownTickets.length > LIST_PAGE && (
-            <Box sx={{ textAlign: "center", mt: 1.5 }}>
-              <Button size="small" onClick={() => setTicketsShown((n) => (n >= shownTickets.length ? LIST_PAGE : n + LIST_PAGE))} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
-                {ticketsShown >= shownTickets.length ? "Show fewer" : `Show ${Math.min(LIST_PAGE, shownTickets.length - ticketsShown)} more requests`}
-              </Button>
-            </Box>
-          )}
-
-          {resolvedTickets.length > 0 && (
-            <Box sx={{ mt: { xs: 2.5, sm: 3 } }}>
-              <Button
-                fullWidth
-                onClick={() => setArchiveOpen((o) => !o)}
-                aria-expanded={archiveOpen}
-                startIcon={<HistoryIcon fontSize="small" />}
-                endIcon={<ArrowForwardIcon fontSize="small" sx={{ transform: archiveOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }} />}
-                sx={{ ...cardSx, justifyContent: "space-between", px: 2, minHeight: 52, fontWeight: 700, color: "text.primary", textTransform: "none" }}
-              >
-                <Box component="span" sx={{ flex: 1, textAlign: "left", ml: 0.5 }}>
-                  Archive · {resolvedTickets.length} closed
-                </Box>
-              </Button>
-              {archiveOpen && (
-                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.5, sm: 2 }, mt: 1.5 }}>
-                  {resolvedTickets.slice(0, archiveShown).map((t) => (
-                    <Box key={t.id} sx={{ minWidth: 0, opacity: 0.85 }}>
-                      <RequestCard t={t} busy={busyTicket === t.id} onStatus={changeTicketStatus} compact />
-                    </Box>
-                  ))}
-                </Box>
-              )}
-              {archiveOpen && resolvedTickets.length > LIST_PAGE && (
-                <Box sx={{ textAlign: "center", mt: 1.5 }}>
-                  <Button size="small" onClick={() => setArchiveShown((n) => (n >= resolvedTickets.length ? LIST_PAGE : n + LIST_PAGE))} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
-                    {archiveShown >= resolvedTickets.length ? "Show fewer" : `Show ${Math.min(LIST_PAGE, resolvedTickets.length - archiveShown)} more`}
-                  </Button>
-                </Box>
-              )}
-            </Box>
-          )}
-        </>
-      )}
-    </>
+    <CaretakerMaintenanceTab
+      activeTickets={activeTickets}
+      archiveOpen={archiveOpen}
+      archiveShown={archiveShown}
+      busyTicket={busyTicket}
+      changeTicketStatus={changeTicketStatus}
+      highTickets={highTickets}
+      progressTickets={progressTickets}
+      rankedTickets={rankedTickets}
+      resolvedTickets={resolvedTickets}
+      setArchiveOpen={setArchiveOpen}
+      setArchiveShown={setArchiveShown}
+      setTicketFilter={setTicketFilter}
+      setTicketsShown={setTicketsShown}
+      shownTickets={shownTickets}
+      ticketFilter={ticketFilter}
+      ticketsShown={ticketsShown}
+    />
   );
 
   /* -------------------------------------------------------------------------
      Payments
   ------------------------------------------------------------------------- */
   const paymentsTab = (
-    <>
-      <Box sx={{ ...row, justifyContent: "space-between", gap: 2, mb: 2 }}>
-        <Typography variant="body2" color="text.secondary">
-          Rent for {currentPeriod}, and every payment on record.
-        </Typography>
-        {!isPhone && (
-          <Button variant="contained" startIcon={<AddIcon />} onClick={() => openCash()} sx={{ fontWeight: 700, borderRadius: 2.5, px: 2.5, flexShrink: 0, textTransform: "none" }}>
-            Record cash payment
-          </Button>
-        )}
-      </Box>
-
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: { xs: 1.25, md: 2 }, mb: { xs: 2, sm: 3 } }}>
-        <StatTile title="Collected" value={peso(collected)} subtitle={currentPeriod} icon={<PaymentsOutlinedIcon fontSize="small" />} />
-        <StatTile title="Paid" value={`${paidCount}/${rentTenants.length}`} subtitle="Tenants this month" icon={<CheckCircleOutlinedIcon fontSize="small" />} />
-        <StatTile title="Verifying" value={pendingCount} subtitle="Waiting for the owner" icon={<HistoryIcon fontSize="small" />} />
-        <StatTile title="Unpaid" value={unpaidTenants.length} subtitle="Still to collect" tone={unpaidTenants.length > 0 ? "error" : undefined} icon={<WarningAmberOutlinedIcon fontSize="small" />} />
-      </Box>
-
-      <Panel title="Unpaid this month" icon={<WarningAmberOutlinedIcon fontSize="small" />} sx={{ mb: { xs: 2, sm: 3 } }}>
-        {unpaidTenants.length === 0 ? (
-          <Typography variant="body2" color="text.secondary">
-            Everyone with a room has paid or is waiting for verification.
-          </Typography>
-        ) : (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
-            {unpaidTenants.slice(0, unpaidShown).map((t) => (
-              <Box key={t.id} sx={{ ...row, gap: 1.25, p: 1.25, borderRadius: 2.5, border: "1px solid", borderColor: "divider" }}>
-                <Box sx={{ minWidth: 0, flex: 1 }}>
-                  <Typography sx={{ fontWeight: 800, lineHeight: 1.25 }} noWrap>
-                    {t.name}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-                    Room {t.roomNumber}
-                    {rentState[t.id] === "partial" && t.rent
-                      ? ` · ${peso(Math.max(t.rent - receivedFrom(t.id, currentPeriod), 0))} left of ${peso(t.rent)}`
-                      : t.rent
-                        ? ` · ${peso(t.rent)}`
-                        : ""}
-                    {rentState[t.id] === "rejected" ? " · last payment rejected" : ""}
-                  </Typography>
-                </Box>
-                {rentState[t.id] === "partial" && <Pill label="Partial" tone="warning" sx={{ flexShrink: 0, display: { xs: "none", sm: "inline-flex" } }} />}
-                <Button size="small" variant="outlined" onClick={() => openCash(t.id)} sx={{ fontWeight: 700, borderRadius: 2, minHeight: 40, flexShrink: 0, textTransform: "none" }}>
-                  Record cash
-                </Button>
-              </Box>
-            ))}
-            {unpaidTenants.length > LIST_PAGE && (
-              <Button size="small" onClick={() => setUnpaidShown((n) => (n >= unpaidTenants.length ? LIST_PAGE : n + LIST_PAGE))} sx={{ alignSelf: "center", fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
-                {unpaidShown >= unpaidTenants.length ? "Show fewer" : `Show ${Math.min(LIST_PAGE, unpaidTenants.length - unpaidShown)} more`}
-              </Button>
-            )}
-          </Box>
-        )}
-      </Panel>
-
-      <Typography variant="h6" sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 700, fontSize: "1.05rem", mb: 1.5 }}>
-        Payment history
-      </Typography>
-      {payments.length === 0 ? (
-        <Paper elevation={0} sx={{ ...cardSx, borderStyle: "dashed" }}>
-          <EmptyState icon={<PaymentIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="No payments yet" body="Payments from tenants and cash you record will appear here." />
-        </Paper>
-      ) : (
-        <>
-          <FilterChips
-            value={payFilter}
-            onChange={(v) => {
-              setPayFilter(v);
-              setPayLimit(20);
-            }}
-            options={[
-              { id: "all", label: "All", n: payCounts.all },
-              { id: "paid", label: "Paid", n: payCounts.paid },
-              ...(payCounts.partial > 0 ? [{ id: "partial", label: "Partial", n: payCounts.partial }] : []),
-              { id: "pending", label: "Pending", n: payCounts.pending },
-              ...(payCounts.rejected > 0 ? [{ id: "rejected", label: "Rejected", n: payCounts.rejected }] : []),
-            ]}
-          />
-          {shownPayments.length === 0 ? (
-            <Paper elevation={0} sx={cardSx}>
-              <EmptyState icon={<PaymentIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="Nothing here" body="No payments match this filter." />
-            </Paper>
-          ) : (
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: 1.25 }}>
-              {shownPayments.slice(0, payLimit).map((p) => (
-                <PayRow key={p.id} p={p} />
-              ))}
-            </Box>
-          )}
-          {shownPayments.length > payLimit && (
-            <Box sx={{ textAlign: "center", mt: 1.5 }}>
-              <Button size="small" onClick={() => setPayLimit((n) => n + 20)} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
-                Show {Math.min(20, shownPayments.length - payLimit)} more
-              </Button>
-            </Box>
-          )}
-        </>
-      )}
-    </>
+    <CaretakerPaymentsTab
+      billOf={billOf}
+      collected={collected}
+      currentPeriod={currentPeriod}
+      isPhone={isPhone}
+      openCash={openCash}
+      paidCount={paidCount}
+      payCounts={payCounts}
+      payFilter={payFilter}
+      payLimit={payLimit}
+      payments={payments}
+      pendingCount={pendingCount}
+      rentState={rentState}
+      rentTenants={rentTenants}
+      setPayFilter={setPayFilter}
+      setPayLimit={setPayLimit}
+      setUnpaidShown={setUnpaidShown}
+      shownPayments={shownPayments}
+      unpaidShown={unpaidShown}
+      unpaidTenants={unpaidTenants}
+    />
   );
 
   /* -------------------------------------------------------------------------
@@ -2608,7 +1232,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const editingRoom = roomDlg.id ? rooms.find((r) => r.id === roomDlg.id) : null;
   const editingOccupants = editingRoom ? occupantsOf(editingRoom) : 0;
 
-  const saveRooms = async (nextRooms, successMessage) => {
+  const saveRooms = async (nextRooms, successMessage, logSummary) => {
     setRoomDlg((d) => ({ ...d, saving: true, error: "" }));
     try {
       const patch = {
@@ -2619,6 +1243,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         updatedAt: new Date(),
       };
       await updateDoc(doc(db, "properties", property.id), patch);
+      if (logSummary) logAction("rooms", logSummary, { action: "rooms.update" });
       setProperty((p) => ({ ...p, ...patch }));
       setRoomDlg((d) => ({ ...d, open: false, saving: false }));
       notify(successMessage);
@@ -2642,14 +1267,25 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       return setRoomDlg((d) => ({ ...d, error: `${editingOccupants} ${editingOccupants === 1 ? "tenant is" : "tenants are"} assigned to ${editingRoom.roomName}. Ask the owner to move them before renaming the room.` }));
     if (!(rate >= 0)) return setRoomDlg((d) => ({ ...d, error: "Enter the monthly rate per bed (0 or more)." }));
     if (editingRoom) {
-      saveRooms(rooms.map((r) => (r.id === roomDlg.id ? { ...r, roomName: name, floor, capacity, monthlyRatePerBed: rate } : r)), `Saved ${name}.`);
+      // Only what actually changed goes in the owner's activity log
+      const changes = [
+        String(editingRoom.roomName).trim() !== name && `name ${editingRoom.roomName} → ${name}`,
+        (Number(editingRoom.floor) || 1) !== floor && `floor ${Number(editingRoom.floor) || 1} → ${floor}`,
+        (Number(editingRoom.capacity) || 0) !== capacity && `beds ${Number(editingRoom.capacity) || 0} → ${capacity}`,
+        (Number(editingRoom.monthlyRatePerBed) || 0) !== rate && `rate per bed ${peso(editingRoom.monthlyRatePerBed)} → ${peso(rate)}`,
+      ].filter(Boolean);
+      saveRooms(
+        rooms.map((r) => (r.id === roomDlg.id ? { ...r, roomName: name, floor, capacity, monthlyRatePerBed: rate } : r)),
+        `Saved ${name}.`,
+        changes.length ? `Edited ${editingRoom.roomName}: ${changes.join(", ")}` : ""
+      );
     } else {
-      saveRooms([...rooms, { id: `room_${Date.now()}`, roomName: name, floor, capacity, occupiedBeds: 0, monthlyRatePerBed: rate }], `Added ${name}.`);
+      saveRooms([...rooms, { id: `room_${Date.now()}`, roomName: name, floor, capacity, occupiedBeds: 0, monthlyRatePerBed: rate }], `Added ${name}.`, `Added ${name} (floor ${floor}, ${capacity} ${capacity === 1 ? "bed" : "beds"}, ${peso(rate)} per bed)`);
     }
   };
   const removeRoom = () => {
     if (!editingRoom || editingOccupants > 0) return;
-    saveRooms(rooms.filter((r) => r.id !== roomDlg.id), `Removed ${editingRoom.roomName}.`);
+    saveRooms(rooms.filter((r) => r.id !== roomDlg.id), `Removed ${editingRoom.roomName}.`, `Removed ${editingRoom.roomName}`);
   };
 
   const takenOf = (r) => occupantsOf(r);
@@ -2669,7 +1305,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         <Pill label={ROOM_STATUS[pickedStatus].label} tone={pickedStatus === "full" ? "error" : pickedStatus === "partial" ? "warning" : "default"} />
       </Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        Floor {pickedRoom.floor || 1} · {pickedTenants.length}/{Number(pickedRoom.capacity) || 0} beds taken · {peso(pickedRoom.monthlyRatePerBed)} per bed
+        {tr("Floor")}{" "}{pickedRoom.floor || 1} · {pickedTenants.length}/{Number(pickedRoom.capacity) || 0}{" "}{tr("beds taken ·")}{" "}{peso(pickedRoom.monthlyRatePerBed)}{" "}{tr("per bed")}
       </Typography>
       <Divider sx={{ mb: 1.5 }} />
       <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
@@ -2677,7 +1313,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       </Typography>
       {pickedTenants.length === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ py: 1.5 }}>
-          No one is assigned to this room.
+          {tr("No one is assigned to this room.")}
         </Typography>
       ) : (
         <Box sx={{ mt: 0.5 }}>
@@ -2689,7 +1325,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                   {t.name}
                 </Typography>
                 <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-                  {t.bedId ? `Bed ${t.bedId}` : "No bed assigned"}
+                  {t.bedId ? `Bed ${t.bedId}` : tr("No bed assigned")}
                 </Typography>
               </Box>
             </Box>
@@ -2697,105 +1333,30 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         </Box>
       )}
       <Button fullWidth variant="contained" startIcon={<EditOutlinedIcon />} onClick={() => openRoom(pickedRoom)} sx={{ mt: 2, minHeight: 48, fontWeight: 800, borderRadius: 2.5, textTransform: "none" }}>
-        Edit room and rate
+        {tr("Edit room and rate")}
       </Button>
     </Box>
   ) : null;
 
   const roomsTab = (
-    <>
-      <Box sx={{ ...row, justifyContent: "space-between", gap: 1.5, mb: 2, flexWrap: "wrap" }}>
-        <Typography variant="body2" color="text.secondary" sx={{ flex: "1 1 200px" }}>
-          {rooms.length} {rooms.length === 1 ? "room" : "rooms"} · {bedsTaken}/{roomBeds} beds taken · {vacantRooms} vacant
-        </Typography>
-        <Button variant="contained" startIcon={<AddIcon />} onClick={() => openRoom()} sx={{ minHeight: 46, px: 2.5, fontWeight: 800, borderRadius: 2.5, textTransform: "none", flex: { xs: "1 1 100%", sm: "0 0 auto" } }}>
-          Add a room
-        </Button>
-      </Box>
-      <LinearProgress variant="determinate" value={occPct} aria-label={`${occPct}% occupied`} sx={{ height: 6, borderRadius: 3, mb: 2.5, bgcolor: (t) => alpha(t.palette.text.primary, 0.08) }} />
-
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "minmax(0, 7fr) minmax(0, 5fr)" }, gap: 3, alignItems: "start" }}>
-        <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 3 } }}>
-          <Box sx={{ ...row, gap: 1, mb: 2 }}>
-            <GridViewOutlinedIcon sx={{ color: "primary.main" }} />
-            <Typography sx={{ fontWeight: 800, fontSize: "1.1rem" }}>Room map</Typography>
-          </Box>
-          {rooms.length === 0 ? (
-            <Typography color="text.secondary" sx={{ p: 3, textAlign: "center", border: "1px dashed", borderColor: "divider", borderRadius: 2 }}>
-              No rooms yet. Add the first one to start assigning tenants.
-            </Typography>
-          ) : (
-            <>
-              <Box sx={{ display: "flex", flexWrap: "wrap", columnGap: 2, rowGap: 0.75, mb: 2.5 }}>
-                {Object.values(ROOM_STATUS).map((st) => (
-                  <Box key={st.label} sx={{ ...row, gap: 0.75 }}>
-                    <Box sx={{ width: 12, height: 12, borderRadius: "4px", bgcolor: st.fill }} />
-                    <Typography variant="caption" color="text.secondary">
-                      {st.label}
-                    </Typography>
-                  </Box>
-                ))}
-              </Box>
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                {roomsByFloor.map(([floor, list], fIdx) => (
-                  <Box key={floor}>
-                    {fIdx > 0 && <Divider sx={{ mb: 2.5 }} />}
-                    <Typography variant="body2" sx={{ fontWeight: 700, mb: 1.25 }}>
-                      Floor {floor}
-                      <Typography component="span" variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                        {" "}
-                        · {list.length} {list.length === 1 ? "room" : "rooms"}
-                      </Typography>
-                    </Typography>
-                    <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: 1.25 }}>
-                      {list.map((r) => (
-                        <RoomTile key={r.id || r.index} room={r} taken={takenOf(r)} selected={pickedRoomId === r.id} onClick={() => setPickedRoomId(r.id)} />
-                      ))}
-                    </Box>
-                  </Box>
-                ))}
-              </Box>
-            </>
-          )}
-        </Paper>
-
-        {/* Desktop: side card. Phones: bottom sheet below. */}
-        {isDesktop && (
-          <Paper elevation={0} sx={{ ...cardSx, p: 3, position: "sticky", top: 96, minHeight: 280 }}>
-            {roomPanel || (
-              <Box sx={{ minHeight: 232, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
-                <Box sx={{ width: 56, height: 56, borderRadius: "50%", mb: 1.5, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.08)" }}>
-                  <TouchAppOutlinedIcon sx={{ color: "primary.main" }} />
-                </Box>
-                <Typography sx={{ fontWeight: 700 }}>Select a room</Typography>
-                <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  Tap any room on the map to see its tenants or change its rate.
-                </Typography>
-              </Box>
-            )}
-          </Paper>
-        )}
-      </Box>
-
-      {!isDesktop && (
-        <Drawer
-          anchor="bottom"
-          open={Boolean(pickedRoom)}
-          onClose={() => setPickedRoomId("")}
-          slotProps={{
-            paper: {
-              sx: { borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: "85dvh", p: 2.5, pb: "calc(20px + env(safe-area-inset-bottom, 0px))" },
-            },
-          }}
-        >
-          <Box sx={{ width: 40, height: 4, borderRadius: 2, bgcolor: "divider", mx: "auto", mb: 2 }} />
-          {roomPanel}
-        </Drawer>
-      )}
-    </>
+    <CaretakerRoomsTab
+      bedsTaken={bedsTaken}
+      isDesktop={isDesktop}
+      occPct={occPct}
+      openRoom={openRoom}
+      pickedRoom={pickedRoom}
+      pickedRoomId={pickedRoomId}
+      roomBeds={roomBeds}
+      roomPanel={roomPanel}
+      rooms={rooms}
+      roomsByFloor={roomsByFloor}
+      setPickedRoomId={setPickedRoomId}
+      takenOf={takenOf}
+      vacantRooms={vacantRooms}
+    />
   );
 
-  const fabAction = isPhone && activeTab === "payments" && canFinancials ? { label: "Record cash", icon: <AddIcon sx={{ mr: 0.75 }} />, onClick: () => openCash() } : null;
+  const fabAction = isPhone && activeTab === "payments" && canFinancials ? { label: tr("Record cash"), icon: <AddIcon sx={{ mr: 0.75 }} />, onClick: () => openCash() } : null;
   const navVisible = Object.values(tabAllowed).filter(Boolean).length > 1;
 
   const bottomOffset = navVisible ? `calc(${BOTTOM_NAV_H}px + 16px + env(safe-area-inset-bottom))` : "calc(16px + env(safe-area-inset-bottom))";
@@ -2814,7 +1375,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
 
       {!online && (
         <Alert severity="warning" icon={<WifiOffOutlinedIcon />} sx={{ mb: 2, borderRadius: 2 }}>
-          You're offline. Curfew marks are kept and sync when you're back online (keep this page open). Requests, notices and payments need a connection.
+          {tr("You're offline. Curfew marks are saved on this phone and sent when you're back online. Requests, notices and payments need a connection.")}
         </Alert>
       )}
       {online && listenError && activeTab !== "overview" && (
@@ -2823,11 +1384,11 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           sx={{ mb: 2, borderRadius: 2 }}
           action={
             <Button color="inherit" size="small" onClick={retryLoad} sx={{ fontWeight: 700 }}>
-              Retry
+              {tr("Retry")}
             </Button>
           }
         >
-          Some information couldn't be loaded.
+          {tr("Some information couldn't be loaded.")}
         </Alert>
       )}
 
@@ -2845,8 +1406,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         {selectedTenant && (
           <>
             <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
-              Tenant details
-              <IconButton aria-label="Close" onClick={() => setSelectedTenantId("")} edge="end">
+              {tr("Tenant details")}
+              <IconButton aria-label={tr("Close")} onClick={() => setSelectedTenantId("")} edge="end">
                 <CloseIcon />
               </IconButton>
             </DialogTitle>
@@ -2872,18 +1433,18 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                   }}
                   sx={{ mb: 1, minHeight: 46, fontWeight: 700, borderRadius: 2.5, textTransform: "none" }}
                 >
-                  Send an in-app notice
+                  {tr("Send an in-app notice")}
                 </Button>
               )}
               <Facts
                 items={[
-                  { label: "Room", value: selectedTenant.roomNumber ? `Room ${selectedTenant.roomNumber}` : "Not assigned" },
-                  ...(selectedTenant.bedId ? [{ label: "Bed", value: selectedTenant.bedId }] : []),
-                  { label: "Phone", value: selectedTenant.phone || "Not provided" },
-                  ...(selectedTenant.email ? [{ label: "Email", value: selectedTenant.email }] : []),
-                  ...(fmtDate(selectedTenant.leaseStartDate) ? [{ label: "Lease start", value: fmtDate(selectedTenant.leaseStartDate) }] : []),
-                  ...(fmtDate(selectedTenant.leaseEndDate) ? [{ label: "Lease end", value: fmtDate(selectedTenant.leaseEndDate) }] : []),
-                  ...(canFinancials && selectedTenant.rent ? [{ label: "Monthly rent", value: peso(selectedTenant.rent) }] : []),
+                  { label: tr("Room"), value: selectedTenant.roomNumber ? `Room ${selectedTenant.roomNumber}` : "Not assigned" },
+                  ...(selectedTenant.bedId ? [{ label: tr("Bed"), value: selectedTenant.bedId }] : []),
+                  { label: tr("Phone"), value: selectedTenant.phone || "Not provided" },
+                  ...(selectedTenant.email ? [{ label: tr("Email"), value: selectedTenant.email }] : []),
+                  ...(fmtDate(selectedTenant.leaseStartDate) ? [{ label: tr("Lease start"), value: fmtDate(selectedTenant.leaseStartDate) }] : []),
+                  ...(fmtDate(selectedTenant.leaseEndDate) ? [{ label: tr("Lease end"), value: fmtDate(selectedTenant.leaseEndDate) }] : []),
+                  ...(canFinancials && selectedTenant.rent ? [{ label: tr("Monthly rent"), value: peso(selectedTenant.rent) }] : []),
                   ...(canFinancials && !selectedTenant.inactive && selectedTenant.roomNumber
                     ? [{ label: currentPeriod.split(" ")[0], value: rentState[selectedTenant.id] === "paid" ? "Paid" : rentState[selectedTenant.id] === "pending" ? "Waiting for verification" : "Unpaid", color: rentState[selectedTenant.id] === "paid" ? "success.main" : rentState[selectedTenant.id] === "pending" ? "warning.main" : "error.main" }]
                     : []),
@@ -2903,7 +1464,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                   }}
                   sx={{ minHeight: 48, fontWeight: 800, borderRadius: 2.5, textTransform: "none" }}
                 >
-                  Record cash payment
+                  {tr("Record cash payment")}
                 </Button>
               </DialogActions>
             )}
@@ -2914,8 +1475,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       {/* ===================== SEND A NOTICE ===================== */}
       <Dialog open={notice.open} onClose={() => !notice.sending && setNotice((n) => ({ ...n, open: false }))} fullScreen={isPhone} fullWidth maxWidth="sm" slotProps={{ paper: dialogPaper }}>
         <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
-          Send a notice
-          <IconButton aria-label="Close" onClick={() => setNotice((n) => ({ ...n, open: false }))} disabled={notice.sending} edge="end">
+          {tr("Send a notice")}
+          <IconButton aria-label={tr("Close")} onClick={() => setNotice((n) => ({ ...n, open: false }))} disabled={notice.sending} edge="end">
             <CloseIcon />
           </IconButton>
         </DialogTitle>
@@ -2936,26 +1497,26 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           </Box>
 
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-            QUICK MESSAGES
+            {tr("QUICK MESSAGES")}
           </Typography>
           <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap", mt: 0.5, mb: 2 }}>
             {[
-              { label: "Curfew reminder", ...reminderPreset, reminder: notice.reminder },
-              { label: "See the caretaker", title: "Please see the caretaker", type: "info", message: "Please drop by the caretaker when you have a moment." },
-              { label: "Past curfew", title: "Out past curfew", type: "error", message: `You're recorded as out past curfew${curfewTime ? ` (${curfewTime})` : ""}. Please contact your caretaker as soon as you can.` },
+              { label: tr("Curfew reminder"), ...reminderPreset, reminder: notice.reminder },
+              { label: tr("See the caretaker"), title: tr("Please see the caretaker"), type: "info", message: tr("Please drop by the caretaker when you have a moment.") },
+              { label: tr("Past curfew"), title: "Out past curfew", type: "error", message: `You're recorded as out past curfew${curfewTime ? ` (${curfewTime})` : ""}. Please contact your caretaker as soon as you can.` },
             ].map((q) => (
               <Chip key={q.label} label={q.label} clickable variant="outlined" onClick={() => setNotice((n) => ({ ...n, title: q.title, message: q.message, type: q.type }))} sx={{ fontWeight: 700, height: 36, borderRadius: 18 }} />
             ))}
           </Box>
 
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            <TextField fullWidth label="Title" value={notice.title} onChange={(e) => setNotice((n) => ({ ...n, title: e.target.value }))} slotProps={{ htmlInput: { maxLength: 80 } }} />
+            <TextField fullWidth label={tr("Title")} value={notice.title} onChange={(e) => setNotice((n) => ({ ...n, title: e.target.value }))} slotProps={{ htmlInput: { maxLength: 80 } }} />
             <TextField
               fullWidth
               required
               multiline
               minRows={3}
-              label="Message"
+              label={tr("Message")}
               value={notice.message}
               onChange={(e) => setNotice((n) => ({ ...n, message: e.target.value, error: "" }))}
               helperText={`${notice.message.length}/300`}
@@ -2976,9 +1537,9 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                 control={<Switch checked={notice.sms} onChange={(e) => setNotice((n) => ({ ...n, sms: e.target.checked }))} />}
                 label={
                   <Box>
-                    <Typography sx={{ fontWeight: 700, lineHeight: 1.25 }}>Also send as a text message</Typography>
+                    <Typography sx={{ fontWeight: 700, lineHeight: 1.25 }}>{tr("Also send as a text message")}</Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Reaches tenants who aren't using the app. Tenants without a number are skipped.
+                      {tr("Reaches tenants who aren't using the app. Tenants without a number are skipped.")}
                     </Typography>
                   </Box>
                 }
@@ -2986,16 +1547,16 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
               />
             )}
             <Typography variant="caption" color="text.secondary">
-              Tenants see this in their Announcements and notification bell.
+              {tr("Tenants see this in their Announcements and notification bell.")}
             </Typography>
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 2, pb: "calc(16px + env(safe-area-inset-bottom))", gap: 1 }}>
           <Button onClick={() => setNotice((n) => ({ ...n, open: false }))} disabled={notice.sending} sx={{ minHeight: 46, fontWeight: 700, textTransform: "none" }}>
-            Cancel
+            {tr("Cancel")}
           </Button>
           <Button variant="contained" startIcon={<SendOutlinedIcon />} onClick={sendNotice} disabled={notice.sending || !notice.recipients.length} sx={{ minHeight: 46, fontWeight: 800, borderRadius: 2.5, px: 3, textTransform: "none" }}>
-            {notice.sending ? "Sending..." : `Send to ${notice.recipients.length}`}
+            {notice.sending ? tr("Sending...") : `Send to ${notice.recipients.length}`}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3003,8 +1564,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       {/* ===================== RECORD CASH PAYMENT ===================== */}
       <Dialog open={cashOpen} onClose={closeCash} fullScreen={isPhone} fullWidth maxWidth="sm" slotProps={{ paper: dialogPaper }}>
         <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
-          Record cash payment
-          <IconButton aria-label="Close" onClick={closeCash} disabled={cashSaving} edge="end">
+          {tr("Record cash payment")}
+          <IconButton aria-label={tr("Close")} onClick={closeCash} disabled={cashSaving} edge="end">
             <CloseIcon />
           </IconButton>
         </DialogTitle>
@@ -3017,7 +1578,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
             )}
             {!online && (
               <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
-                You're offline. You can fill this in, but it can't be saved until you reconnect.
+                {tr("You're offline. You can fill this in, but it can't be saved until you reconnect.")}
               </Alert>
             )}
 
@@ -3027,14 +1588,14 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                   select
                   fullWidth
                   required
-                  label="Tenant"
+                  label={tr("Tenant")}
                   value={cash.tenantId}
                   onChange={(e) => pickCashTenant(e.target.value)}
                   error={Boolean(cashErrors.tenantId)}
                   helperText={cashErrors.tenantId}
                   slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}
                 >
-                  <option value="">Choose a tenant</option>
+                  <option value="">{tr("Choose a tenant")}</option>
                   {cashTenants.map((t) => (
                     <option key={t.id} value={t.id}>
                       {t.name}
@@ -3045,19 +1606,19 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
 
                 {cashPaid && (
                   <Alert severity="warning" sx={{ borderRadius: 2 }}>
-                    {cashTenant?.name || "This tenant"} already has a paid record for {cash.periodMonth}. Double-check before saving another.
+                    {cashTenant?.name || tr("This tenant")}{" "}{tr("already has a paid record for")}{" "}{cash.periodMonth}{tr(". Double-check before saving another.")}
                   </Alert>
                 )}
                 {!cashPaid && cashPending && (
                   <Alert severity="warning" sx={{ borderRadius: 2 }}>
-                    {cashTenant?.name || "This tenant"} already sent a payment for {cash.periodMonth} that's waiting for verification. Check with the owner first so it isn't counted twice.
+                    {cashTenant?.name || tr("This tenant")}{" "}{tr("already sent a payment for")}{" "}{cash.periodMonth}{" "}{tr("that's waiting for verification. Check with the owner first so it isn't counted twice.")}
                   </Alert>
                 )}
 
                 <TextField
                   fullWidth
                   required
-                  label="Amount (₱)"
+                  label={tr("Amount (₱)")}
                   type="number"
                   value={cash.amount}
                   onChange={(e) => {
@@ -3068,24 +1629,31 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                   error={Boolean(cashErrors.amount)}
                   helperText={
                     cashErrors.amount ||
-                    (cashTenant?.rent
+                    (cashBill && cashBill.total > 0
                       ? cashReceivedBefore > 0
-                        ? `Rent ${peso(cashTenant.rent)} · already received ${peso(cashReceivedBefore)} · ${peso(cashBalance)} left`
-                        : `Monthly rent: ${peso(cashTenant.rent)}`
+                        ? `${cashBill.feeTotal > 0 ? "Rent + fees" : "Rent"} ${peso(cashBill.total)} · already received ${peso(cashReceivedBefore)} · ${peso(cashBalance)} left`
+                        : cashBill.feeTotal > 0
+                          ? `Rent + fees for the month: ${peso(cashBill.total)}`
+                          : `Monthly rent: ${peso(cashBill.total)}`
                       : undefined)
                   }
                   slotProps={{ htmlInput: { inputMode: "decimal", min: 0, step: "any" } }}
                 />
+                {cashBill && cashBill.fees.length > 0 && (
+                  <Box sx={{ px: 1.5, py: 1, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
+                    <BillBreakdown bill={cashBill} />
+                  </Box>
+                )}
 
                 <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" }, gap: 2 }}>
                   <TextField
                     select
                     fullWidth
-                    label="Rent for"
+                    label={tr("Rent for")}
                     value={cash.periodMonth}
                     onChange={(e) => {
                       const period = e.target.value;
-                      const owed = cashTenant?.rent ? Math.max(cashTenant.rent - receivedFrom(cashTenant.id, period), 0) : 0;
+                      const owed = cashTenant ? billOf(cashTenant, period).balance : 0;
                       setCash((c) => ({ ...c, periodMonth: period, amount: !amountTouched && owed > 0 ? String(owed) : c.amount }));
                     }}
                     slotProps={{ select: { native: true }, inputLabel: { shrink: true } }}
@@ -3098,7 +1666,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                   </TextField>
                   <TextField
                     fullWidth
-                    label="Date received"
+                    label={tr("Date received")}
                     type="date"
                     value={cash.paymentDate}
                     onChange={(e) => {
@@ -3121,22 +1689,22 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                   </Alert>
                 )}
 
-                <TextField fullWidth label="Notes (optional)" multiline minRows={2} value={cash.notes} onChange={(e) => setCash((c) => ({ ...c, notes: e.target.value }))} />
+                <TextField fullWidth label={tr("Notes (optional)")} multiline minRows={2} value={cash.notes} onChange={(e) => setCash((c) => ({ ...c, notes: e.target.value }))} />
 
                 <Box>
                   <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                    PHOTO OF THE RECEIPT OR CASH (OPTIONAL)
+                    {tr("PHOTO OF THE RECEIPT OR CASH (OPTIONAL)")}
                   </Typography>
                   {cashProof ? (
                     <Box sx={{ ...row, gap: 1.5, mt: 0.75 }}>
-                      <Box component="img" ref={cashPreviewRef} alt="Selected photo" sx={{ width: 72, height: 72, borderRadius: 2, objectFit: "cover", border: "1px solid", borderColor: "divider" }} />
+                      <Box component="img" ref={cashPreviewRef} alt={tr("Selected photo")} sx={{ width: 72, height: 72, borderRadius: 2, objectFit: "cover", border: "1px solid", borderColor: "divider" }} />
                       <Button color="inherit" onClick={() => setCashProof(null)} disabled={cashSaving} sx={{ fontWeight: 700, textTransform: "none", minHeight: 44 }}>
-                        Remove
+                        {tr("Remove")}
                       </Button>
                     </Box>
                   ) : (
-                    <Button component="label" variant="outlined" startIcon={<AddPhotoAlternateOutlinedIcon />} disabled={cashSaving} sx={{ mt: 0.75, display: "flex", minHeight: 48, borderRadius: 2.5, fontWeight: 700, textTransform: "none" }}>
-                      Take or choose a photo
+                    <Button component="label" role={undefined} variant="outlined" startIcon={<AddPhotoAlternateOutlinedIcon />} disabled={cashSaving} sx={{ mt: 0.75, display: "flex", minHeight: 48, borderRadius: 2.5, fontWeight: 700, textTransform: "none" }}>
+                      {tr("Take or choose a photo")}
                       <input hidden type="file" accept="image/*" onChange={pickProof} />
                     </Button>
                   )}
@@ -3146,10 +1714,10 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           </DialogContent>
           <DialogActions sx={{ p: 2, pb: "calc(16px + env(safe-area-inset-bottom))", gap: 1 }}>
             <Button onClick={closeCash} disabled={cashSaving} sx={{ minHeight: 46, fontWeight: 700, textTransform: "none" }}>
-              Cancel
+              {tr("Cancel")}
             </Button>
             <Button type="submit" variant="contained" disabled={cashSaving || !online} sx={{ minHeight: 46, fontWeight: 800, borderRadius: 2.5, px: 3, textTransform: "none" }}>
-              {cashSaving ? "Saving..." : cashStatus === "Partial" ? "Save partial payment" : "Save cash payment"}
+              {cashSaving ? tr("Saving...") : cashStatus === "Partial" ? tr("Save partial payment") : tr("Save cash payment")}
             </Button>
           </DialogActions>
         </Box>
@@ -3158,8 +1726,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       {/* ===================== ROOM EDITOR ===================== */}
       <Dialog open={roomDlg.open} onClose={() => !roomDlg.saving && setRoomDlg((d) => ({ ...d, open: false }))} fullWidth maxWidth="xs" slotProps={{ paper: { sx: { borderRadius: 3, bgcolor: "background.default", m: 2, width: "calc(100% - 32px)", maxHeight: "calc(100% - 32px)" } } }}>
         <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
-          {editingRoom ? `Edit ${editingRoom.roomName}` : "Add a room"}
-          <IconButton aria-label="Close" onClick={() => setRoomDlg((d) => ({ ...d, open: false }))} disabled={roomDlg.saving} edge="end">
+          {editingRoom ? `Edit ${editingRoom.roomName}` : tr("Add a room")}
+          <IconButton aria-label={tr("Close")} onClick={() => setRoomDlg((d) => ({ ...d, open: false }))} disabled={roomDlg.saving} edge="end">
             <CloseIcon />
           </IconButton>
         </DialogTitle>
@@ -3174,7 +1742,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
               <TextField
                 fullWidth
                 required
-                label="Room name or number"
+                label={tr("Room name or number")}
                 value={roomDlg.roomName}
                 onChange={(e) => setRoomDlg((d) => ({ ...d, roomName: e.target.value, error: "" }))}
                 disabled={editingOccupants > 0}
@@ -3182,12 +1750,12 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                 slotProps={{ htmlInput: { maxLength: 40 } }}
               />
               <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 2 }}>
-                <TextField fullWidth label="Floor" type="number" value={roomDlg.floor} onChange={(e) => setRoomDlg((d) => ({ ...d, floor: e.target.value, error: "" }))} slotProps={{ htmlInput: { inputMode: "numeric", min: 1 } }} />
-                <TextField fullWidth label="Beds" type="number" value={roomDlg.capacity} onChange={(e) => setRoomDlg((d) => ({ ...d, capacity: e.target.value, error: "" }))} slotProps={{ htmlInput: { inputMode: "numeric", min: 1 } }} />
+                <TextField fullWidth label={tr("Floor")} type="number" value={roomDlg.floor} onChange={(e) => setRoomDlg((d) => ({ ...d, floor: e.target.value, error: "" }))} slotProps={{ htmlInput: { inputMode: "numeric", min: 1 } }} />
+                <TextField fullWidth label={tr("Beds")} type="number" value={roomDlg.capacity} onChange={(e) => setRoomDlg((d) => ({ ...d, capacity: e.target.value, error: "" }))} slotProps={{ htmlInput: { inputMode: "numeric", min: 1 } }} />
               </Box>
               <TextField
                 fullWidth
-                label="Monthly rate per bed (₱)"
+                label={tr("Monthly rate per bed (₱)")}
                 type="number"
                 value={roomDlg.rate}
                 onChange={(e) => setRoomDlg((d) => ({ ...d, rate: e.target.value, error: "" }))}
@@ -3198,23 +1766,23 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
                 <Box sx={{ pt: 1 }}>
                   {editingOccupants > 0 ? (
                     <Typography variant="caption" color="text.secondary">
-                      {editingOccupants} {editingOccupants === 1 ? "tenant lives" : "tenants live"} here, so this room can't be removed.
+                      {editingOccupants} {editingOccupants === 1 ? tr("tenant lives") : tr("tenants live")}{" "}{tr("here, so this room can't be removed.")}
                     </Typography>
                   ) : roomDlg.confirmDelete ? (
                     <Box sx={{ ...row, gap: 1, flexWrap: "wrap" }}>
                       <Typography variant="body2" sx={{ fontWeight: 700, flex: "1 1 100%" }}>
-                        Remove {editingRoom.roomName} for good?
+                        {tr("Remove")}{" "}{editingRoom.roomName}{" "}{tr("for good?")}
                       </Typography>
                       <Button color="error" variant="contained" onClick={removeRoom} disabled={roomDlg.saving} sx={{ minHeight: 44, fontWeight: 800, textTransform: "none" }}>
-                        Yes, remove it
+                        {tr("Yes, remove it")}
                       </Button>
                       <Button color="inherit" onClick={() => setRoomDlg((d) => ({ ...d, confirmDelete: false }))} sx={{ minHeight: 44, fontWeight: 700, textTransform: "none" }}>
-                        Keep
+                        {tr("Keep")}
                       </Button>
                     </Box>
                   ) : (
                     <Button color="error" startIcon={<DeleteOutlineIcon />} onClick={() => setRoomDlg((d) => ({ ...d, confirmDelete: true }))} sx={{ minHeight: 44, fontWeight: 700, textTransform: "none" }}>
-                      Remove this room
+                      {tr("Remove this room")}
                     </Button>
                   )}
                 </Box>
@@ -3223,10 +1791,10 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           </DialogContent>
           <DialogActions sx={{ p: 2, pb: "calc(16px + env(safe-area-inset-bottom))", gap: 1 }}>
             <Button onClick={() => setRoomDlg((d) => ({ ...d, open: false }))} disabled={roomDlg.saving} sx={{ minHeight: 46, fontWeight: 700, textTransform: "none" }}>
-              Cancel
+              {tr("Cancel")}
             </Button>
             <Button type="submit" variant="contained" disabled={roomDlg.saving || !online} sx={{ minHeight: 46, fontWeight: 800, borderRadius: 2.5, px: 3, textTransform: "none" }}>
-              {roomDlg.saving ? "Saving..." : editingRoom ? "Save room" : "Add room"}
+              {roomDlg.saving ? tr("Saving...") : editingRoom ? tr("Save room") : tr("Add room")}
             </Button>
           </DialogActions>
         </Box>
@@ -3248,7 +1816,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           action={
             toast.undo ? (
               <Button color="inherit" size="small" onClick={toast.undo} sx={{ fontWeight: 800, minHeight: 36 }}>
-                Undo
+                {tr("Undo")}
               </Button>
             ) : undefined
           }

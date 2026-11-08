@@ -51,6 +51,8 @@ import { db } from "../../config/firebase";
 import { useAuth } from "../../context/AuthContext";
 import { normalizeStatus } from "../../utils/tenantRent";
 import { isRemovedAccount } from "../../utils/accountState";
+// Translation is "tr" here: this file also uses "t" for tenants and the theme
+import { t as tr } from "../../i18n";
 
 const HEAD = '"Inter", sans-serif';
 const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
@@ -61,24 +63,24 @@ const MAX_MESSAGE = 1000;
 const BATCH_SIZE = 400; // Firestore caps a batch at 500 writes
 
 const SCOPE_OPTIONS = [
-  { value: "all", label: "Everyone", hint: "All your properties", Icon: ApartmentOutlinedIcon },
-  { value: "property", label: "One property", hint: "Everyone in a building", Icon: HomeWorkOutlinedIcon },
-  { value: "room", label: "One room", hint: "People in a room", Icon: MeetingRoomOutlinedIcon },
-  { value: "individual", label: "One person", hint: "A single tenant or caretaker", Icon: PersonOutlineOutlinedIcon },
+  { value: "all", label: tr("Everyone"), hint: tr("All your properties"), Icon: ApartmentOutlinedIcon },
+  { value: "property", label: tr("One property"), hint: tr("Everyone in a building"), Icon: HomeWorkOutlinedIcon },
+  { value: "room", label: tr("One room"), hint: tr("People in a room"), Icon: MeetingRoomOutlinedIcon },
+  { value: "individual", label: tr("One person"), hint: tr("A single tenant or caretaker"), Icon: PersonOutlineOutlinedIcon },
 ];
 
 const AUDIENCE_OPTIONS = [
-  { value: "both", label: "Everyone", long: "Tenants & caretakers" },
-  { value: "tenants", label: "Tenants", long: "Tenants only" },
-  { value: "caretakers", label: "Caretakers", long: "Caretakers only" },
+  { value: "both", label: tr("Everyone"), long: "Tenants & caretakers" },
+  { value: "tenants", label: tr("Tenants"), long: "Tenants only" },
+  { value: "caretakers", label: tr("Caretakers"), long: "Caretakers only" },
 ];
 
 // type -> label, tone, icon
 const TYPES = {
-  info: { label: "Info", tone: "info", Icon: InfoOutlinedIcon },
-  warning: { label: "Warning", tone: "warning", Icon: WarningAmberOutlinedIcon },
-  success: { label: "Good news", tone: "success", Icon: CheckCircleOutlinedIcon },
-  error: { label: "Urgent", tone: "error", Icon: ErrorOutlinedIcon },
+  info: { label: tr("Info"), tone: "info", Icon: InfoOutlinedIcon },
+  warning: { label: tr("Warning"), tone: "warning", Icon: WarningAmberOutlinedIcon },
+  success: { label: tr("Good news"), tone: "success", Icon: CheckCircleOutlinedIcon },
+  error: { label: tr("Urgent"), tone: "error", Icon: ErrorOutlinedIcon },
 };
 // Anything saved with an unknown type is shown, filtered and counted as Info
 const typeKey = (t) => (TYPES[t] ? t : "info");
@@ -163,7 +165,7 @@ function Header({ tiles, onNew, loading }) {
 
       <Box sx={{ position: "relative", display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: { xs: "stretch", sm: "center" }, justifyContent: "space-between", gap: { xs: 1.5, sm: 2 }, mb: { xs: 2, sm: 2.5 } }}>
         <Typography color="text.secondary" sx={{ minWidth: 0, fontSize: { xs: 14, sm: 15 } }}>
-          Send updates to everyone, one property, one room or one person
+          {tr("Send updates to everyone, one property, one room or one person")}
         </Typography>
         <Button
           variant="contained"
@@ -171,7 +173,7 @@ function Header({ tiles, onNew, loading }) {
           onClick={onNew}
           sx={{ flexShrink: 0, fontWeight: 700, borderRadius: R.sm, minHeight: 44, boxShadow: "0 10px 22px -14px rgba(255,69,0,.9)" }}
         >
-          New announcement
+          {tr("New announcement")}
         </Button>
       </Box>
 
@@ -250,11 +252,11 @@ function AnnouncementCard({ a, scopeLabel, onReuse }) {
           <Box sx={{ ...row, gap: 0.5, ml: "auto" }}>
             {long && (
               <Button size="small" onClick={() => setOpen((v) => !v)} sx={{ fontWeight: 700, minWidth: 0 }}>
-                {open ? "Show less" : "Show more"}
+                {open ? tr("Show less") : tr("Show more")}
               </Button>
             )}
             <Button size="small" color="inherit" startIcon={<ContentCopyOutlinedIcon sx={{ fontSize: 16 }} />} onClick={() => onReuse(a)} sx={{ fontWeight: 700, minWidth: 0, color: "text.secondary" }}>
-              Reuse
+              {tr("Reuse")}
             </Button>
           </Box>
         </Box>
@@ -646,16 +648,16 @@ export default function OwnerAnnouncements() {
   const nTenants = users.filter((u) => roleOf(u) === "tenant").length;
   const nCaretakers = users.length - nTenants;
   const tiles = [
-    { label: "Sent", icon: <CampaignOutlinedIcon />, value: stats.total, sub: "All time" },
+    { label: tr("Sent"), icon: <CampaignOutlinedIcon />, value: stats.total, sub: tr("All time") },
     { label: `In ${stats.monthName}`, icon: <CalendarMonthOutlinedIcon />, value: stats.thisMonth, sub: plural(stats.reachedThisMonth, "person reached", "people reached") },
     {
-      label: "Can reach",
+      label: tr("Can reach"),
       icon: <GroupsOutlinedIcon />,
       value: people.status === "loading" ? "…" : people.status === "error" ? "?" : users.length,
       sub: people.status === "ready" ? `${plural(nTenants, "tenant", "tenants")} · ${plural(nCaretakers, "caretaker", "caretakers")}` : "",
       accent: people.status === "error" ? "error" : null,
     },
-    { label: "Last sent", icon: <ScheduleOutlinedIcon />, value: stats.last, sub: stats.lastTitle, small: true },
+    { label: tr("Last sent"), icon: <ScheduleOutlinedIcon />, value: stats.last, sub: stats.lastTitle, small: true },
   ];
 
   const nRecTenants = recipients.filter((u) => roleOf(u) === "tenant").length;
@@ -677,7 +679,7 @@ export default function OwnerAnnouncements() {
       {history.error && <Alert severity="error" sx={{ mb: 2, borderRadius: R.md }}>{history.error}</Alert>}
       {people.status === "error" && (
         <Alert severity="warning" sx={{ mb: 2, borderRadius: R.md }}>
-          Couldn't load your tenants and caretakers, so new announcements can't be sent right now. Refresh the page to try again.
+          {tr("Couldn't load your tenants and caretakers, so new announcements can't be sent right now. Refresh the page to try again.")}
         </Alert>
       )}
 
@@ -693,12 +695,12 @@ export default function OwnerAnnouncements() {
           <Box sx={{ width: 60, height: 60, borderRadius: R.md, mx: "auto", mb: 2, display: "grid", placeItems: "center", bgcolor: "rgba(255,69,0,.10)" }}>
             <CampaignOutlinedIcon sx={{ fontSize: 30, color: "primary.main" }} />
           </Box>
-          <Typography sx={{ fontFamily: HEAD, fontWeight: 800 }}>No announcements yet</Typography>
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 800 }}>{tr("No announcements yet")}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2, maxWidth: 360, mx: "auto" }}>
-            Let everyone know about a water interruption, a house meeting or a rule change.
+            {tr("Let everyone know about a water interruption, a house meeting or a rule change.")}
           </Typography>
           <Button variant="outlined" startIcon={<AddIcon />} onClick={openNew} sx={{ fontWeight: 700, borderRadius: R.sm }}>
-            Write the first one
+            {tr("Write the first one")}
           </Button>
         </Box>
       ) : (
@@ -709,21 +711,21 @@ export default function OwnerAnnouncements() {
               <SearchIcon sx={{ color: "text.secondary", fontSize: 20 }} />
               <InputBase
                 fullWidth
-                placeholder="Search title or message"
+                placeholder={tr("Search title or message")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 inputProps={{ "aria-label": "Search announcements" }}
                 sx={{ fontSize: 14.5 }}
               />
               {search && (
-                <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
+                <IconButton size="small" aria-label={tr("Clear search")} onClick={() => setSearch("")}>
                   <CloseIcon fontSize="small" />
                 </IconButton>
               )}
             </Box>
             <Box
               role="tablist"
-              aria-label="Filter by type"
+              aria-label={tr("Filter by type")}
               sx={{ display: "flex", gap: 0.75, overflowX: "auto", mx: { xs: -2, sm: 0 }, px: { xs: 2, sm: 0 }, scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}
             >
               {FILTERS.map((f) => {
@@ -755,7 +757,7 @@ export default function OwnerAnnouncements() {
                     }}
                   >
                     {t && <Box sx={{ width: 8, height: 8, borderRadius: "2px", bgcolor: `${t.tone}.main` }} />}
-                    {f === "all" ? "All" : t.label}
+                    {f === "all" ? tr("All") : t.label}
                     <Box component="span" sx={{ opacity: 0.6, fontWeight: 600 }}>{counts[f] || 0}</Box>
                   </Box>
                 );
@@ -765,10 +767,10 @@ export default function OwnerAnnouncements() {
 
           {visible.length === 0 ? (
             <Box sx={{ ...panelSx, py: 5, px: 3, textAlign: "center" }}>
-              <Typography sx={{ fontWeight: 700 }}>No announcements match</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>Try a different search or filter.</Typography>
+              <Typography sx={{ fontWeight: 700 }}>{tr("No announcements match")}</Typography>
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>{tr("Try a different search or filter.")}</Typography>
               <Button size="small" onClick={() => { setFilter("all"); setSearch(""); }} sx={{ mt: 1.5, fontWeight: 700 }}>
-                Clear filters
+                {tr("Clear filters")}
               </Button>
             </Box>
           ) : (
@@ -798,13 +800,13 @@ export default function OwnerAnnouncements() {
             </Box>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.15rem", lineHeight: 1.25 }}>
-                {draftFromReuse ? "Send again" : "New announcement"}
+                {draftFromReuse ? tr("Send again") : tr("New announcement")}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                It shows up in their notifications right away
+                {tr("It shows up in their notifications right away")}
               </Typography>
             </Box>
-            <IconButton onClick={closeCompose} aria-label="Close" disabled={submitting} sx={{ bgcolor: "action.hover" }}>
+            <IconButton onClick={closeCompose} aria-label={tr("Close")} disabled={submitting} sx={{ bgcolor: "action.hover" }}>
               <CloseIcon />
             </IconButton>
           </Box>
@@ -813,7 +815,7 @@ export default function OwnerAnnouncements() {
         <DialogContent sx={{ px: { xs: 2, sm: 3 }, py: 0, ...fieldSx }}>
           {formError && <Alert severity="error" sx={{ mt: 2, borderRadius: R.sm }}>{formError}</Alert>}
 
-          <ComposeSection step={1} title="Message">
+          <ComposeSection step={1} title={tr("Message")}>
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(4, minmax(0, 1fr))" }, gap: 0.75, mb: 2 }}>
               {Object.entries(TYPES).map(([key, t]) => (
                 <Choice key={key} active={type === key} tone={t.tone} onClick={() => setType(key)} sx={{ ...row, justifyContent: "center", gap: 0.75, height: 40, fontSize: 13.5, fontWeight: 700 }}>
@@ -824,11 +826,11 @@ export default function OwnerAnnouncements() {
             </Box>
 
             <TextField
-              label="Title"
+              label={tr("Title")}
               value={title}
               onChange={(e) => setTitle(e.target.value.slice(0, MAX_TITLE))}
               onBlur={() => touch("title")}
-              placeholder="e.g. Water interruption on Saturday"
+              placeholder={tr("e.g. Water interruption on Saturday")}
               fullWidth
               error={!!show("title")}
               helperText={show("title") || `${title.length}/${MAX_TITLE}`}
@@ -836,11 +838,11 @@ export default function OwnerAnnouncements() {
             />
 
             <TextField
-              label="Message"
+              label={tr("Message")}
               value={message}
               onChange={(e) => setMessage(e.target.value.slice(0, MAX_MESSAGE))}
               onBlur={() => touch("message")}
-              placeholder="What's happening, when, and what they need to do"
+              placeholder={tr("What's happening, when, and what they need to do")}
               multiline
               minRows={4}
               maxRows={12}
@@ -850,7 +852,7 @@ export default function OwnerAnnouncements() {
             />
           </ComposeSection>
 
-          <ComposeSection step={2} title="Who gets it">
+          <ComposeSection step={2} title={tr("Who gets it")}>
             <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 0.75, mb: 1.5 }}>
               {SCOPE_OPTIONS.map((o) => (
                 <Choice key={o.value} active={scope === o.value} onClick={() => changeScope(o.value)} sx={{ display: "flex", alignItems: "flex-start", gap: 1, p: 1.25 }}>
@@ -868,7 +870,7 @@ export default function OwnerAnnouncements() {
                 <TextField
                   select
                   fullWidth
-                  label="Property"
+                  label={tr("Property")}
                   value={selectedPropertyId}
                   onChange={(e) => {
                     setSelectedPropertyId(e.target.value);
@@ -879,7 +881,7 @@ export default function OwnerAnnouncements() {
                   error={!!show("property")}
                   helperText={show("property")}
                 >
-                  {properties.length === 0 && <MenuItem value="" disabled>No properties found</MenuItem>}
+                  {properties.length === 0 && <MenuItem value="" disabled>{tr("No properties found")}</MenuItem>}
                   {properties.map((p) => (
                     <MenuItem key={p.id} value={p.id}>{propertyNameOf(p)}</MenuItem>
                   ))}
@@ -889,7 +891,7 @@ export default function OwnerAnnouncements() {
                   <TextField
                     select
                     fullWidth
-                    label="Room"
+                    label={tr("Room")}
                     value={availableRooms.includes(selectedRoomNumber) ? selectedRoomNumber : ""}
                     disabled={!selectedPropertyId || availableRooms.length === 0}
                     onChange={(e) => {
@@ -901,7 +903,7 @@ export default function OwnerAnnouncements() {
                     helperText={show("room") || (selectedPropertyId && availableRooms.length === 0 ? "No one lives in this property yet." : "")}
                   >
                     {availableRooms.map((r) => (
-                      <MenuItem key={r} value={r}>Room {r}</MenuItem>
+                      <MenuItem key={r} value={r}>{tr("Room")}{" "}{r}</MenuItem>
                     ))}
                   </TextField>
                 )}
@@ -928,7 +930,7 @@ export default function OwnerAnnouncements() {
                       <Box sx={{ minWidth: 0 }}>
                         <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>{userName(u)}</Typography>
                         <Typography variant="caption" color="text.secondary">
-                          {roleOf(u) === "caretaker" ? "Caretaker" : "Tenant"}
+                          {roleOf(u) === "caretaker" ? tr("Caretaker") : tr("Tenant")}
                           {userRoom(u) ? ` · Room ${userRoom(u)}` : ""}
                           {userProp(u) ? ` · ${propertyName(userProp(u))}` : ""}
                         </Typography>
@@ -937,13 +939,13 @@ export default function OwnerAnnouncements() {
                   );
                 }}
                 renderInput={(params) => (
-                  <TextField {...params} label="Person" placeholder="Search by name" error={!!show("person")} helperText={show("person")} />
+                  <TextField {...params} label={tr("Person")} placeholder={tr("Search by name")} error={!!show("person")} helperText={show("person")} />
                 )}
               />
             )}
 
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.75 }}>
-              Audience
+              {tr("Audience")}
             </Typography>
             <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 0.75 }}>
               {AUDIENCE_OPTIONS.map((o) => (
@@ -985,7 +987,7 @@ export default function OwnerAnnouncements() {
           </Box>
           <Box sx={{ display: "flex", gap: 1 }}>
             <Button onClick={closeCompose} color="inherit" disabled={submitting} sx={{ fontWeight: 700, borderRadius: R.sm, flex: { xs: 1, sm: "none" } }}>
-              Cancel
+              {tr("Cancel")}
             </Button>
             <Button
               variant="contained"
@@ -995,7 +997,7 @@ export default function OwnerAnnouncements() {
               startIcon={submitting ? <CircularProgress size={18} color="inherit" /> : <SendIcon />}
               sx={{ borderRadius: R.sm, fontWeight: 700, px: 3, flex: { xs: 1, sm: "none" } }}
             >
-              {submitting ? "Sending…" : "Send"}
+              {submitting ? tr("Sending…") : tr("Send")}
             </Button>
           </Box>
         </Box>

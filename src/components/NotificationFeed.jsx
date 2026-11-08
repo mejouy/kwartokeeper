@@ -22,6 +22,7 @@ import DoneAllIcon from "@mui/icons-material/DoneAll";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import { collection, onSnapshot, query, updateDoc, where, doc } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
+import { t } from "../i18n";
 
 function getDateValue(value) {
   if (value?.toDate) return value.toDate();
@@ -170,14 +171,14 @@ export default function NotificationFeed() {
 
   return (
     <>
-      <Tooltip title="Notifications">
+      <Tooltip title={t("Notifications")}>
         <IconButton
           aria-label={`Notifications${unreadNotifications.length ? `, ${unreadNotifications.length} unread` : ""}`}
           aria-describedby={popoverId}
           color="inherit"
           onClick={(event) => setAnchorEl(event.currentTarget)}
         >
-          <Badge badgeContent={unreadNotifications.length} color="error" max={99}>
+          <Badge badgeContent={unreadNotifications.length || null} color="error" max={99}>
             <NotificationsNoneOutlinedIcon />
           </Badge>
         </IconButton>
@@ -194,9 +195,9 @@ export default function NotificationFeed() {
       >
         <Box sx={{ p: 2, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 1 }}>
           <Box>
-            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>Notifications</Typography>
+            <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>{t("Notifications")}</Typography>
             <Typography variant="caption" color="text.secondary">
-              {unreadNotifications.length ? `${unreadNotifications.length} unread` : "You're all caught up"}
+              {unreadNotifications.length ? `${unreadNotifications.length} unread` : t("You're all caught up")}
             </Typography>
           </Box>
           <Button
@@ -205,7 +206,7 @@ export default function NotificationFeed() {
             disabled={!unreadNotifications.length || markingAll}
             onClick={markAllAsRead}
           >
-            Mark all read
+            {t("Mark all read")}
           </Button>
         </Box>
         <Divider />
@@ -220,7 +221,7 @@ export default function NotificationFeed() {
           <Box sx={{ py: 4, px: 2, textAlign: "center" }}>
             <CampaignOutlinedIcon sx={{ color: "text.disabled", mb: 1 }} />
             <Typography variant="body2" color="text.secondary">
-              No announcements or notifications yet.
+              {t("No announcements or notifications yet.")}
             </Typography>
           </Box>
         ) : (
@@ -238,7 +239,7 @@ export default function NotificationFeed() {
                   <Stack spacing={0.5} sx={{ minWidth: 0, flex: 1 }}>
                     <Stack direction="row" sx={{ alignItems: "center" }} spacing={1}>
                       <Typography variant="body2" sx={{ fontWeight: notification.isRead ? 500 : 700, flex: 1 }}>
-                        {notification.title || "Announcement"}
+                        {notification.title || t("Announcement")}
                       </Typography>
                       {!notification.isRead && <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "primary.main", flexShrink: 0 }} />}
                     </Stack>

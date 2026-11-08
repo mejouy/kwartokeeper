@@ -157,7 +157,7 @@ export default function ManageOwners() {
       const id = t.uid || t.id;
       merged.set(id, { ...(merged.get(id) || {}), ...t });
     });
-    const tenants = [...merged.values()];
+    const tenants = withoutRemoved([...merged.values()]);
     // Same occupancy rule as the owner pages: beds from rooms, occupied = current tenants
     const occ = occupancyOf(properties.map((p) => ({ id: p.id, beds: bedsInProperty(p) })), tenants);
     const ownerOfProperty = new Map(properties.map((p) => [p.id, keyOf(p.ownerUid ?? p.ownerId ?? p.createdBy)]));

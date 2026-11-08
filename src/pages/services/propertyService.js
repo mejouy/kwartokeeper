@@ -1,5 +1,6 @@
 // src/pages/services/propertyService.js
 import { auth, db } from "../../config/firebase";
+import { findDuplicateProperty } from "../../utils/duplicates";
 import {
   collection,
   addDoc,
@@ -124,6 +125,13 @@ export const saveProperty = async (
     province: normalizeText(wizardData.province) || normalizeText(wizardData.address?.province) || null,
     region: normalizeText(wizardData.region) || normalizeText(wizardData.address?.region) || null,
   };
+
+  // The same property twice (same name or same street address) is almost always a double entry
+  const duplicate = await findDuplicateProperty(resolvedOwnerUid, {
+    propertyName: normalizeText(wizardData.propertyName) || normalizeText(wizardData.name),
+    address: addressPayload,
+  });
+  if (duplicate) throw new Error(duplicate.message);
 
   let uploadedCoverPhotoUrl =
     normalizeText(wizardData.coverPhotoUrl) ||

@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
+import { visuallyHidden } from "@mui/utils";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Box, Typography, Button, IconButton, Chip, CircularProgress, Paper,
@@ -31,6 +32,7 @@ import { getPropertyCoverPhotoUrl } from "../../../utils/getPropertyCoverPhotoUr
 import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
 import { holdsBed } from "../../../utils/occupancy";
 import { withoutRemoved } from "../../../utils/accountState";
+import { t } from "../../../i18n";
 
 const INK = "#202020";
 const ORANGE = "#ff4500";
@@ -84,10 +86,10 @@ const getRoomStatus = (room, roomTenants) => {
 };
 
 const STATUS_STYLES = {
-  vacant: { fill: "rgba(202, 220, 246, 0.55)", label: "Vacant", text: "text.primary" },
-  partial: { fill: "rgba(255, 69, 0, 0.45)", label: "Partially occupied", text: "text.primary" },
-  full: { fill: ORANGE, label: "Fully occupied", text: "#ffffff" },
-  maintenance: { fill: "rgba(0, 0, 0, 0.12)", label: "Under maintenance", text: "text.primary" },
+  vacant: { fill: "rgba(202, 220, 246, 0.55)", label: t("Vacant"), text: "text.primary" },
+  partial: { fill: "rgba(255, 69, 0, 0.45)", label: t("Partially occupied"), text: "text.primary" },
+  full: { fill: ORANGE, label: t("Fully occupied"), text: "#ffffff" },
+  maintenance: { fill: "rgba(0, 0, 0, 0.12)", label: t("Under maintenance"), text: "text.primary" },
 };
 
 const row = { display: "flex", alignItems: "center" };
@@ -166,7 +168,7 @@ function CoverBanner({ property, coverPhotoUrl, occPct, onBack, onEdit }) {
 
       {/* top row: back + edit */}
       <Box sx={{ position: "relative", ...row, justifyContent: "space-between", gap: 1 }}>
-        <IconButton aria-label="Back to properties" onClick={onBack} sx={{ color: "#fff", bgcolor: "rgba(0,0,0,.35)", backdropFilter: "blur(6px)", "&:hover": { bgcolor: "rgba(0,0,0,.5)" } }}>
+        <IconButton aria-label={t("Back to properties")} onClick={onBack} sx={{ color: "#fff", bgcolor: "rgba(0,0,0,.35)", backdropFilter: "blur(6px)", "&:hover": { bgcolor: "rgba(0,0,0,.5)" } }}>
           <ArrowBackIcon />
         </IconButton>
         <Button
@@ -174,17 +176,17 @@ function CoverBanner({ property, coverPhotoUrl, occPct, onBack, onEdit }) {
           onClick={onEdit}
           sx={{ fontWeight: 700, borderRadius: R.sm, color: INK, bgcolor: "#fff", px: 2, "&:hover": { bgcolor: "#f3f3f3" } }}
         >
-          Edit<Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>&nbsp;property</Box>
+          {t("Edit")}<Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>{" "}{t("property")}</Box>
         </Button>
       </Box>
 
       {/* bottom: name, type, address */}
       <Box sx={{ position: "relative", mt: 4, minWidth: 0 }}>
         <Box sx={{ display: "inline-flex", px: 1, py: 0.3, mb: 1, borderRadius: "6px", bgcolor: "rgba(255,255,255,.94)", color: INK, fontSize: 12, fontWeight: 700 }}>
-          {property.propertyType || "Dormitory"}
+          {property.propertyType || t("Dormitory")}
         </Box>
         <Typography component="h1" sx={{ fontFamily: HEAD, fontWeight: 900, letterSpacing: "-0.03em", lineHeight: 1.1, fontSize: { xs: "1.6rem", sm: "2.3rem" }, overflowWrap: "anywhere", textShadow: coverPhotoUrl ? "0 2px 12px rgba(0,0,0,.35)" : "none" }}>
-          {property.propertyName || "Unnamed property"}
+          {property.propertyName || t("Unnamed property")}
         </Typography>
         <Box sx={{ ...row, alignItems: "flex-start", gap: 0.5, mt: 0.75, color: "rgba(255,255,255,.85)", minWidth: 0 }}>
           <PlaceOutlinedIcon sx={{ fontSize: 17, flexShrink: 0, mt: "2px" }} />
@@ -287,7 +289,6 @@ function RoomTile({ room, roomTenants, isSelected, onSelect, delay }) {
       component="button"
       type="button"
       onClick={() => onSelect(roomKey(room))}
-      aria-label={`${room.roomName}, ${STATUS_STYLES[status].label}${capacity ? `, ${roomTenants.length} of ${capacity} beds taken` : ""}`}
       aria-pressed={isSelected}
       sx={{
         position: "relative",
@@ -326,6 +327,10 @@ function RoomTile({ room, roomTenants, isSelected, onSelect, delay }) {
       >
         {caption}
       </Typography>
+      {/* Read out after the visible text (voice control still matches what's on screen) */}
+      <Box component="span" sx={visuallyHidden}>
+        {`, ${STATUS_STYLES[status].label}${capacity ? `, ${roomTenants.length} of ${capacity} beds taken` : ""}`}
+      </Box>
     </Box>
   );
 }
@@ -415,7 +420,7 @@ function RoomMap({ rooms, tenants, selectedKey, onSelectRoom }) {
               >
                 {floorLabel(f.key)}
                 <Box component="span" sx={{ ml: 0.75, fontWeight: 600, opacity: 0.7 }}>
-                  {f.freeBeds} free
+                  {f.freeBeds}{" "}{t("free")}
                 </Box>
               </Box>
             );
@@ -448,7 +453,7 @@ function RoomMap({ rooms, tenants, selectedKey, onSelectRoom }) {
                   {floor.key === "Unassigned" ? "—" : `${floor.key}F`}
                 </Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block", lineHeight: 1.3 }}>
-                  {floor.freeBeds} free
+                  {floor.freeBeds}{" "}{t("free")}
                 </Typography>
               </Box>
               <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 1 }}>
@@ -650,13 +655,13 @@ export default function PropertyProfile() {
     return (
       <Box sx={{ maxWidth: 480, mx: "auto", mt: 8, textAlign: "center" }}>
         <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.2rem", mb: 1 }}>
-          {loadError ? "Couldn't load this property" : "Property not found"}
+          {loadError ? t("Couldn't load this property") : t("Property not found")}
         </Typography>
         <Typography color="text.secondary" sx={{ mb: 2.5 }}>
-          {loadError ? "Check your connection and try again." : "It may have been removed, or the link is wrong."}
+          {loadError ? t("Check your connection and try again.") : t("It may have been removed, or the link is wrong.")}
         </Typography>
         <Button variant="contained" startIcon={<ArrowBackIcon />} onClick={() => navigate("/owner/properties")} sx={{ fontWeight: 700, borderRadius: R.sm }}>
-          Back to properties
+          {t("Back to properties")}
         </Button>
       </Box>
     );
@@ -680,7 +685,7 @@ export default function PropertyProfile() {
       <Box sx={{ ...row, justifyContent: "space-between", alignItems: "flex-start", gap: 1 }}>
         <Box sx={{ minWidth: 0 }}>
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase" }}>
-            {selectedRoom.floor != null ? `Floor ${selectedRoom.floor}` : "Room"}
+            {selectedRoom.floor != null ? `Floor ${selectedRoom.floor}` : t("Room")}
           </Typography>
           <Typography noWrap sx={{ fontFamily: HEAD, fontWeight: 900, fontSize: "1.5rem", lineHeight: 1.15, letterSpacing: "-0.02em" }}>
             {selectedRoom.roomName}
@@ -692,7 +697,7 @@ export default function PropertyProfile() {
             </Typography>
           </Box>
         </Box>
-        <IconButton size="small" aria-label="Close room details" onClick={closeRoom} sx={{ mt: -0.5, mr: -0.5, bgcolor: "action.hover" }}>
+        <IconButton size="small" aria-label={t("Close room details")} onClick={closeRoom} sx={{ mt: -0.5, mr: -0.5, bgcolor: "action.hover" }}>
           <CloseIcon fontSize="small" />
         </IconButton>
       </Box>
@@ -712,14 +717,14 @@ export default function PropertyProfile() {
 
       {/* TENANTS — what owners check most, so it comes first */}
       <Typography variant="subtitle2" sx={{ fontWeight: 800, mt: 3, mb: 1.25 }}>
-        Tenants
+        {t("Tenants")}
         <Typography component="span" variant="subtitle2" color="text.secondary" sx={{ fontWeight: 600 }}>
-          {" "}· {selectedTenants.length} of {capacityOf(selectedRoom)}
+          {" "}· {selectedTenants.length}{" "}{t("of")}{" "}{capacityOf(selectedRoom)}
         </Typography>
       </Typography>
       {selectedTenants.length === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ p: 2, textAlign: "center", border: "1px dashed", borderColor: "divider", borderRadius: R.sm }}>
-          No tenants assigned to this room.
+          {t("No tenants assigned to this room.")}
         </Typography>
       ) : (
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
@@ -760,7 +765,7 @@ export default function PropertyProfile() {
                   </Typography>
                   <Typography variant="caption" color="text.secondary" noWrap component="div">
                     {(tenant.bedId || tenant.bedNumber) ? `Bed ${tenant.bedId || tenant.bedNumber} · ` : ""}
-                    {moveOut ? `Move-out ${moveOut}` : "No scheduled move-out"}
+                    {moveOut ? `Move-out ${moveOut}` : t("No scheduled move-out")}
                   </Typography>
                 </Box>
                 <ChevronRightIcon sx={{ color: "text.disabled" }} />
@@ -774,7 +779,7 @@ export default function PropertyProfile() {
 
       {/* ROOM STATUS */}
       <Typography variant="subtitle2" sx={{ fontWeight: 800, mb: 1.25 }}>
-        Room status
+        {t("Room status")}
       </Typography>
       <ToggleButtonGroup
         exclusive
@@ -802,10 +807,10 @@ export default function PropertyProfile() {
           },
         }}
       >
-        <ToggleButton value="operational">Available</ToggleButton>
+        <ToggleButton value="operational">{t("Available")}</ToggleButton>
         <ToggleButton value="maintenance">
           <HandymanOutlinedIcon sx={{ fontSize: 16, mr: 0.75 }} />
-          Maintenance
+          {t("Maintenance")}
         </ToggleButton>
       </ToggleButtonGroup>
 
@@ -815,8 +820,8 @@ export default function PropertyProfile() {
           size="small"
           multiline
           minRows={2}
-          label="Maintenance reason"
-          placeholder="e.g. Plumbing repairs in progress"
+          label={t("Maintenance reason")}
+          placeholder={t("e.g. Plumbing repairs in progress")}
           value={maintenanceNote}
           onChange={(e) => {
             setMaintenanceNote(e.target.value);
@@ -835,12 +840,12 @@ export default function PropertyProfile() {
         fullWidth
         sx={{ fontWeight: 700, borderRadius: R.sm, boxShadow: "none" }}
       >
-        {savingStatus ? "Saving..." : "Update status"}
+        {savingStatus ? t("Saving...") : t("Update status")}
       </Button>
 
       {saveSuccess && (
         <Alert icon={<CheckCircleOutlineIcon fontSize="inherit" />} severity="success" sx={{ mt: 1.5, py: 0, borderRadius: R.sm }}>
-          Room status updated
+          {t("Room status updated")}
         </Alert>
       )}
       {saveError && (
@@ -865,11 +870,11 @@ export default function PropertyProfile() {
 
       <StatTiles
         items={[
-          { label: "Rooms", icon: <MeetingRoomOutlinedIcon />, value: overallMetrics.totalRooms },
-          { label: "Beds occupied", icon: <PeopleOutlinedIcon />, value: overallMetrics.occupiedBeds, suffix: `/ ${overallMetrics.totalCapacity}`, progress: occPct },
-          { label: "Beds available", icon: <BedOutlinedIcon />, value: overallMetrics.availableBeds, color: overallMetrics.availableBeds > 0 ? "success.main" : undefined, tint: "rgba(46,125,50,.1)", iconColor: "success.main" },
+          { label: t("Rooms"), icon: <MeetingRoomOutlinedIcon />, value: overallMetrics.totalRooms },
+          { label: t("Beds occupied"), icon: <PeopleOutlinedIcon />, value: overallMetrics.occupiedBeds, suffix: `/ ${overallMetrics.totalCapacity}`, progress: occPct },
+          { label: t("Beds available"), icon: <BedOutlinedIcon />, value: overallMetrics.availableBeds, color: overallMetrics.availableBeds > 0 ? "success.main" : undefined, tint: "rgba(46,125,50,.1)", iconColor: "success.main" },
           {
-            label: "Under maintenance",
+            label: t("Under maintenance"),
             icon: <HandymanOutlinedIcon />,
             value: overallMetrics.maintenanceRooms,
             suffix: overallMetrics.maintenanceRooms === 1 ? "room" : "rooms",
@@ -895,17 +900,17 @@ export default function PropertyProfile() {
             icon={<GridViewOutlinedIcon />}
             aside={
               <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600, flexShrink: 0 }}>
-                {loadingTenants ? "Loading tenants…" : `${overallMetrics.occupiedBeds} ${overallMetrics.occupiedBeds === 1 ? "tenant" : "tenants"}`}
+                {loadingTenants ? t("Loading tenants…") : `${overallMetrics.occupiedBeds} ${overallMetrics.occupiedBeds === 1 ? "tenant" : "tenants"}`}
               </Typography>
             }
           >
-            Room map
+            {t("Room map")}
           </SectionTitle>
           {rooms.length > 0 ? (
             <RoomMap rooms={rooms} tenants={tenants} selectedKey={selectedRoom ? selectedKey : null} onSelectRoom={selectRoom} />
           ) : (
             <Typography color="text.secondary" sx={{ p: 3, textAlign: "center", border: "1px dashed", borderColor: "divider", borderRadius: R.sm }}>
-              No rooms have been added to this property yet.
+              {t("No rooms have been added to this property yet.")}
             </Typography>
           )}
         </Paper>
@@ -931,9 +936,9 @@ export default function PropertyProfile() {
                 <Box sx={{ width: 60, height: 60, borderRadius: R.md, mx: "auto", mb: 1.5, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.08)" }}>
                   <TouchAppOutlinedIcon sx={{ color: "primary.main" }} />
                 </Box>
-                <Typography sx={{ fontFamily: HEAD, fontWeight: 800 }}>Select a room</Typography>
+                <Typography sx={{ fontFamily: HEAD, fontWeight: 800 }}>{t("Select a room")}</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, maxWidth: 260 }}>
-                  Tap any room on the map to see its tenants or change its status.
+                  {t("Tap any room on the map to see its tenants or change its status.")}
                 </Typography>
               </Box>
             )}
@@ -968,7 +973,7 @@ export default function PropertyProfile() {
       {/* AMENITIES & HOUSE RULES */}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: 3, alignItems: "stretch" }}>
         <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 3 } }}>
-          <SectionTitle icon={<WifiOutlinedIcon />}>Amenities</SectionTitle>
+          <SectionTitle icon={<WifiOutlinedIcon />}>{t("Amenities")}</SectionTitle>
           {property.amenities?.length > 0 ? (
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
               {property.amenities.map((amenity) => (
@@ -981,14 +986,14 @@ export default function PropertyProfile() {
               ))}
             </Box>
           ) : (
-            <Typography variant="body2" color="text.secondary">No amenities listed.</Typography>
+            <Typography variant="body2" color="text.secondary">{t("No amenities listed.")}</Typography>
           )}
         </Paper>
 
         <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 3 } }}>
-          <SectionTitle icon={<PolicyOutlinedIcon />}>House rules</SectionTitle>
+          <SectionTitle icon={<PolicyOutlinedIcon />}>{t("House rules")}</SectionTitle>
           <Typography variant="body2" sx={{ whiteSpace: "pre-line", color: "text.secondary", lineHeight: 1.7 }}>
-            {property.rulesText || "No house rules specified."}
+            {property.rulesText || t("No house rules specified.")}
           </Typography>
 
           {property.ruleFiles?.length > 0 && (

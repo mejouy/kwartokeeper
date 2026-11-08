@@ -7,6 +7,7 @@ import PersonAddAltOutlinedIcon from "@mui/icons-material/PersonAddAltOutlined";
 import SupervisorAccountOutlinedIcon from "@mui/icons-material/SupervisorAccountOutlined";
 import ApartmentOutlinedIcon from "@mui/icons-material/ApartmentOutlined";
 import ChevronRightIcon from "@mui/icons-material/ChevronRight";
+import { t } from "../../../i18n";
 
 // The same facade motif from the login page (window size, gap, and lit
 // pattern), tiled and blurred to sit behind the card as ambient texture —
@@ -215,16 +216,16 @@ export default function WizardSuccess() {
             variant="h5"
             sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, color: "text.primary" }}
           >
-            {propertyName ? `${propertyName} is ready` : "Your property is ready"}
+            {propertyName ? `${propertyName} is ready` : t("Your property is ready")}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1, mb: 3 }}>
-            Your rooms and beds are set up. Here's what you built. You can change any of it later in Properties.
+            {t("Your rooms and beds are set up. Here's what you built. You can change any of it later in Properties.")}
           </Typography>
 
           <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 1, mb: 3 }}>
             <Stat value={totalFloors || "—"} label={totalFloors === 1 ? "Floor" : "Floors"} />
-            <Stat value={totalRooms} label="Rooms" />
-            <Stat value={totalBeds} label="Beds" />
+            <Stat value={totalRooms} label={t("Rooms")} />
+            <Stat value={totalBeds} label={t("Beds")} />
           </Box>
 
           <Typography
@@ -232,24 +233,24 @@ export default function WizardSuccess() {
             color="text.secondary"
             sx={{ fontWeight: 600, display: "block", textAlign: "left", mb: 0.5, px: 1 }}
           >
-            Next up
+            {t("Next up")}
           </Typography>
           <Box sx={{ mb: 3 }}>
             {propertyId && (
               <NextUpRow
                 icon={ApartmentOutlinedIcon}
-                label="Review rooms, rates and photos"
+                label={t("Review rooms, rates and photos")}
                 onClick={() => navigate(`/owner/properties/${propertyId}`)}
               />
             )}
             <NextUpRow
               icon={PersonAddAltOutlinedIcon}
-              label="Add your first tenant"
+              label={t("Add your first tenant")}
               onClick={() => navigate(propertyId ? `/owner/tenants/register?propertyId=${propertyId}` : "/owner/tenants/add")}
             />
             <NextUpRow
               icon={SupervisorAccountOutlinedIcon}
-              label="Invite a caretaker"
+              label={t("Invite a caretaker")}
               onClick={() => navigate("/owner/caretakers/invite")}
               last
             />
@@ -261,7 +262,7 @@ export default function WizardSuccess() {
             sx={{ py: 1.5, fontWeight: 700, borderRadius: "10px" }}
             onClick={() => navigate("/owner", { replace: true })}
           >
-            Go to my dashboard
+            {t("Go to my dashboard")}
           </Button>
         </Box>
       </Box>

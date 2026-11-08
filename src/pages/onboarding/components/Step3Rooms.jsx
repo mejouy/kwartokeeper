@@ -16,6 +16,7 @@ import { buildUniformRooms, buildPerFloorRooms, computeSummary } from "../../../
 import { saveProperty } from "../../services/propertyService";
 import { useAuth } from "../../../context/AuthContext";
 import { StepHeader, FormCard, ChoiceTile, Counter, WizardFooter } from "./wizardUi";
+import { t } from "../../../i18n";
 
 const HEAD = '"Inter", sans-serif';
 const fieldSx = { "& .MuiOutlinedInput-root": { borderRadius: "10px" } };
@@ -26,9 +27,9 @@ const MAX_ALPHA_FLOORS = 26; // A...Z
 const PREVIEW_PER_ROW = 24;
 
 const NAMING = [
-  { value: "floor", title: "By floor", hint: (f) => (f > 1 ? "101, 102 … 201, 202" : "101, 102, 103") },
-  { value: "alpha", title: "Letters", hint: (f) => (f > 1 ? "A1, A2 … B1, B2" : "A1, A2, A3") },
-  { value: "sequential", title: "Plain numbers", hint: () => "1, 2, 3, 4 …" },
+  { value: "floor", title: t("By floor"), hint: (f) => (f > 1 ? "101, 102 … 201, 202" : "101, 102, 103") },
+  { value: "alpha", title: t("Letters"), hint: (f) => (f > 1 ? "A1, A2 … B1, B2" : "A1, A2, A3") },
+  { value: "sequential", title: t("Plain numbers"), hint: () => "1, 2, 3, 4 …" },
 ];
 
 const peso = (n) => `₱${Math.round(Number(n) || 0).toLocaleString("en-PH")}`;
@@ -59,7 +60,7 @@ function GroupEditor({ group, onChange, onRemove, canRemove, errors }) {
           <TextField
             select
             fullWidth
-            label="Room type"
+            label={t("Room type")}
             value={group.roomType}
             onChange={(e) => onChange({ roomType: e.target.value, ...(e.target.value === "Solo / Single" ? { capacityPerRoom: 1 } : {}), ...(e.target.value !== "Custom" ? { customRoomType: "" } : {}) })}
             sx={{ ...fieldSx, "& .MuiOutlinedInput-root": { borderRadius: "10px", bgcolor: "background.default" } }}
@@ -69,8 +70,8 @@ function GroupEditor({ group, onChange, onRemove, canRemove, errors }) {
             ))}
           </TextField>
           {canRemove && (
-            <Tooltip title="Remove this room type">
-              <IconButton onClick={onRemove} aria-label="Remove this room type" sx={{ mt: 1, color: "text.secondary", "&:hover": { color: "error.main" } }}>
+            <Tooltip title={t("Remove this room type")}>
+              <IconButton onClick={onRemove} aria-label={t("Remove this room type")} sx={{ mt: 1, color: "text.secondary", "&:hover": { color: "error.main" } }}>
                 <DeleteOutlineIcon />
               </IconButton>
             </Tooltip>
@@ -79,8 +80,8 @@ function GroupEditor({ group, onChange, onRemove, canRemove, errors }) {
         {group.roomType === "Custom" ? (
           <TextField
             fullWidth
-            label="Name this room type"
-            placeholder="e.g. Quad sharing"
+            label={t("Name this room type")}
+            placeholder={t("e.g. Quad sharing")}
             value={group.customRoomType}
             onChange={(e) => onChange({ customRoomType: e.target.value.slice(0, 40) })}
             error={Boolean(errors?.custom)}
@@ -94,12 +95,12 @@ function GroupEditor({ group, onChange, onRemove, canRemove, errors }) {
 
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "auto minmax(0, 1fr) minmax(0, 1fr)" }, gap: 1.5, mt: 1.75, alignItems: "end" }}>
         <Box sx={{ gridColumn: { xs: "1 / -1", sm: "auto" } }}>
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.5 }}>Rooms</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.5 }}>{t("Rooms")}</Typography>
           <Counter value={Number(group.numberOfRooms) || 1} onChange={(v) => onChange({ numberOfRooms: v })} min={1} max={MAX_ROOMS_PER_FLOOR} label="rooms" />
         </Box>
         <TextField
           select
-          label="Beds per room"
+          label={t("Beds per room")}
           value={group.capacityPerRoom}
           onChange={(e) => onChange({ capacityPerRoom: Number(e.target.value) })}
           disabled={group.roomType === "Solo / Single"}
@@ -110,7 +111,7 @@ function GroupEditor({ group, onChange, onRemove, canRemove, errors }) {
           ))}
         </TextField>
         <TextField
-          label="Rate per bed / month"
+          label={t("Rate per bed / month")}
           value={group.monthlyRate}
           onChange={(e) => onChange({ monthlyRate: rateInput(e.target.value) })}
           error={Boolean(errors?.rate)}
@@ -138,7 +139,7 @@ function BuildingPreview({ rooms, floors }) {
             </Typography>
             <Box sx={{ flex: 1, minWidth: 0, display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
               {list.length === 0 && (
-                <Typography variant="caption" color="text.disabled">No rooms</Typography>
+                <Typography variant="caption" color="text.disabled">{t("No rooms")}</Typography>
               )}
               {list.slice(0, PREVIEW_PER_ROW).map((r, j) => (
                 <Tooltip key={j} title={`Room ${r.roomName} · ${r.capacity} ${r.capacity === 1 ? "bed" : "beds"}`} disableInteractive>
@@ -150,7 +151,7 @@ function BuildingPreview({ rooms, floors }) {
               )}
             </Box>
             <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>
-              {list.length} · {list.reduce((s, r) => s + (Number(r.capacity) || 0), 0)} beds
+              {list.length} · {list.reduce((s, r) => s + (Number(r.capacity) || 0), 0)}{" "}{t("beds")}
             </Typography>
           </Box>
         ))}
@@ -330,11 +331,11 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
 
   return (
     <Box>
-      <StepHeader step={3} total={3} title="Rooms and beds" subtitle="Tell us how many rooms each floor has. Room numbers are made for you, and you can rename or fine-tune any room later." />
+      <StepHeader step={3} total={3} title={t("Rooms and beds")} subtitle={t("Tell us how many rooms each floor has. Room numbers are made for you, and you can rename or fine-tune any room later.")} />
 
       <Box sx={{ display: "flex", flexDirection: "column", gap: { xs: 2, sm: 2.5 } }}>
         {/* ───── Room numbers ───── */}
-        <FormCard icon={TagOutlinedIcon} title="Room numbers">
+        <FormCard icon={TagOutlinedIcon} title={t("Room numbers")}>
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(3, minmax(0, 1fr))" }, gap: 1 }}>
             {NAMING.map((n) => {
               const disabled = n.value === "alpha" && alphaTooMany;
@@ -353,11 +354,11 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
         </FormCard>
 
         {/* ───── Layout ───── */}
-        <FormCard icon={LayersOutlinedIcon} title="Rooms on each floor" description={totalFloors === 1 ? "Your property has 1 floor." : `Your property has ${totalFloors} floors.`}>
+        <FormCard icon={LayersOutlinedIcon} title={t("Rooms on each floor")} description={totalFloors === 1 ? "Your property has 1 floor." : `Your property has ${totalFloors} floors.`}>
           {totalFloors > 1 && (
             <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1, mb: 2 }}>
-              <ChoiceTile active={configMode === "uniform"} onClick={() => setConfigMode("uniform")} icon={ViewAgendaOutlinedIcon} title="Same on every floor" hint="Quickest" />
-              <ChoiceTile active={configMode === "perFloor"} onClick={() => setConfigMode("perFloor")} icon={DashboardOutlinedIcon} title="Different per floor" hint="Mix room types" />
+              <ChoiceTile active={configMode === "uniform"} onClick={() => setConfigMode("uniform")} icon={ViewAgendaOutlinedIcon} title={t("Same on every floor")} hint={t("Quickest")} />
+              <ChoiceTile active={configMode === "perFloor"} onClick={() => setConfigMode("perFloor")} icon={DashboardOutlinedIcon} title={t("Different per floor")} hint={t("Mix room types")} />
             </Box>
           )}
 
@@ -365,13 +366,13 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
             <>
               {totalFloors > 1 && (
                 <Typography variant="body2" color="text.secondary" sx={{ mb: 1.25 }}>
-                  Each of the {totalFloors} floors gets:
+                  {t("Each of the")}{" "}{totalFloors}{" "}{t("floors gets:")}
                 </Typography>
               )}
               <GroupEditor group={uniform} onChange={patchUniform} canRemove={false} errors={showErrors ? groupErrors(uniform) : null} />
               {totalFloors === 1 && (
                 <Button size="small" startIcon={<AddIcon />} onClick={() => setConfigMode("perFloor")} sx={{ mt: 1.25, fontWeight: 700 }}>
-                  Mix room types on this floor
+                  {t("Mix room types on this floor")}
                 </Button>
               )}
             </>
@@ -379,7 +380,7 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
             <>
               {/* Floor picker */}
               {totalFloors > 1 && (
-                <Box role="tablist" aria-label="Floor" sx={{ display: "flex", gap: 0.75, overflowX: "auto", pb: 0.5, mb: 1.5, mx: { xs: -2, sm: 0 }, px: { xs: 2, sm: 0 }, scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
+                <Box role="tablist" aria-label={t("Floor")} sx={{ display: "flex", gap: 0.75, overflowX: "auto", pb: 0.5, mb: 1.5, mx: { xs: -2, sm: 0 }, px: { xs: 2, sm: 0 }, scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
                   {floorConfigs.map((f, i) => {
                     const on = i === safeFloor;
                     const bad = showErrors && floorHasErrors(f);
@@ -408,14 +409,14 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
                         }}
                       >
                         <Box sx={{ fontWeight: 800, fontSize: 14 }}>{f.floorNumber}F</Box>
-                        <Box sx={{ fontSize: 11.5, opacity: 0.7 }}>{count} rooms</Box>
+                        <Box sx={{ fontSize: 11.5, opacity: 0.7 }}>{count}{" "}{t("rooms")}</Box>
                       </Box>
                     );
                   })}
                 </Box>
               )}
 
-              <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 1.25 }}>{ordinal(floor.floorNumber)} floor</Typography>
+              <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 1.25 }}>{ordinal(floor.floorNumber)}{" "}{t("floor")}</Typography>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
                 {floor.roomGroups.map((g) => (
                   <GroupEditor
@@ -430,16 +431,16 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
               </Box>
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 1.5, alignItems: "center" }}>
                 <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => addGroup(safeFloor)} sx={{ fontWeight: 700, borderRadius: "10px" }}>
-                  Add another room type
+                  {t("Add another room type")}
                 </Button>
                 {safeFloor + 1 < totalFloors && (
                   <Button size="small" color="inherit" startIcon={<ContentCopyIcon sx={{ fontSize: 16 }} />} onClick={() => copyFloor(safeFloor, false)} sx={{ fontWeight: 700, color: "text.secondary" }}>
-                    Copy to {ordinal(safeFloor + 2)} floor
+                    {t("Copy to")}{" "}{ordinal(safeFloor + 2)}{" "}{t("floor")}
                   </Button>
                 )}
                 {safeFloor + 2 < totalFloors && (
                   <Button size="small" color="inherit" startIcon={<ContentCopyIcon sx={{ fontSize: 16 }} />} onClick={() => copyFloor(safeFloor, true)} sx={{ fontWeight: 700, color: "text.secondary" }}>
-                    Copy to all floors above
+                    {t("Copy to all floors above")}
                   </Button>
                 )}
                 {copied && (
@@ -453,13 +454,13 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
         </FormCard>
 
         {/* ───── Live preview ───── */}
-        <FormCard icon={ApartmentOutlinedIcon} title="Your building" description="Each square is a room. Darker squares have more beds.">
+        <FormCard icon={ApartmentOutlinedIcon} title={t("Your building")} description="Each square is a room. Darker squares have more beds.">
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "repeat(4, minmax(0, 1fr))" }, gap: 1, mb: 2 }}>
             {[
-              { label: "Floors", value: totalFloors },
-              { label: "Rooms", value: rooms.length },
-              { label: "Beds", value: totalBeds },
-              { label: "Rent when full", value: peso(fullRent), sub: "per month" },
+              { label: t("Floors"), value: totalFloors },
+              { label: t("Rooms"), value: rooms.length },
+              { label: t("Beds"), value: totalBeds },
+              { label: t("Rent when full"), value: peso(fullRent), sub: t("per month") },
             ].map((t) => (
               <Box key={t.label} sx={{ p: 1.5, borderRadius: "14px", bgcolor: (th) => alpha(th.palette.background.paper, 0.55), minWidth: 0 }}>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>{t.label}</Typography>
@@ -471,7 +472,7 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
           {rooms.length > 0 ? (
             <BuildingPreview rooms={rooms} floors={totalFloors} />
           ) : (
-            <Typography variant="body2" color="text.secondary">Add rooms above to see your building.</Typography>
+            <Typography variant="body2" color="text.secondary">{t("Add rooms above to see your building.")}</Typography>
           )}
         </FormCard>
 

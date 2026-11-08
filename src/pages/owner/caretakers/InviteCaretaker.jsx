@@ -40,23 +40,25 @@ import { auth, db } from "../../../config/firebase";
 import { useAuth } from "../../../context/AuthContext";
 import { createCaretakerAccount } from "../../../services/caretakerService";
 import { generateTempPassword } from "../../../utils/generateTempPassword";
+import { findDuplicatePerson } from "../../../utils/duplicates";
+import { t } from "../../../i18n";
 
 // ---------------------------------------------------------------------------
 // Same layout as the property setup (PropertyWizard): dark sidebar with the
 // step list and dorm facade on the left, white content column on the right.
 // ---------------------------------------------------------------------------
 const STEPS = [
-  { title: "Caretaker details", heading: "Who are you inviting?", sub: "Their name and contact details. They will sign in with this email.", Icon: PersonOutlinedIcon },
-  { title: "Property & access", heading: "What can they do?", sub: "Choose the property they will look after and what they are allowed to manage.", Icon: SecurityOutlinedIcon },
-  { title: "Send login", heading: "How should they get their login?", sub: "Pick how to send the sign-in details, then review before creating the account.", Icon: SendOutlinedIcon },
+  { title: t("Caretaker details"), heading: "Who are you inviting?", sub: t("Their name and contact details. They will sign in with this email."), Icon: PersonOutlinedIcon },
+  { title: t("Property & access"), heading: "What can they do?", sub: t("Choose the property they will look after and what they are allowed to manage."), Icon: SecurityOutlinedIcon },
+  { title: t("Send login"), heading: "How should they get their login?", sub: t("Pick how to send the sign-in details, then review before creating the account."), Icon: SendOutlinedIcon },
 ];
 
 const PERMISSION_OPTIONS = [
-  { key: "manageTenants", label: "Manage tenants", desc: "Register tenants and assign rooms" },
-  { key: "logOccupancy", label: "Log occupancy", desc: "Daily occupancy and curfew checks" },
-  { key: "handleReports", label: "Handle reports", desc: "Receive and update incident / maintenance reports" },
-  { key: "viewFinancials", label: "View financials", desc: "See rent payments and history" },
-  { key: "modifyLayout", label: "Modify layout", desc: "Change property layout or room rates" },
+  { key: "manageTenants", label: t("Manage tenants"), desc: "Register tenants and assign rooms" },
+  { key: "logOccupancy", label: t("Log occupancy"), desc: "Daily occupancy and curfew checks" },
+  { key: "handleReports", label: t("Handle reports"), desc: "Receive and update incident / maintenance reports" },
+  { key: "viewFinancials", label: t("View financials"), desc: "See rent payments and history" },
+  { key: "modifyLayout", label: t("Modify layout"), desc: "Change property layout or room rates" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -201,7 +203,7 @@ function DormFacade() {
       width="100%"
       style={{ maxWidth: 220, display: "block" }}
       role="img"
-      aria-label="Illustration of a dormitory building at night, with illuminated windows"
+      aria-label={t("Illustration of a dormitory building at night, with illuminated windows")}
     >
       {windows.map((win, i) => (
         <rect
@@ -440,7 +442,17 @@ export default function InviteCaretaker() {
     });
   };
 
-  const handleNext = () => {
+  // Same email or mobile number as one of this owner's current tenants or caretakers
+  const findDuplicate = async () => {
+    const found = await findDuplicatePerson(currentUser?.uid, { email: form.email, phone: form.mobilePhone }).catch((err) => {
+      console.warn("Duplicate check skipped:", err?.code || err);
+      return null;
+    });
+    return found ? { [found.field === "phone" ? "mobilePhone" : found.field]: found.message } : null;
+  };
+
+  const handleNext = async () => {
+    if (submitting) return;
     setError(null);
     const errs = validateStep(step);
     setFieldErrors(errs);
@@ -448,6 +460,17 @@ export default function InviteCaretaker() {
       setError("Please fix the highlighted fields.");
       scrollTop();
       return;
+    }
+    if (step === 0) {
+      setSubmitting(true);
+      const dup = await findDuplicate();
+      setSubmitting(false);
+      if (dup) {
+        setFieldErrors(dup);
+        setError(Object.values(dup)[0]);
+        scrollTop();
+        return;
+      }
     }
     setStep((s) => Math.min(s + 1, STEPS.length - 1));
     scrollTop();
@@ -481,6 +504,15 @@ export default function InviteCaretaker() {
 
     setSubmitting(true);
     try {
+      const dup = await findDuplicate();
+      if (dup) {
+        setFieldErrors(dup);
+        setError(Object.values(dup)[0]);
+        setStep(0);
+        scrollTop();
+        return;
+      }
+
       const tempPassword = generateTempPassword();
       const permissions =
         permissionMode === "full" ? FULL_PERMISSIONS : customPermissions;
@@ -603,12 +635,12 @@ export default function InviteCaretaker() {
         }}
       >
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.5 }}>
-          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt="KwartoKeeper" sx={{ height: 28 }} />
+          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt={t("KwartoKeeper")} sx={{ height: 28 }} />
           <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 700, fontSize: "1rem", flex: 1 }}>
-            Invite caretaker
+            {t("Invite caretaker")}
           </Typography>
           <IconButton
-            aria-label="Cancel invite"
+            aria-label={t("Cancel invite")}
             onClick={() => navigate("/owner/caretakers")}
             disabled={submitting}
             size="small"
@@ -621,7 +653,7 @@ export default function InviteCaretaker() {
         {/* Mobile step indicator */}
         <Box sx={{ display: { xs: "block", md: "none" } }}>
           <Typography variant="body2" sx={{ color: "#cadcf6", mb: 1 }}>
-            Step {step + 1} of {STEPS.length} — {STEPS[step].title}
+            {t("Step")}{" "}{step + 1}{" "}{t("of")}{" "}{STEPS.length} — {STEPS[step].title}
           </Typography>
           <Box sx={{ display: "flex", gap: 0.75 }}>
             {STEPS.map(({ title }, i) => (
@@ -686,10 +718,10 @@ export default function InviteCaretaker() {
                 {/* ---------------- STEP 1: DETAILS ---------------- */}
                 {step === 0 && (
                   <>
-                    <FormRow label="Full name" required>
+                    <FormRow label={t("Full name")} required>
                       <TextField
                         fullWidth
-                        placeholder="e.g. Maria Santos"
+                        placeholder={t("e.g. Maria Santos")}
                         value={form.fullName}
                         onChange={(e) => updateField("fullName", e.target.value)}
                         onBlur={validateOnBlur("fullName")}
@@ -699,7 +731,7 @@ export default function InviteCaretaker() {
                       />
                     </FormRow>
 
-                    <FormRow label="Email" required>
+                    <FormRow label={t("Email")} required>
                       <TextField
                         fullWidth
                         type="email"
@@ -714,7 +746,7 @@ export default function InviteCaretaker() {
                       />
                     </FormRow>
 
-                    <FormRow label="Mobile phone" required>
+                    <FormRow label={t("Mobile phone")} required>
                       <TextField
                         fullWidth
                         type="tel"
@@ -745,11 +777,11 @@ export default function InviteCaretaker() {
                   <>
                     {noProperties && (
                       <Alert severity="warning">
-                        You need a property before you can invite a caretaker. Set one up from the Properties page first.
+                        {t("You need a property before you can invite a caretaker. Set one up from the Properties page first.")}
                       </Alert>
                     )}
 
-                    <FormRow label="Assigned property" required>
+                    <FormRow label={t("Assigned property")} required>
                       <TextField
                         select
                         fullWidth
@@ -765,7 +797,7 @@ export default function InviteCaretaker() {
                       </TextField>
                     </FormRow>
 
-                    <FormRow label="Permissions" top>
+                    <FormRow label={t("Permissions")} top>
                       <ToggleButtonGroup
                         value={permissionMode}
                         exclusive
@@ -800,8 +832,8 @@ export default function InviteCaretaker() {
                           },
                         }}
                       >
-                        <ToggleButton value="full">Full access</ToggleButton>
-                        <ToggleButton value="custom">Custom</ToggleButton>
+                        <ToggleButton value="full">{t("Full access")}</ToggleButton>
+                        <ToggleButton value="custom">{t("Custom")}</ToggleButton>
                       </ToggleButtonGroup>
 
                       <Group icon={<SecurityOutlinedIcon sx={{ fontSize: 18, color: "primary.main" }} />} title={permissionMode === "full" ? "Full access includes everything below" : "Switch on what they can do"}>
@@ -837,7 +869,7 @@ export default function InviteCaretaker() {
                       </Group>
                       {permissionMode === "custom" && grantedCount === 0 && (
                         <Typography variant="caption" color="warning.dark" sx={{ display: "block", mt: 1, fontWeight: 600 }}>
-                          Nothing selected yet. They could sign in but not do anything.
+                          {t("Nothing selected yet. They could sign in but not do anything.")}
                         </Typography>
                       )}
                     </FormRow>
@@ -847,14 +879,14 @@ export default function InviteCaretaker() {
                 {/* ---------------- STEP 3: SEND ---------------- */}
                 {step === 2 && (
                   <>
-                    <FormRow label="How to send the login" required>
+                    <FormRow label={t("How to send the login")} required>
                       <TextField select fullWidth value={dispatchMethod} onChange={(e) => setDispatchMethod(e.target.value)}>
-                        <MenuItem value="manual">I'll share it myself (message, email or copy)</MenuItem>
-                        <MenuItem value="sms">Text it to them (SMS)</MenuItem>
+                        <MenuItem value="manual">{t("I'll share it myself (message, email or copy)")}</MenuItem>
+                        <MenuItem value="sms">{t("Text it to them (SMS)")}</MenuItem>
                       </TextField>
                     </FormRow>
 
-                    <FormRow label="Review" top>
+                    <FormRow label={t("Review")} top>
                       <Box sx={{ bgcolor: "background.paper", borderRadius: "4px", border: "1px solid", borderColor: "divider", p: 2 }}>
                         <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
                           {reviewRows.map(([label, value]) => (
@@ -868,7 +900,7 @@ export default function InviteCaretaker() {
                       <Box sx={{ display: "flex", gap: 1.25, alignItems: "flex-start", color: "text.secondary", mt: 1.5 }}>
                         <InfoOutlinedIcon sx={{ fontSize: 18, mt: "2px", color: "primary.main" }} />
                         <Typography variant="caption" sx={{ fontSize: "0.8rem" }}>
-                          A temporary password is created with the account. The next screen shows it once, with buttons to copy or share it, even if you choose SMS.
+                          {t("A temporary password is created with the account. The next screen shows it once, with buttons to copy or share it, even if you choose SMS.")}
                         </Typography>
                       </Box>
                     </FormRow>
@@ -894,7 +926,7 @@ export default function InviteCaretaker() {
         >
           <Box sx={{ width: "100%", maxWidth: 760, display: "flex", justifyContent: "space-between", gap: 2, pt: 2, borderTop: "1px solid", borderColor: "divider" }}>
             <Button variant="outlined" onClick={handleBack} disabled={submitting} sx={{ py: 1.5, px: 3, fontWeight: 600 }}>
-              {step === 0 ? "Cancel" : "Back"}
+              {step === 0 ? t("Cancel") : t("Back")}
             </Button>
             <Button
               type={isLast ? "submit" : "button"}
@@ -906,9 +938,9 @@ export default function InviteCaretaker() {
               {submitting ? (
                 <Box sx={{ display: "flex", alignItems: "center", gap: 1 }}>
                   <CircularProgress size={20} color="inherit" />
-                  {sendingSms ? "Sending SMS…" : "Creating…"}
+                  {sendingSms ? t("Sending SMS…") : t("Creating…")}
                 </Box>
-              ) : isLast ? (dispatchMethod === "sms" ? "Create & send SMS" : "Create account") : "Next step"}
+              ) : isLast ? (dispatchMethod === "sms" ? t("Create & send SMS") : t("Create account")) : t("Next step")}
             </Button>
           </Box>
         </Box>

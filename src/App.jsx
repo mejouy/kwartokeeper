@@ -1,5 +1,8 @@
 // src/App.jsx
 
+import { lazy } from "react";
+import PageBoundary from "./components/PageBoundary";
+
 import {
   BrowserRouter as Router,
   Routes,
@@ -11,17 +14,17 @@ import {
 import ProtectedRoute from "./components/ProtectedRoute";
 import RedirectIfAuthenticated from "./components/RedirectIfAuthenticated";
 import PushRegistrar from "./components/PushRegistrar";
-import AccountSuspended from "./pages/AccountSuspended";
-import NotFound from "./pages/NotFound";
+const AccountSuspended = lazy(() => import("./pages/AccountSuspended"));
+const NotFound = lazy(() => import("./pages/NotFound"));
 
 // --- Auth & Onboarding ---
 import LandingWelcome from "./pages/LandingWelcome";
 import Login from "./pages/auth/Login";
-import SetPassword from "./pages/auth/SetPassword";
-import OwnerRegister from "./pages/auth/OwnerRegister";
-import OwnerWelcome from "./pages/onboarding/OwnerWelcome";
-import PropertyWizard from "./pages/onboarding/PropertyWizard";
-import WizardSuccess from "./pages/onboarding/components/WizardSuccess";
+const SetPassword = lazy(() => import("./pages/auth/SetPassword"));
+const OwnerRegister = lazy(() => import("./pages/auth/OwnerRegister"));
+const OwnerWelcome = lazy(() => import("./pages/onboarding/OwnerWelcome"));
+const PropertyWizard = lazy(() => import("./pages/onboarding/PropertyWizard"));
+const WizardSuccess = lazy(() => import("./pages/onboarding/components/WizardSuccess"));
 
 // --- Layouts ---
 import OwnerLayout from "./layouts/OwnerLayout";
@@ -30,41 +33,41 @@ import CaretakerLayout from "./layouts/CaretakerLayout";
 import TenantLayout from "./layouts/TenantLayout";
 
 // --- Owner Pages ---
-import OwnerOverview from "./pages/owner/OwnerOverview";
-import OwnerAnnouncements from "./pages/owner/OwnerAnnouncements";
-import OwnerAccount from "./pages/owner/OwnerAccount";
-import OwnerReports from "./pages/owner/OwnerReports";
+const OwnerOverview = lazy(() => import("./pages/owner/OwnerOverview"));
+const OwnerAnnouncements = lazy(() => import("./pages/owner/OwnerAnnouncements"));
+const OwnerAccount = lazy(() => import("./pages/owner/OwnerAccount"));
+const OwnerReports = lazy(() => import("./pages/owner/OwnerReports"));
 
 // Properties
-import PropertyList from "./pages/owner/properties/PropertyList";
-import PropertyProfile from "./pages/owner/properties/PropertyProfile";
-import PropertyDetails from "./pages/owner/properties/PropertyDetails";
+const PropertyList = lazy(() => import("./pages/owner/properties/PropertyList"));
+const PropertyProfile = lazy(() => import("./pages/owner/properties/PropertyProfile"));
+const PropertyDetails = lazy(() => import("./pages/owner/properties/PropertyDetails"));
 
 // Tenants
-import TenantList from "./pages/owner/tenants/TenantList";
-import RegisterTenant from "./pages/owner/tenants/RegisterTenant";
-import TenantDetail from "./pages/owner/tenants/TenantDetail";
+const TenantList = lazy(() => import("./pages/owner/tenants/TenantList"));
+const RegisterTenant = lazy(() => import("./pages/owner/tenants/RegisterTenant"));
+const TenantDetail = lazy(() => import("./pages/owner/tenants/TenantDetail"));
 
 // Caretakers
-import CaretakerList from "./pages/owner/caretakers/CaretakerList";
-import InviteCaretaker from "./pages/owner/caretakers/InviteCaretaker";
-import CaretakerInvited from "./pages/owner/caretakers/CaretakerInvited";
-import CaretakerDetail from "./pages/owner/caretakers/CaretakerDetail";
+const CaretakerList = lazy(() => import("./pages/owner/caretakers/CaretakerList"));
+const InviteCaretaker = lazy(() => import("./pages/owner/caretakers/InviteCaretaker"));
+const CaretakerInvited = lazy(() => import("./pages/owner/caretakers/CaretakerInvited"));
+const CaretakerDetail = lazy(() => import("./pages/owner/caretakers/CaretakerDetail"));
 
 // Payments & Maintenance
-import PaymentsPage from "./pages/owner/PaymentsPage";
-import MaintenancePage from "./pages/owner/MaintenancePage";
+const PaymentsPage = lazy(() => import("./pages/owner/PaymentsPage"));
+const MaintenancePage = lazy(() => import("./pages/owner/MaintenancePage"));
 
 // --- Admin Pages ---
-import AdminOverview from "./pages/admin/AdminOverview";
-import ManageOwners from "./pages/admin/ManageOwners";
-import OwnerDetails from "./pages/admin/OwnerDetails";
-import AdminAnnouncements from "./pages/admin/AdminAnnouncements";
-import AdminSettings from "./pages/admin/AdminSettings";
+const AdminOverview = lazy(() => import("./pages/admin/AdminOverview"));
+const ManageOwners = lazy(() => import("./pages/admin/ManageOwners"));
+const OwnerDetails = lazy(() => import("./pages/admin/OwnerDetails"));
+const AdminAnnouncements = lazy(() => import("./pages/admin/AdminAnnouncements"));
+const AdminSettings = lazy(() => import("./pages/admin/AdminSettings"));
 
 // --- Tenant & Caretaker Pages ---
-import TenantDashboard from "./pages/tenant/TenantDashboard";
-import CaretakerDashboard from "./pages/caretaker/CaretakerDashboard";
+const TenantDashboard = lazy(() => import("./pages/tenant/TenantDashboard"));
+const CaretakerDashboard = lazy(() => import("./pages/caretaker/CaretakerDashboard"));
 
 // --- Placeholders for other secondary routes ---
 const AdminPropertiesPlaceholder = () => (
@@ -81,6 +84,8 @@ function App() {
   return (
     <Router>
       <PushRegistrar />
+      {/* Each page's code downloads when it's first opened (smaller first load) */}
+      <PageBoundary fullScreen>
       <Routes>
         {/* --- Public Routes --- */}
         {/* "/" and "/login" skip straight to the user's role home if a session
@@ -254,6 +259,7 @@ function App() {
         {/* --- 404 Fallback Route --- */}
         <Route path="*" element={<NotFound />} />
       </Routes>
+      </PageBoundary>
     </Router>
   );
 }

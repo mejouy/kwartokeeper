@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import PageBoundary from "../components/PageBoundary";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import PeopleAltOutlinedIcon from "@mui/icons-material/PeopleAltOutlined";
 import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
@@ -10,14 +11,15 @@ import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
 import { checkLeaseEndsOnOwnerAppOpen } from "../utils/leaseEndNotifications";
 import AppShell from "./AppShell";
+import { t } from "../i18n";
 
 // permKeys = the owner permissions that unlock the tab (any one of them is enough)
 const ALL_NAV_ITEMS = [
-  { id: "overview", text: "Overview", short: "Home", icon: <DashboardOutlinedIcon />, permKeys: null, group: 0 },
-  { id: "tenants", text: "Tenants & curfew", short: "Tenants", icon: <PeopleAltOutlinedIcon />, permKeys: ["manageTenants", "logOccupancy"], group: 1 },
-  { id: "maintenance", text: "Repairs", short: "Repairs", icon: <BuildOutlinedIcon />, permKeys: ["handleReports"], group: 1 },
-  { id: "payments", text: "Payments", short: "Payments", icon: <PaymentsOutlinedIcon />, permKeys: ["viewFinancials"], group: 2 },
-  { id: "rooms", text: "Rooms & rates", short: "Rooms", icon: <MeetingRoomOutlinedIcon />, permKeys: ["modifyLayout"], group: 2 },
+  { id: "overview", text: t("Overview"), short: t("Home"), icon: <DashboardOutlinedIcon />, permKeys: null, group: 0 },
+  { id: "tenants", text: t("Tenants & curfew"), short: t("Tenants"), icon: <PeopleAltOutlinedIcon />, permKeys: ["manageTenants", "logOccupancy"], group: 1 },
+  { id: "maintenance", text: t("Repairs"), short: t("Repairs"), icon: <BuildOutlinedIcon />, permKeys: ["handleReports"], group: 1 },
+  { id: "payments", text: t("Payments"), short: t("Payments"), icon: <PaymentsOutlinedIcon />, permKeys: ["viewFinancials"], group: 2 },
+  { id: "rooms", text: t("Rooms & rates"), short: t("Rooms"), icon: <MeetingRoomOutlinedIcon />, permKeys: ["modifyLayout"], group: 2 },
 ];
 const GROUP_HEADINGS = [null, "Daily work", "Property"];
 
@@ -51,7 +53,8 @@ export default function CaretakerLayout({ children }) {
         };
         const ownerUid = data.ownerUid || data.invitedBy || "";
         if (ownerUid) {
-          checkLeaseEndsOnOwnerAppOpen(ownerUid, user.uid).catch((error) => console.error("Unable to check lease-end notifications:", error));
+          const propertyId = data.assignedPropertyId || data.propertyId || "";
+          checkLeaseEndsOnOwnerAppOpen(ownerUid, user.uid, { propertyId, name: data.name || data.fullName || "" }).catch((error) => console.error("Unable to check lease-end notifications:", error));
         }
         if (active) {
           setPermissions(data.permissions || {});
@@ -119,10 +122,11 @@ export default function CaretakerLayout({ children }) {
       title={activeNavItem.id === "overview" ? "" : activeNavItem.text}
       profile={profile}
       roleLabel="Caretaker"
+      languageSwitch
       navLabel="Caretaker pages"
       onLogout={handleLogout}
     >
-      {typeof children === "function" ? children(activeTab, setActiveTab) : children || <Outlet context={{ activeTab, setActiveTab }} />}
+      <PageBoundary>{typeof children === "function" ? children(activeTab, setActiveTab) : children || <Outlet context={{ activeTab, setActiveTab }} />}</PageBoundary>
     </AppShell>
   );
 }

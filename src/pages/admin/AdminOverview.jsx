@@ -21,7 +21,7 @@ import { ownerAccessOf } from "../../utils/ownerAccess";
 import { occupancyOf, bedsInProperty, holdsBed } from "../../utils/occupancy";
 import { loadPlatformSettings } from "../../utils/platformSettings";
 import { HeaderCard, Panel, Pill } from "./adminUi";
-import { withoutRemoved } from "../../utils/accountState";
+import { isRemovedAccount, withoutRemoved } from "../../utils/accountState";
 
 const R = { sm: "10px", md: "14px" };
 const row = { display: "flex", alignItems: "center" };
@@ -63,6 +63,7 @@ export default function AdminOverview() {
   const [owners, setOwners] = useState([]);
   const [properties, setProperties] = useState([]);
   const [tenantSources, setTenantSources] = useState({ tenants: [], users: [] });
+  const [removedOwnerIds, setRemovedOwnerIds] = useState(() => new Set());
   const [adminName, setAdminName] = useState("");
   const [settings, setSettings] = useState(null);
 
@@ -77,7 +78,10 @@ export default function AdminOverview() {
       onSnapshot(
         query(collection(db, "users"), where("role", "==", "owner")),
         (snap) => {
-          setOwners(withoutRemoved(snap.docs.map((d) => ({ id: d.id, ...d.data() }))));
+          const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+          setOwners(withoutRemoved(all));
+          // Their properties and tenants leave the platform totals too
+          setRemovedOwnerIds(new Set(all.filter(isRemovedAccount).map((o) => o.id)));
           markReady("owners");
         },
         fail("owners", "owners")
@@ -123,6 +127,9 @@ export default function AdminOverview() {
     return m;
   }, [owners]);
 
+  // Properties of owners whose account was deleted or disabled don't count
+  const liveProperties = useMemo(() => properties.filter((p) => !removedOwnerIds.has(p.ownerUid ?? p.ownerId ?? p.createdBy ?? "")), [properties, removedOwnerIds]);
+
   // Same occupancy rule as the owner pages
   const occ = useMemo(() => {
     const merged = new Map();
@@ -130,11 +137,11 @@ export default function AdminOverview() {
       const id = t.uid || t.id;
       merged.set(id, { ...(merged.get(id) || {}), ...t });
     });
-    const tenants = [...merged.values()];
-    const result = occupancyOf(properties.map((p) => ({ id: p.id, beds: bedsInProperty(p) })), tenants);
+    const tenants = withoutRemoved([...merged.values()]).filter((t) => !removedOwnerIds.has(t.ownerUid || t.ownerId || ""));
+    const result = occupancyOf(liveProperties.map((p) => ({ id: p.id, beds: bedsInProperty(p) })), tenants);
     // Current tenants only (Active or Pending), same as everywhere else
     return { ...result, residents: tenants.filter(holdsBed).length };
-  }, [properties, tenantSources]);
+  }, [liveProperties, tenantSources, removedOwnerIds]);
 
   const loading = !(ready.owners && ready.properties && ready.tenants);
   const pending = byState.pending;
@@ -184,7 +191,7 @@ export default function AdminOverview() {
         description={
           pending.length > 0
             ? `${plural(pending.length, "owner registration is", "owner registrations are")} waiting for your approval.`
-            : `Nothing waiting. ${plural(properties.length, "property", "properties")} and ${plural(occ.residents, "tenant", "tenants")} on the platform.`
+            : `Nothing waiting. ${plural(liveProperties.length, "property", "properties")} and ${plural(occ.residents, "tenant", "tenants")} on the platform.`
         }
         action={
           <Button variant="contained" disableElevation startIcon={<FactCheckOutlinedIcon />} onClick={() => navigate("/admin/owners")} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 44, boxShadow: "0 10px 22px -14px rgba(255,69,0,.9)" }}>
@@ -194,7 +201,7 @@ export default function AdminOverview() {
         tiles={[
           { label: "Waiting for review", value: pending.length, sub: pending.length ? `Oldest from ${formatDate(pending[0].verificationDocs?.submittedAt || pending[0].createdAt)}` : "Nothing waiting", icon: <PersonAddAltOutlinedIcon />, tone: pending.length ? "warning" : undefined, onClick: () => navigate("/admin/owners") },
           { label: "Active owners", value: byState.active.length, sub: `${totalOwners} signed up in total`, icon: <SupervisorAccountOutlinedIcon />, onClick: () => navigate("/admin/owners") },
-          { label: "Properties", value: properties.length, sub: `${occ.beds} beds`, icon: <HomeWorkOutlinedIcon /> },
+          { label: "Properties", value: liveProperties.length, sub: `${occ.beds} beds`, icon: <HomeWorkOutlinedIcon /> },
           { label: "Occupancy", value: `${occ.rate}%`, sub: `${occ.occupied} of ${occ.beds} beds filled`, icon: <DonutLargeOutlinedIcon /> },
         ]}
       />

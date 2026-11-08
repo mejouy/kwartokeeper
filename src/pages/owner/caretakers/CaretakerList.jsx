@@ -34,6 +34,7 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../../config/firebase";
 import { useAuth } from "../../../context/AuthContext";
 import { withoutRemoved } from "../../../utils/accountState";
+import { t } from "../../../i18n";
 
 const HEAD = '"Inter", sans-serif';
 const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
@@ -42,17 +43,17 @@ const panelSx = { bgcolor: "background.default", border: "1px solid", borderColo
 
 // Every permission, in the order the invite form shows them
 const PERMISSIONS = [
-  { key: "manageTenants", label: "Manage tenants", icon: PeopleAltOutlinedIcon },
-  { key: "logOccupancy", label: "Log occupancy & curfew", icon: NightsStayOutlinedIcon },
-  { key: "handleReports", label: "Handle repair reports", icon: BuildOutlinedIcon },
-  { key: "viewFinancials", label: "View financials", icon: PaymentsOutlinedIcon },
-  { key: "modifyLayout", label: "Modify rooms & rates", icon: MeetingRoomOutlinedIcon },
+  { key: "manageTenants", label: t("Manage tenants"), icon: PeopleAltOutlinedIcon },
+  { key: "logOccupancy", label: t("Log occupancy & curfew"), icon: NightsStayOutlinedIcon },
+  { key: "handleReports", label: t("Handle repair reports"), icon: BuildOutlinedIcon },
+  { key: "viewFinancials", label: t("View financials"), icon: PaymentsOutlinedIcon },
+  { key: "modifyLayout", label: t("Modify rooms & rates"), icon: MeetingRoomOutlinedIcon },
 ];
 
 const FILTERS = [
-  { value: "all", label: "All" },
-  { value: "active", label: "Active" },
-  { value: "pending", label: "Not logged in yet" },
+  { value: "all", label: t("All") },
+  { value: "active", label: t("Active") },
+  { value: "pending", label: t("Not logged in yet") },
 ];
 
 // A caretaker is "pending" until they log in and replace their temporary password
@@ -79,7 +80,7 @@ function StatusPill({ pending }) {
         color: (t) => t.palette[tone].dark,
       }}
     >
-      {pending ? "Not logged in yet" : "Active"}
+      {pending ? t("Not logged in yet") : t("Active")}
     </Box>
   );
 }
@@ -95,7 +96,6 @@ function CaretakerCard({ caretaker, onOpen }) {
       component="button"
       type="button"
       onClick={onOpen}
-      aria-label={`Manage ${name}`}
       sx={{
         ...panelSx,
         display: "flex",
@@ -124,7 +124,7 @@ function CaretakerCard({ caretaker, onOpen }) {
             {name}
           </Typography>
           <Typography variant="caption" color="text.secondary" noWrap component="div">
-            {caretaker.email || "No email"}
+            {caretaker.email || t("No email")}
           </Typography>
         </Box>
         <ChevronRightIcon className="kk-chev" sx={{ color: "text.disabled", transition: "all .15s ease", flexShrink: 0 }} />
@@ -135,7 +135,7 @@ function CaretakerCard({ caretaker, onOpen }) {
         <Box sx={{ ...row, gap: 0.75, minWidth: 0, color: caretaker.assignedPropertyId ? "text.primary" : "warning.dark" }}>
           <ApartmentOutlinedIcon sx={{ fontSize: 17, color: caretaker.assignedPropertyId ? "text.secondary" : "warning.main" }} />
           <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
-            {caretaker.assignedPropertyId ? caretaker.propertyName || "Unknown property" : "No property assigned"}
+            {caretaker.assignedPropertyId ? caretaker.propertyName || t("Unknown property") : t("No property assigned")}
           </Typography>
         </Box>
         <StatusPill pending={pending} />
@@ -145,7 +145,7 @@ function CaretakerCard({ caretaker, onOpen }) {
       <Box sx={{ ...row, gap: 0.75, color: "text.secondary" }}>
         <PhoneOutlinedIcon sx={{ fontSize: 16 }} />
         <Typography variant="body2" color={caretaker.phone ? "text.primary" : "text.secondary"}>
-          {caretaker.phone || "No phone number"}
+          {caretaker.phone || t("No phone number")}
         </Typography>
       </Box>
 
@@ -153,10 +153,10 @@ function CaretakerCard({ caretaker, onOpen }) {
       <Box sx={{ mt: "auto", pt: 1.25, width: "100%", borderTop: "1px solid", borderColor: "divider" }}>
         <Box sx={{ ...row, justifyContent: "space-between", mb: 0.75 }}>
           <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary", letterSpacing: ".06em", textTransform: "uppercase" }}>
-            Can do
+            {t("Can do")}
           </Typography>
           <Typography variant="caption" sx={{ fontWeight: 700, color: count ? "text.secondary" : "warning.dark" }}>
-            {count === 0 ? "No permissions yet" : `${count} of ${PERMISSIONS.length}`}
+            {count === 0 ? t("No permissions yet") : `${count} of ${PERMISSIONS.length}`}
           </Typography>
         </Box>
         <Box sx={{ display: "flex", gap: 0.5 }}>
@@ -281,10 +281,10 @@ export default function CaretakerList() {
   const open = (c) => navigate(`/owner/caretakers/${c.id}`);
 
   const tiles = [
-    { label: "Caretakers", icon: <SupervisorAccountOutlinedIcon />, value: counts.all },
-    { label: "Active", icon: <HowToRegOutlinedIcon />, value: counts.active, accent: counts.active > 0 ? "success.dark" : undefined },
-    { label: "Not logged in yet", icon: <MarkEmailUnreadOutlinedIcon />, value: counts.pending, accent: counts.pending > 0 ? "warning.dark" : undefined },
-    { label: "Properties without one", icon: <DomainDisabledOutlinedIcon />, value: uncovered.length, accent: uncovered.length > 0 ? "warning.dark" : undefined },
+    { label: t("Caretakers"), icon: <SupervisorAccountOutlinedIcon />, value: counts.all },
+    { label: t("Active"), icon: <HowToRegOutlinedIcon />, value: counts.active, accent: counts.active > 0 ? "success.dark" : undefined },
+    { label: t("Not logged in yet"), icon: <MarkEmailUnreadOutlinedIcon />, value: counts.pending, accent: counts.pending > 0 ? "warning.dark" : undefined },
+    { label: t("Properties without one"), icon: <DomainDisabledOutlinedIcon />, value: uncovered.length, accent: uncovered.length > 0 ? "warning.dark" : undefined },
   ];
 
   return (
@@ -294,7 +294,7 @@ export default function CaretakerList() {
         <Box aria-hidden sx={{ position: "absolute", top: -180, right: -120, width: 380, height: 380, borderRadius: "50%", background: "rgba(255,69,0,.10)", filter: "blur(70px)", pointerEvents: "none" }} />
         <Box sx={{ position: "relative", display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: { xs: "stretch", sm: "center" }, justifyContent: "space-between", gap: { xs: 1.5, sm: 2 }, mb: { xs: 2, sm: 2.5 } }}>
           <Typography color="text.secondary" sx={{ minWidth: 0, fontSize: { xs: 14, sm: 15 } }}>
-            The people helping run your properties, and what each one can do
+            {t("The people helping run your properties, and what each one can do")}
           </Typography>
           <Button
             variant="contained"
@@ -302,7 +302,7 @@ export default function CaretakerList() {
             onClick={goInvite}
             sx={{ flexShrink: 0, fontWeight: 700, borderRadius: R.sm, minHeight: 44, boxShadow: "0 10px 22px -14px rgba(255,69,0,.9)" }}
           >
-            Invite caretaker
+            {t("Invite caretaker")}
           </Button>
         </Box>
         <Box sx={{ position: "relative", display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: { xs: 1, sm: 1.5 } }}>
@@ -338,7 +338,7 @@ export default function CaretakerList() {
           sx={{ mb: { xs: 2, sm: 2.5 }, borderRadius: R.md, alignItems: "center" }}
           action={
             <Button color="inherit" size="small" onClick={goInvite} sx={{ fontWeight: 700, whiteSpace: "nowrap" }}>
-              Invite
+              {t("Invite")}
             </Button>
           }
         >
@@ -367,15 +367,15 @@ export default function CaretakerList() {
             }}
           >
             <SearchIcon sx={{ color: "text.secondary" }} />
-            <InputBase fullWidth placeholder="Search name, email, phone or property" value={search} onChange={(e) => setSearch(e.target.value)} inputProps={{ "aria-label": "Search caretakers" }} />
+            <InputBase fullWidth placeholder={t("Search name, email, phone or property")} value={search} onChange={(e) => setSearch(e.target.value)} inputProps={{ "aria-label": "Search caretakers" }} />
             {search && (
-              <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
+              <IconButton size="small" aria-label={t("Clear search")} onClick={() => setSearch("")}>
                 <CloseIcon fontSize="small" />
               </IconButton>
             )}
           </Paper>
 
-          <Box role="group" aria-label="Filter by status" sx={{ display: "flex", gap: 0.5, p: 0.5, ...panelSx, borderRadius: R.md, overflowX: "auto", scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
+          <Box role="group" aria-label={t("Filter by status")} sx={{ display: "flex", gap: 0.5, p: 0.5, ...panelSx, borderRadius: R.md, overflowX: "auto", scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
             {FILTERS.map((f) => {
               const on = filter === f.value;
               return (
@@ -426,22 +426,22 @@ export default function CaretakerList() {
           <Box sx={{ width: 64, height: 64, borderRadius: R.md, mx: "auto", mb: 2, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
             <SupervisorAccountOutlinedIcon sx={{ fontSize: 32, color: "primary.main" }} />
           </Box>
-          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 0.5 }}>No caretakers yet</Typography>
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 0.5 }}>{t("No caretakers yet")}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5, maxWidth: 420, mx: "auto" }}>
-            Invite someone to help run a property: curfew checks, repairs, cash payments. You choose exactly what they can see and do.
+            {t("Invite someone to help run a property: curfew checks, repairs, cash payments. You choose exactly what they can see and do.")}
           </Typography>
           <Button variant="contained" startIcon={<PersonAddAltOutlinedIcon />} onClick={goInvite} sx={{ fontWeight: 700, borderRadius: R.sm }}>
-            Invite caretaker
+            {t("Invite caretaker")}
           </Button>
         </Paper>
       ) : visible.length === 0 ? (
         <Paper elevation={0} sx={{ ...panelSx, py: 5, px: 2, textAlign: "center" }}>
-          <Typography sx={{ fontWeight: 700 }}>No caretakers match</Typography>
+          <Typography sx={{ fontWeight: 700 }}>{t("No caretakers match")}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-            Try a different search or filter.
+            {t("Try a different search or filter.")}
           </Typography>
           <Button size="small" onClick={clearFilters} sx={{ mt: 1, fontWeight: 700 }}>
-            Clear filters
+            {t("Clear filters")}
           </Button>
         </Paper>
       ) : (
@@ -449,10 +449,10 @@ export default function CaretakerList() {
           {isFiltering && (
             <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 1.25 }}>
               <Typography variant="body2" color="text.secondary">
-                Showing {visible.length} of {caretakers.length} caretakers
+                {t("Showing")}{" "}{visible.length}{" "}{t("of")}{" "}{caretakers.length}{" "}{t("caretakers")}
               </Typography>
               <Button size="small" onClick={clearFilters} sx={{ fontWeight: 700 }}>
-                Clear filters
+                {t("Clear filters")}
               </Button>
             </Box>
           )}

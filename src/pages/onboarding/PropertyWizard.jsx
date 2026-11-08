@@ -14,14 +14,16 @@ import { collection, getCountFromServer, query, where } from 'firebase/firestore
 import { onAuthStateChanged } from 'firebase/auth';
 import { auth, db } from '../../config/firebase';
 import { loadPlatformSettings } from '../../utils/platformSettings';
+import { findDuplicateProperty } from '../../utils/duplicates';
+import { t } from "../../i18n";
 
 const HEAD = '"Inter", sans-serif';
 // Cream page, white cards (same as the owner pages)
 const PAGE_BG = (t) => alpha(t.palette.background.paper, 0.35);
 const STEPS = [
-  { title: 'Basic details', desc: 'Name, address and contact' },
-  { title: 'Rules & amenities', desc: 'Floors, curfew and what’s included' },
-  { title: 'Rooms & beds', desc: 'Layout, capacity and rates' },
+  { title: t("Basic details"), desc: 'Name, address and contact' },
+  { title: t("Rules & amenities"), desc: 'Floors, curfew and what’s included' },
+  { title: t("Rooms & beds"), desc: 'Layout, capacity and rates' },
 ];
 
 // The building lights up as the owner moves through the steps
@@ -225,8 +227,23 @@ export default function PropertyWizard() {
     return e;
   };
 
-  const handleNext = () => {
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false);
+  const handleNext = async () => {
+    if (checkingDuplicate) return;
     const e = activeStep === 0 ? validateStep1() : activeStep === 1 ? validateStep2() : {};
+    // Same name or address as a property they already have: say so now, not at the last step
+    if (activeStep === 0 && Object.keys(e).length === 0 && auth.currentUser) {
+      setCheckingDuplicate(true);
+      const dup = await findDuplicateProperty(auth.currentUser.uid, {
+        propertyName: wizardData.propertyName,
+        address: { street: wizardData.street, barangay: wizardData.barangay, cityMunicipality: wizardData.cityMunicipality },
+      }).catch((err) => {
+        console.warn('Duplicate check skipped:', err?.code || err);
+        return null;
+      });
+      setCheckingDuplicate(false);
+      if (dup) e[dup.field] = dup.message;
+    }
     setErrors(e);
     if (Object.keys(e).length > 0) {
       // Bring the first problem into view
@@ -259,12 +276,12 @@ export default function PropertyWizard() {
     return (
       <Box sx={{ minHeight: '100dvh', display: 'grid', placeItems: 'center', px: 2, bgcolor: PAGE_BG }}>
         <Box sx={{ maxWidth: 440, textAlign: 'center', bgcolor: 'background.default', border: '1px solid', borderColor: 'divider', borderRadius: '22px', p: { xs: 3, sm: 4 } }}>
-          <Typography sx={{ fontFamily: HEAD, fontWeight: 900, fontSize: '1.4rem' }}>You&apos;ve reached the property limit</Typography>
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 900, fontSize: '1.4rem' }}>{t("You've reached the property limit")}</Typography>
           <Typography color="text.secondary" sx={{ mt: 1 }}>
-            Your account can have up to {limit.max} {limit.max === 1 ? 'property' : 'properties'}, and you already have {limit.count}. Contact KwartoKeeper support if you need more.
+            {t("Your account can have up to")}{" "}{limit.max} {limit.max === 1 ? 'property' : 'properties'}{t(", and you already have")}{" "}{limit.count}{t(". Contact KwartoKeeper support if you need more.")}
           </Typography>
           <Button variant="contained" disableElevation onClick={() => navigate('/owner/properties', { replace: true })} sx={{ mt: 3, fontWeight: 700, borderRadius: '10px', minHeight: 44 }}>
-            Back to my properties
+            {t("Back to my properties")}
           </Button>
         </Box>
       </Box>
@@ -293,9 +310,9 @@ export default function PropertyWizard() {
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt="KwartoKeeper" sx={{ height: 30 }} />
-          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: '1rem', flex: 1 }}>Property setup</Typography>
-          <IconButton aria-label="Leave property setup" onClick={leave} size="small" sx={{ color: '#cadcf6', '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,.08)' } }}>
+          <Box component="img" src="/KwartoKeeper-DarkMode-Icon.png" alt={t("KwartoKeeper")} sx={{ height: 30 }} />
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: '1rem', flex: 1 }}>{t("Property setup")}</Typography>
+          <IconButton aria-label={t("Leave property setup")} onClick={leave} size="small" sx={{ color: '#cadcf6', '&:hover': { color: '#fff', bgcolor: 'rgba(255,255,255,.08)' } }}>
             <CloseIcon fontSize="small" />
           </IconButton>
         </Box>
@@ -305,7 +322,7 @@ export default function PropertyWizard() {
         <Box sx={{ mt: 'auto' }}>
           <SetupBuilding progress={(activeStep + 1) / STEPS.length} />
           <Typography sx={{ color: 'rgba(202,220,246,.75)', fontSize: '0.82rem', mt: 2, lineHeight: 1.5 }}>
-            Nothing is saved until the last step. You can change all of this later in Properties.
+            {t("Nothing is saved until the last step. You can change all of this later in Properties.")}
           </Typography>
         </Box>
       </Box>
@@ -327,14 +344,14 @@ export default function PropertyWizard() {
         }}
       >
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.25 }}>
-          <Box component="img" src="/KwartoKeeper-Icon.png" alt="KwartoKeeper" sx={{ height: 26, width: 26, objectFit: 'contain' }} />
+          <Box component="img" src="/KwartoKeeper-Icon.png" alt={t("KwartoKeeper")} sx={{ height: 26, width: 26, objectFit: 'contain' }} />
           <Box sx={{ flex: 1, minWidth: 0 }}>
-            <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: '0.95rem', lineHeight: 1.2 }}>Property setup</Typography>
+            <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: '0.95rem', lineHeight: 1.2 }}>{t("Property setup")}</Typography>
             <Typography variant="caption" color="text.secondary" noWrap component="div">
-              Step {activeStep + 1} of {STEPS.length} · {STEPS[activeStep].title}
+              {t("Step")}{" "}{activeStep + 1}{" "}{t("of")}{" "}{STEPS.length} · {STEPS[activeStep].title}
             </Typography>
           </Box>
-          <IconButton aria-label="Leave property setup" onClick={leave} size="small" sx={{ bgcolor: 'action.hover' }}>
+          <IconButton aria-label={t("Leave property setup")} onClick={leave} size="small" sx={{ bgcolor: 'action.hover' }}>
             <CloseIcon fontSize="small" />
           </IconButton>
         </Box>
@@ -350,7 +367,7 @@ export default function PropertyWizard() {
         <Box sx={{ width: '100%', maxWidth: 760, display: 'flex', flexDirection: 'column', minHeight: { md: '100%' } }}>
           {activeStep < 2 && errorCount > 0 && (
             <Alert severity="error" sx={{ mb: 2.5, borderRadius: '14px' }}>
-              {errorCount === 1 ? 'One thing needs fixing' : `${errorCount} things need fixing`} before you continue. They're marked below.
+              {errorCount === 1 ? t("One thing needs fixing") : `${errorCount} things need fixing`}{" "}{t("before you continue. They're marked below.")}
             </Alert>
           )}
 
@@ -364,9 +381,10 @@ export default function PropertyWizard() {
             <WizardFooter
               onBack={handleBack}
               backLabel={activeStep === 0 ? 'Cancel' : 'Back'}
-              primaryLabel={`Next: ${STEPS[activeStep + 1].title}`}
+              primaryLabel={checkingDuplicate ? 'Checking…' : `Next: ${STEPS[activeStep + 1].title}`}
               primaryIcon={<ArrowForwardIcon />}
               onPrimary={handleNext}
+              busy={checkingDuplicate}
             />
           )}
         </Box>

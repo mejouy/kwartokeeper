@@ -1,6 +1,6 @@
 // src/pages/owner/tenants/TenantDetail.jsx
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
   Box,
@@ -59,6 +59,7 @@ import {
   where,
   onSnapshot,
   setDoc,
+  addDoc,
 } from "firebase/firestore";
 import { auth, db } from "../../../config/firebase";
 import { normalizePayment } from "../../../utils/normalizePayment";
@@ -67,8 +68,14 @@ import { addMonthsClamped } from "../../../utils/addMonthsClamped";
 import { reconcilePropertyOccupancy } from "../../../utils/reconcilePropertyOccupancy";
 import { isRoomUnderMaintenance, MAINTENANCE_ROOM_MESSAGE } from "../../../utils/roomStatus";
 import { useAuth } from "../../../context/AuthContext";
-import { normalizeStatus, rentStatusOf, paymentPeriodOf, dueDayOf, STATUS_TONE } from "../../../utils/tenantRent";
+import { normalizeStatus, rentStatusOf, paymentPeriodOf, dueDayOf, STATUS_TONE, leaseLengthText } from "../../../utils/tenantRent";
 import { isRemovedAccount, removedLabel } from "../../../utils/accountState";
+import { isActiveCharge } from "../../../utils/charges";
+import { findDuplicatePerson } from "../../../utils/duplicates";
+import { AddFeeDialog, BillBreakdown, FeeList } from "../../../components/Fees";
+import BoltOutlinedIcon from "@mui/icons-material/BoltOutlined";
+import AddIcon from "@mui/icons-material/Add";
+import { t } from "../../../i18n";
 
 // ---------------------------------------------------------------------------
 // Constants — lease codes deliberately match what RegisterTenant stores in
@@ -76,11 +83,11 @@ import { isRemovedAccount, removedLabel } from "../../../utils/accountState";
 // value the edit form starts from.
 // ---------------------------------------------------------------------------
 const LEASE_DURATIONS = [
-  { value: "1_month", label: "1 month", months: 1 },
-  { value: "3_months", label: "3 months", months: 3 },
-  { value: "6_months", label: "6 months", months: 6 },
-  { value: "12_months", label: "12 months", months: 12 },
-  { value: "custom", label: "Custom…", months: null },
+  { value: "1_month", label: t("1 month"), months: 1 },
+  { value: "3_months", label: t("3 months"), months: 3 },
+  { value: "6_months", label: t("6 months"), months: 6 },
+  { value: "12_months", label: t("12 months"), months: 12 },
+  { value: "custom", label: t("Custom…"), months: null },
 ];
 
 const ID_TYPE_LABELS = {
@@ -183,8 +190,11 @@ function getLeaseInfo(tenant) {
   const end = toDate(tenant.leaseEnd || tenant.endDate || tenant.leaseEndDate || tenant.moveOutDate);
 
   const stored = tenant.leaseDuration;
-  let durationLabel = null;
-  if (stored) {
+  // From the dates when there are both, so it always matches them; a saved label only otherwise
+  let durationLabel = leaseLengthText(start, end);
+  if (durationLabel) {
+    // nothing else to work out
+  } else if (stored) {
     const preset = LEASE_DURATIONS.find(
       (d) => d.value === stored || (d.months && d.months === Number(stored))
     );
@@ -340,9 +350,9 @@ const segmentedSx = {
 // Curfew record
 // ---------------------------------------------------------------------------
 const CURFEW_STATUS = {
-  present: { label: "In on time", tone: "success", dot: "success.main" },
-  late: { label: "Late", tone: "warning", dot: "warning.main" },
-  out: { label: "Out past curfew", tone: "error", dot: "error.main" },
+  present: { label: t("In on time"), tone: "success", dot: "success.main" },
+  late: { label: t("Late"), tone: "warning", dot: "warning.main" },
+  out: { label: t("Out past curfew"), tone: "error", dot: "error.main" },
 };
 
 function curfewNightLabel(key) {
@@ -369,7 +379,7 @@ function CurfewRecord({ nights, showAll, onToggle }) {
         action={
           onTimeRate != null && (
             <Typography variant="body2" sx={{ fontWeight: 600, color: "text.secondary", textAlign: "right" }}>
-              On time{" "}
+              {t("On time")}{" "}
               <Box component="span" sx={{ color: onTimeRate >= 80 ? "success.main" : "warning.main", fontFamily: HEADING_FONT, fontWeight: 700 }}>
                 {onTimeRate}%
               </Box>
@@ -377,21 +387,21 @@ function CurfewRecord({ nights, showAll, onToggle }) {
           )
         }
       >
-        Curfew record
+        {t("Curfew record")}
       </SectionHeading>
 
       {nights.length === 0 ? (
         <Typography color="text.secondary" variant="body2" sx={{ py: 4, textAlign: "center", border: "1px dashed", borderColor: "divider", borderRadius: 2 }}>
-          No curfew checks recorded for this tenant yet. They appear here once the caretaker starts logging nights.
+          {t("No curfew checks recorded for this tenant yet. They appear here once the caretaker starts logging nights.")}
         </Typography>
       ) : (
         <>
           <Box sx={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: { xs: 1, sm: 2 }, mb: 2.5 }}>
             {[
-              { label: "Nights checked", value: nights.length },
-              { label: "On time", value: count("present"), color: "success.main" },
-              { label: "Late", value: count("late"), color: count("late") > 0 ? "warning.main" : undefined },
-              { label: "Out", value: count("out"), color: count("out") > 0 ? "error.main" : undefined },
+              { label: t("Nights checked"), value: nights.length },
+              { label: t("On time"), value: count("present"), color: "success.main" },
+              { label: t("Late"), value: count("late"), color: count("late") > 0 ? "warning.main" : undefined },
+              { label: t("Out"), value: count("out"), color: count("out") > 0 ? "error.main" : undefined },
             ].map((x) => (
               <Box key={x.label} sx={{ minWidth: 0 }}>
                 <Typography variant="caption" color="text.secondary" noWrap component="div">
@@ -454,7 +464,7 @@ function CurfewRecord({ nights, showAll, onToggle }) {
 
           {nights.length > 6 && (
             <Button onClick={onToggle} size="small" sx={{ mt: 1, fontWeight: 700 }}>
-              {showAll ? "Show fewer" : `Show all ${nights.length} nights`}
+              {showAll ? t("Show fewer") : `Show all ${nights.length} nights`}
             </Button>
           )}
         </>
@@ -489,7 +499,10 @@ export default function TenantDetail() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
   const [formErrors, setFormErrors] = useState({});
-  const [snackbar, setSnackbar] = useState(false);
+  const [snackbar, setSnackbar] = useState(null); // { message, severity }
+  // Extra fees on top of rent (utils/charges.js)
+  const [charges, setCharges] = useState([]);
+  const [feeDialog, setFeeDialog] = useState({ open: false, key: 0, editing: null });
   const [ownerProperties, setOwnerProperties] = useState([]);
   const [propertyTenants, setPropertyTenants] = useState({ propertyId: "", list: [] });
   const [occupancyLoading, setOccupancyLoading] = useState(false);
@@ -586,21 +599,77 @@ export default function TenantDetail() {
   // =========================================================
   // LOAD PAYMENTS RECORD FOR THIS TENANT
   // =========================================================
+  const ownerPropsRef = useRef([]);
   useEffect(() => {
-    if (!tenantId) return;
+    ownerPropsRef.current = ownerProperties;
+  }, [ownerProperties]);
 
-    const unsubscribe = onSnapshot(
-      query(collection(db, "payments"), where("tenantId", "==", tenantId)),
-      (snapshot) => {
-        setPayments(snapshot.docs.map((d) => normalizePayment({ id: d.id, ...d.data() })));
-      },
-      (err) => {
-        console.error("Error fetching tenant payments:", err);
-      }
+  // Live tenant details: changes saved elsewhere (another device or tab) show without a reload.
+  // Same merge as the first load: the tenant record wins over the account profile.
+  useEffect(() => {
+    if (!tenantId || authLoading) return undefined;
+    const latest = { user: undefined, tenant: undefined };
+    const publish = () => {
+      if (latest.user === undefined || latest.tenant === undefined) return;
+      if (!latest.tenant && !(latest.user && latest.user.role === "tenant")) return;
+      const merged = { ...(latest.user || {}), id: tenantId, ...(latest.tenant || {}) };
+      // Only refresh a tenant that's already on screen (the first load handles errors)
+      setTenant((prev) => (prev ? merged : prev));
+      // Moved to another of the owner's properties: show that one
+      const match = ownerPropsRef.current.find((p) => p.id === merged.propertyId);
+      if (match) setProperty((prev) => (prev?.id === match.id ? prev : match));
+    };
+    const watch = (path, key) =>
+      onSnapshot(
+        doc(db, path, tenantId),
+        (snap) => {
+          latest[key] = snap.exists() ? snap.data() : null;
+          publish();
+        },
+        (err) => console.warn(`Live ${key} updates unavailable:`, err?.code || err)
+      );
+    const unsubs = [watch("tenants", "tenant"), watch("users", "user")];
+    return () => unsubs.forEach((u) => u());
+  }, [tenantId, authLoading]);
+
+
+  // The database only shows an owner their own payments: those saved with their
+  // ownerUid, and older ones that only have the property. Both are read and merged.
+  const tenantPropertyId = tenant?.propertyId || "";
+  useEffect(() => {
+    if (!tenantId || !ownerUid) return undefined;
+
+    const sources = { owner: [], property: [] };
+    const publish = () => {
+      const byId = new Map();
+      [...sources.owner, ...sources.property].forEach((p) => byId.set(p.id, p));
+      setPayments([...byId.values()]);
+    };
+    const watch = (key, ...filters) =>
+      onSnapshot(
+        query(collection(db, "payments"), ...filters, where("tenantId", "==", tenantId)),
+        (snapshot) => {
+          sources[key] = snapshot.docs.map((d) => normalizePayment({ id: d.id, ...d.data() }));
+          publish();
+        },
+        (err) => console.error(`Error fetching tenant payments (${key}):`, err)
+      );
+    const unsubs = [watch("owner", where("ownerUid", "==", ownerUid))];
+    if (tenantPropertyId) unsubs.push(watch("property", where("propertyId", "==", tenantPropertyId)));
+    return () => unsubs.forEach((u) => u());
+  }, [tenantId, ownerUid, tenantPropertyId]);
+
+  // =========================================================
+  // EXTRA FEES for this tenant (electricity, Wi-Fi...)
+  // =========================================================
+  useEffect(() => {
+    if (!tenantId || !ownerUid) return undefined;
+    return onSnapshot(
+      query(collection(db, "charges"), where("ownerUid", "==", ownerUid), where("tenantId", "==", tenantId)),
+      (snapshot) => setCharges(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isActiveCharge)),
+      (err) => console.warn("Fees unavailable:", err?.code || err)
     );
-
-    return () => unsubscribe();
-  }, [tenantId]);
+  }, [tenantId, ownerUid]);
 
   // =========================================================
   // CURFEW RECORD — this tenant's line from each night the caretaker
@@ -741,7 +810,7 @@ export default function TenantDetail() {
         leaseDuration = preset.value;
       } else {
         leaseDuration = "custom";
-        customLeaseDuration = String(stored);
+        customLeaseDuration = leaseLengthText(lease.start, lease.end) || String(stored);
       }
     } else if (lease.start && lease.end) {
       const m = monthsBetween(lease.start, lease.end);
@@ -828,6 +897,11 @@ export default function TenantDetail() {
         }
       }
 
+      // A custom term follows its dates whenever either date changes
+      if ((name === "leaseStart" || name === "leaseEnd") && next.leaseDuration === "custom") {
+        next.customLeaseDuration = leaseLengthText(next.leaseStart, next.leaseEnd) || next.customLeaseDuration;
+      }
+
       // End date edited by hand → keep the duration truthful
       if (name === "leaseEnd" && next.leaseDuration !== "custom" && next.leaseStart && value) {
         const s = toDate(next.leaseStart);
@@ -839,8 +913,7 @@ export default function TenantDetail() {
             next.leaseDuration = preset.value;
           } else {
             next.leaseDuration = "custom";
-            next.customLeaseDuration =
-              m > 0 ? pluralize(m, "month") : pluralize(Math.round((e2 - s) / MS_PER_DAY), "day");
+            next.customLeaseDuration = leaseLengthText(s, e2) || pluralize(Math.round((e2 - s) / MS_PER_DAY), "day");
           }
         }
       }
@@ -892,11 +965,19 @@ export default function TenantDetail() {
     setSaving(true);
     setSaveError("");
     try {
+      // Another current tenant or caretaker already using this number?
+      const dup = await findDuplicatePerson(ownerUid, { phone: formData.phone, excludeId: tenantId }).catch(() => null);
+      if (dup) {
+        setFormErrors({ phone: dup.message });
+        setSaveError(dup.message);
+        return;
+      }
+
       const tenantRef = doc(db, "tenants", tenantId);
       const previousPropertyId = tenant?.propertyId || "";
 
       const isCustom = formData.leaseDuration === "custom";
-      const finalDuration = isCustom ? formData.customLeaseDuration.trim() : formData.leaseDuration;
+      const finalDuration = isCustom ? leaseLengthText(formData.leaseStart, formData.leaseEnd) || formData.customLeaseDuration.trim() : formData.leaseDuration;
       const startDateObj = toDate(formData.leaseStart);
       const endDateObj = formData.leaseEnd ? toDate(formData.leaseEnd) : null;
       const leaseEndISO = endDateObj ? endDateObj.toISOString() : null;
@@ -908,12 +989,15 @@ export default function TenantDetail() {
         email: formData.email.trim(),
         phone: formData.phone.trim(),
         contactNumber: formData.phone.trim(),
+        contact: formData.phone.trim(),
         status: formData.status,
         propertyId: formData.propertyId,
         roomId: formData.roomId,
+        roomNumber: formData.roomId,
         bedId: formData.bedId || null,
         monthlyRent: rent,
         rentAmount: rent,
+        roomMonthlyRate: rent,
         // Lease — every alias is written in step, so no reader (including the
         // property's room map) can pick up a stale value.
         leaseDuration: finalDuration,
@@ -941,12 +1025,43 @@ export default function TenantDetail() {
       const propertyIds = [...new Set([previousPropertyId, formData.propertyId].filter(Boolean))];
       await Promise.all(propertyIds.map((pid) => reconcilePropertyOccupancy(pid)));
 
+      // Tell the tenant what changed about their stay (their dashboard already shows it live).
+      // Best effort, and only for things they'd want to know: rent, lease, room, property, status.
+      const before = tenant || {};
+      const propName = (id) => ownerProperties.find((p) => p.id === id)?.propertyName || ownerProperties.find((p) => p.id === id)?.name || "another property";
+      const day = (v) => (toDate(v) ? formatDate(v) : "not set");
+      const beforeRent = Number(before.monthlyRent ?? before.rentAmount ?? before.roomMonthlyRate ?? 0) || 0;
+      const changes = [
+        beforeRent !== rent && `Monthly rent: ${formatAmount(beforeRent)} → ${formatAmount(rent)}`,
+        day(before.leaseStartDate || before.leaseStart) !== day(formData.leaseStart) && `Lease start: ${day(before.leaseStartDate || before.leaseStart)} → ${day(formData.leaseStart)}`,
+        day(before.leaseEndDate || before.leaseEnd) !== day(leaseEndISO) && `Lease end: ${day(before.leaseEndDate || before.leaseEnd)} → ${day(leaseEndISO)}`,
+        (before.propertyId || "") !== formData.propertyId && `Property: ${propName(formData.propertyId)}`,
+        String(before.roomId || before.roomNumber || "") !== String(formData.roomId || "") && `Room: ${before.roomId || before.roomNumber || "none"} → ${formData.roomId || "none"}`,
+        String(before.bedId || "") !== String(formData.bedId || "") && `Bed: ${before.bedId || "none"} → ${formData.bedId || "none"}`,
+        String(before.status || "Active") !== String(formData.status) && `Status: ${before.status || "Active"} → ${formData.status}`,
+      ].filter(Boolean);
+      if (changes.length) {
+        addDoc(collection(db, "notifications"), {
+          userId: tenantId,
+          kind: "notice",
+          category: "account",
+          type: "info",
+          title: "Your rental details were updated",
+          message: `Your landlord updated your details. ${changes.join(". ")}.`,
+          ownerId: ownerUid,
+          createdBy: ownerUid,
+          createdByRole: "owner",
+          isRead: false,
+          createdAt: new Date().toISOString(),
+        }).catch((err) => console.warn("Tenant not notified of the change:", err?.code || err));
+      }
+
       setTenant((prev) => ({ ...prev, ...updatedPayload }));
       const newlyMatchedProp = ownerProperties.find((p) => p.id === formData.propertyId);
       if (newlyMatchedProp) setProperty(newlyMatchedProp);
 
       setOpenEdit(false);
-      setSnackbar(true);
+      setSnackbar({ message: t("Tenant details updated."), severity: "success" });
     } catch (err) {
       console.error("Error updating tenant:", err);
       setSaveError("Failed to update tenant details: " + err.message);
@@ -966,12 +1081,12 @@ export default function TenantDetail() {
   if (!tenantId || error || (!loading && !tenant)) {
     return (
       <Box sx={{ maxWidth: 520, mx: "auto", mt: { xs: 4, md: 8 }, textAlign: "center", px: 2 }}>
-        <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 800, fontSize: "1.2rem", mb: 0.5 }}>Can't open this tenant</Typography>
+        <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 800, fontSize: "1.2rem", mb: 0.5 }}>{t("Can't open this tenant")}</Typography>
         <Typography color="text.secondary" sx={{ mb: 3 }}>
-          {!tenantId ? "This link is missing the tenant." : error || "Tenant details are unavailable."}
+          {!tenantId ? t("This link is missing the tenant.") : error || t("Tenant details are unavailable.")}
         </Typography>
         <Button variant="contained" startIcon={<ArrowBackIcon />} onClick={() => navigate("/owner/tenants")} sx={{ fontWeight: 700, borderRadius: "10px" }}>
-          Back to tenants
+          {t("Back to tenants")}
         </Button>
       </Box>
     );
@@ -1018,7 +1133,9 @@ export default function TenantDetail() {
   const paidPayments = sortedPayments.filter((p) => statusOfPayment(p) === "paid");
   const totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
   const underReview = sortedPayments.filter((p) => statusOfPayment(p) === "pending").length;
-  const rent = rentStatusOf({ ...tenant, monthlyRent: monthlyRentValue }, payments, today);
+  const rent = rentStatusOf({ ...tenant, id: tenantId, monthlyRent: monthlyRentValue }, payments, today, charges);
+  const thisMonthFees = rent.bill?.feeTotal || 0;
+  const feeTenant = { id: tenantId, name: displayName, propertyId: tenant.propertyId || "", propertyName: property?.propertyName || property?.name || tenant.propertyName || "", roomNumber: tenant.roomId || "" };
   const tenantSince = formatDate(tenant.leaseStartDate || tenant.leaseStart || tenant.createdAt);
 
   const toneSx = (tone) => ({
@@ -1030,13 +1147,18 @@ export default function TenantDetail() {
   const tiles = [
     {
       icon: HomeWorkOutlinedIcon,
-      label: "Property",
+      label: t("Property"),
       value: property?.propertyName || property?.name || tenant.propertyName || "Not assigned",
       sub: propertyAddress && propertyAddress !== "No address specified" ? propertyAddress : null,
       onClick: property?.id ? () => navigate(`/owner/properties/${property.id}`) : null,
     },
-    { icon: MeetingRoomOutlinedIcon, label: "Room & bed", value: tenant.roomId ? `Room ${tenant.roomId}` : "No room", sub: roomSub, warn: !tenant.roomId && status !== "Inactive" },
-    { icon: PaymentsOutlinedIcon, label: "Monthly rent", value: formatAmount(monthlyRentValue), sub: `Due every ${ordinal(dueDayOf(tenant))} of the month` },
+    { icon: MeetingRoomOutlinedIcon, label: t("Room & bed"), value: tenant.roomId ? `Room ${tenant.roomId}` : "No room", sub: roomSub, warn: !tenant.roomId && status !== "Inactive" },
+    {
+      icon: PaymentsOutlinedIcon,
+      label: t("Monthly rent"),
+      value: formatAmount(monthlyRentValue),
+      sub: thisMonthFees > 0 ? `+ ${formatAmount(thisMonthFees)} fees this month` : `Due every ${ordinal(dueDayOf(tenant))} of the month`,
+    },
     { icon: ReceiptLongOutlinedIcon, label: `Rent for ${today.toLocaleDateString("en-US", { month: "long" })}`, pill: rent },
   ];
 
@@ -1102,12 +1224,12 @@ export default function TenantDetail() {
         onClick={() => navigate("/owner/tenants")}
         sx={{ mb: 1.25, ml: -1, color: "text.secondary", fontWeight: 600 }}
       >
-        Tenants
+        {t("Tenants")}
       </Button>
 
       {isRemovedAccount(tenant) && (
         <Alert severity="error" sx={{ mb: 2, borderRadius: "14px" }}>
-          <strong>{removedLabel(tenant)}</strong> They no longer appear in lists, counts or announcements. Their records are kept for your history.
+          <strong>{removedLabel(tenant)}</strong>{" "}{t("They no longer appear in lists, counts or announcements. Their records are kept for your history.")}
         </Alert>
       )}
 
@@ -1138,11 +1260,11 @@ export default function TenantDetail() {
                   {displayName}
                 </Typography>
                 <Box component="span" sx={pillSx(STATUS_TONE[status])}>
-                  {status === "Pending" ? "Pending onboarding" : status}
+                  {status === "Pending" ? t("Pending onboarding") : status}
                 </Box>
               </Box>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, overflowWrap: "anywhere" }}>
-                {[phone, tenant.email].filter(Boolean).join(" · ") || "No contact details"}
+                {[phone, tenant.email].filter(Boolean).join(" · ") || t("No contact details")}
                 {tenantSince !== "—" ? ` · Tenant since ${tenantSince}` : ""}
               </Typography>
             </Box>
@@ -1157,7 +1279,7 @@ export default function TenantDetail() {
               onClick={handleOpenEdit}
               sx={{ fontWeight: 700, borderRadius: "10px", minHeight: 38, px: 2, flex: { xs: 1, sm: "none" } }}
             >
-              Edit details
+              {t("Edit details")}
             </Button>
           </Box>
         </Box>
@@ -1175,7 +1297,7 @@ export default function TenantDetail() {
             <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 2 }}>
               <Box sx={{ display: "flex", alignItems: "center", gap: 1.25 }}>
                 <CalendarMonthOutlinedIcon sx={{ color: "primary.main" }} />
-                <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 700 }}>Lease</Typography>
+                <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 700 }}>{t("Lease")}</Typography>
               </Box>
               <Chip label={lease.statusLabel} size="small" sx={{ bgcolor: leaseTone.bg, color: leaseTone.color, fontWeight: 700, border: "none" }} />
             </Box>
@@ -1197,11 +1319,11 @@ export default function TenantDetail() {
 
             <Box sx={{ display: "flex", justifyContent: "space-between", gap: 2, mt: lease.progress != null ? 0 : 2.5 }}>
               <Box>
-                <Typography variant="caption" sx={{ color: "#cadcf6", display: "block" }}>Start</Typography>
+                <Typography variant="caption" sx={{ color: "#cadcf6", display: "block" }}>{t("Start")}</Typography>
                 <Typography sx={{ fontWeight: 700 }}>{formatDate(lease.start)}</Typography>
               </Box>
               <Box sx={{ textAlign: "right" }}>
-                <Typography variant="caption" sx={{ color: "#cadcf6", display: "block" }}>End</Typography>
+                <Typography variant="caption" sx={{ color: "#cadcf6", display: "block" }}>{t("End")}</Typography>
                 <Typography sx={{ fontWeight: 700 }}>{formatDate(lease.end)}</Typography>
               </Box>
             </Box>
@@ -1213,29 +1335,29 @@ export default function TenantDetail() {
             icon={ReceiptLongOutlinedIcon}
             action={
               <Button size="small" endIcon={<ChevronRightIcon />} onClick={() => navigate("/owner/payments")} sx={{ fontWeight: 700 }}>
-                Payments
+                {t("Payments")}
               </Button>
             }
           >
-            Payments
+            {t("Payments")}
           </SectionHeading>
           <Box>
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Total paid</Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>{t("Total paid")}</Typography>
             <Typography sx={{ fontFamily: HEADING_FONT, fontWeight: 900, fontSize: { xs: "1.6rem", sm: "1.9rem" }, lineHeight: 1.2, color: "primary.main" }}>
               {formatAmount(totalPaid)}
             </Typography>
           </Box>
           <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1, mt: "auto" }}>
             <Box sx={{ p: 1.25, borderRadius: "10px", bgcolor: (t) => alpha(t.palette.background.paper, 0.5) }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block" }}>Last paid</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block" }}>{t("Last paid")}</Typography>
               <Typography sx={{ fontWeight: 700, fontSize: "0.92rem" }}>
                 {paidPayments[0] ? formatDate(paidPayments[0].paymentDate || paidPayments[0].createdAt) : "—"}
               </Typography>
             </Box>
             <Box sx={{ p: 1.25, borderRadius: "10px", bgcolor: (t) => (underReview ? alpha(t.palette.info.main, 0.1) : alpha(t.palette.background.paper, 0.5)) }}>
-              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block" }}>Under review</Typography>
+              <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block" }}>{t("Under review")}</Typography>
               <Typography sx={{ fontWeight: 700, fontSize: "0.92rem", color: underReview ? "info.dark" : "text.primary" }}>
-                {underReview ? pluralize(underReview, "payment") : "None"}
+                {underReview ? pluralize(underReview, "payment") : t("None")}
               </Typography>
             </Box>
           </Box>
@@ -1245,11 +1367,11 @@ export default function TenantDetail() {
       {/* ───── Emergency contact + Identification ───── */}
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: 2.5, mb: 2.5 }}>
         <Box sx={{ ...panelSx, p: { xs: 2.5, sm: 3 } }}>
-          <SectionHeading icon={ContactEmergencyOutlinedIcon}>Emergency contact</SectionHeading>
+          <SectionHeading icon={ContactEmergencyOutlinedIcon}>{t("Emergency contact")}</SectionHeading>
           <Box>
-            <DetailRow label="Name">{tenant.emergencyContact?.name || tenant.emergencyName || "Not provided"}</DetailRow>
-            <DetailRow label="Relationship">{tenant.emergencyContact?.relationship || tenant.emergencyRelationship || "—"}</DetailRow>
-            <DetailRow label="Phone">
+            <DetailRow label={t("Name")}>{tenant.emergencyContact?.name || tenant.emergencyName || t("Not provided")}</DetailRow>
+            <DetailRow label={t("Relationship")}>{tenant.emergencyContact?.relationship || tenant.emergencyRelationship || "—"}</DetailRow>
+            <DetailRow label={t("Phone")}>
               {emergencyPhone ? (
                 <Link href={`tel:${emergencyPhone}`} underline="hover" sx={{ fontWeight: 700 }}>
                   {emergencyPhone}
@@ -1261,23 +1383,23 @@ export default function TenantDetail() {
           </Box>
           {!(tenant.emergencyContact?.name || tenant.emergencyName) && (
             <Button size="small" onClick={handleOpenEdit} sx={{ mt: 1, fontWeight: 700 }}>
-              Add emergency contact
+              {t("Add emergency contact")}
             </Button>
           )}
         </Box>
 
         <Box sx={{ ...panelSx, p: { xs: 2.5, sm: 3 } }}>
-          <SectionHeading icon={BadgeOutlinedIcon}>Identification</SectionHeading>
+          <SectionHeading icon={BadgeOutlinedIcon}>{t("Identification")}</SectionHeading>
           <Box sx={{ display: "flex", gap: 2, alignItems: "flex-start" }}>
             <Box sx={{ flex: 1, minWidth: 0 }}>
-              <DetailRow label="ID type">
+              <DetailRow label={t("ID type")}>
                 {tenant.idType ? ID_TYPE_LABELS[tenant.idType] || String(tenant.idType).replace(/_/g, " ") : "—"}
               </DetailRow>
-              <DetailRow label="ID number">{tenant.idNumber || "—"}</DetailRow>
-              <DetailRow label="Registered">{formatDate(tenant.createdAt)}</DetailRow>
-              <DetailRow label="Notes">
+              <DetailRow label={t("ID number")}>{tenant.idNumber || "—"}</DetailRow>
+              <DetailRow label={t("Registered")}>{formatDate(tenant.createdAt)}</DetailRow>
+              <DetailRow label={t("Notes")}>
                 <Box component="span" sx={{ fontWeight: 400, color: "text.secondary" }}>
-                  {tenant.notes || "No notes recorded."}
+                  {tenant.notes || t("No notes recorded.")}
                 </Box>
               </DetailRow>
             </Box>
@@ -1287,10 +1409,10 @@ export default function TenantDetail() {
                 href={tenant.idPhotoUrl}
                 target="_blank"
                 rel="noopener noreferrer"
-                aria-label="Open the ID photo"
+                aria-label={t("Open the ID photo")}
                 sx={{ position: "relative", width: { xs: 96, sm: 120 }, aspectRatio: "4 / 3", flexShrink: 0, borderRadius: "10px", overflow: "hidden", border: "1px solid", borderColor: "divider", display: "block", "&:hover .kk-open": { opacity: 1 } }}
               >
-                <Box component="img" src={tenant.idPhotoUrl} alt="ID photo" sx={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                <Box component="img" src={tenant.idPhotoUrl} alt={t("ID photo")} sx={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
                 <Box className="kk-open" sx={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", bgcolor: "rgba(0,0,0,.45)", color: "#fff", opacity: 0, transition: "opacity .15s" }}>
                   <OpenInNewIcon fontSize="small" />
                 </Box>
@@ -1298,6 +1420,36 @@ export default function TenantDetail() {
             )}
           </Box>
         </Box>
+      </Box>
+
+      {/* ───── Extra fees (not included in the room / bed rate) ───── */}
+      <Box sx={{ ...panelSx, p: { xs: 2.5, sm: 3 }, mb: 2.5 }}>
+        <SectionHeading
+          icon={BoltOutlinedIcon}
+          action={
+            status !== "Inactive" && (
+              <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => setFeeDialog((d) => ({ open: true, key: d.key + 1, editing: null }))} sx={{ fontWeight: 700, borderRadius: "10px", flexShrink: 0 }}>
+                {t("Add fee")}
+              </Button>
+            )
+          }
+        >
+          {t("Extra fees")}
+        </SectionHeading>
+        {rent.bill && rent.bill.feeTotal > 0 && (
+          <Box sx={{ mb: 1.5, p: 1.5, borderRadius: "12px", bgcolor: (t) => alpha(t.palette.background.paper, 0.5) }}>
+            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.5 }}>
+              {today.toLocaleDateString("en-US", { month: "long", year: "numeric" }).toUpperCase()}
+            </Typography>
+            <BillBreakdown bill={rent.bill} />
+          </Box>
+        )}
+        <FeeList
+          charges={charges}
+          emptyText={t("No extra fees. Add one for things not included in the rent, like electricity, Wi-Fi or kitchen access.")}
+          onEdit={(c) => setFeeDialog((d) => ({ open: true, key: d.key + 1, editing: c }))}
+          onDone={(message, severity = "success") => setSnackbar({ message, severity })}
+        />
       </Box>
 
       {/* ───── Curfew record ───── */}
@@ -1315,12 +1467,12 @@ export default function TenantDetail() {
             )
           }
         >
-          Payment records
+          {t("Payment records")}
         </SectionHeading>
 
         {payments.length === 0 ? (
           <Typography color="text.secondary" variant="body2" sx={{ py: 4, textAlign: "center", border: "1px dashed", borderColor: "divider", borderRadius: "12px" }}>
-            No payment records yet.
+            {t("No payment records yet.")}
           </Typography>
         ) : (
           <>
@@ -1396,13 +1548,13 @@ export default function TenantDetail() {
             </Avatar>
             <Box sx={{ flex: 1, minWidth: 0 }}>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block", lineHeight: 1.2 }}>
-                Edit tenant
+                {t("Edit tenant")}
               </Typography>
               <Typography noWrap sx={{ fontFamily: HEADING_FONT, fontWeight: 800, fontSize: "1.2rem", letterSpacing: "-0.01em" }}>
-                {formData.fullName || "Unnamed tenant"}
+                {formData.fullName || t("Unnamed tenant")}
               </Typography>
             </Box>
-            <IconButton onClick={() => setOpenEdit(false)} aria-label="Close" disabled={saving} sx={{ bgcolor: "action.hover" }}>
+            <IconButton onClick={() => setOpenEdit(false)} aria-label={t("Close")} disabled={saving} sx={{ bgcolor: "action.hover" }}>
               <CloseIcon />
             </IconButton>
           </Box>
@@ -1417,32 +1569,32 @@ export default function TenantDetail() {
 
           <Box sx={{ px: { xs: 2, sm: 3 } }}>
             {/* Personal */}
-            <FormSection first icon={PersonOutlineOutlinedIcon} title="Personal information" description="How you and the caretaker reach this tenant.">
+            <FormSection first icon={PersonOutlineOutlinedIcon} title={t("Personal information")} description="How you and the caretaker reach this tenant.">
               <Box sx={formStack}>
-                <TextField required label="Full name" name="fullName" value={formData.fullName} onChange={handleChange} fullWidth {...fieldError("fullName")} />
+                <TextField required label={t("Full name")} name="fullName" value={formData.fullName} onChange={handleChange} fullWidth {...fieldError("fullName")} />
                 <Box sx={formPair}>
-                  <TextField required label="Phone number" name="phone" type="tel" value={formData.phone} onChange={handleChange} fullWidth {...fieldError("phone")} />
-                  <TextField label="Email address" name="email" value={formData.email} onChange={handleChange} fullWidth {...fieldError("email")} />
+                  <TextField required label={t("Phone number")} name="phone" type="tel" value={formData.phone} onChange={handleChange} fullWidth {...fieldError("phone")} />
+                  <TextField label={t("Email address")} name="email" value={formData.email} onChange={handleChange} fullWidth {...fieldError("email")} />
                 </Box>
                 <Box>
                   <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>
-                    Status
+                    {t("Status")}
                   </Typography>
                   <ToggleButtonGroup
                     exclusive
                     fullWidth
                     value={formData.status}
                     onChange={(e, value) => value && setField("status", value)}
-                    aria-label="Tenant status"
+                    aria-label={t("Tenant status")}
                     sx={segmentedSx}
                   >
-                    <ToggleButton value="Active">Active</ToggleButton>
-                    <ToggleButton value="Pending Onboarding">Pending onboarding</ToggleButton>
-                    <ToggleButton value="Inactive">Inactive</ToggleButton>
+                    <ToggleButton value="Active">{t("Active")}</ToggleButton>
+                    <ToggleButton value="Pending Onboarding">{t("Pending onboarding")}</ToggleButton>
+                    <ToggleButton value="Inactive">{t("Inactive")}</ToggleButton>
                   </ToggleButtonGroup>
                   {formData.status === "Inactive" && (
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
-                      Inactive tenants no longer hold their bed and drop out of rent tracking.
+                      {t("Inactive tenants no longer hold their bed and drop out of rent tracking.")}
                     </Typography>
                   )}
                 </Box>
@@ -1450,9 +1602,9 @@ export default function TenantDetail() {
             </FormSection>
 
             {/* Room & rent */}
-            <FormSection icon={MeetingRoomOutlinedIcon} title="Room & rent" description="Where they stay and what they pay each month.">
+            <FormSection icon={MeetingRoomOutlinedIcon} title={t("Room & rent")} description="Where they stay and what they pay each month.">
               <Box sx={formStack}>
-                <TextField select required label="Property" name="propertyId" value={formData.propertyId} onChange={handleChange} fullWidth {...fieldError("propertyId")}>
+                <TextField select required label={t("Property")} name="propertyId" value={formData.propertyId} onChange={handleChange} fullWidth {...fieldError("propertyId")}>
                   {ownerProperties.map((prop) => (
                     <MenuItem key={prop.id} value={prop.id}>{prop.propertyName || prop.name}</MenuItem>
                   ))}
@@ -1461,7 +1613,7 @@ export default function TenantDetail() {
                   <TextField
                     select
                     required
-                    label="Room"
+                    label={t("Room")}
                     name="roomId"
                     value={formData.roomId}
                     onChange={handleChange}
@@ -1483,14 +1635,14 @@ export default function TenantDetail() {
                             <Typography variant="body2" sx={{ fontWeight: 700 }}>
                               {rName}
                               {room.floor ? (
-                                <Box component="span" sx={{ fontWeight: 400, color: "text.secondary" }}> · Floor {room.floor}</Box>
+                                <Box component="span" sx={{ fontWeight: 400, color: "text.secondary" }}>{" "}{t("· Floor")}{" "}{room.floor}</Box>
                               ) : null}
                             </Typography>
                             <Typography variant="caption" sx={{ color: isRoomUnderMaintenance(room) ? "warning.main" : isFull ? "error.main" : "text.secondary" }}>
                               {isRoomUnderMaintenance(room)
-                                ? "Under maintenance"
+                                ? t("Under maintenance")
                                 : cap > 0
-                                ? isFull ? "Full" : `${free} of ${cap} beds free`
+                                ? isFull ? t("Full") : `${free} of ${cap} beds free`
                                 : ""}
                               {room.monthlyRatePerBed ? ` · ${formatAmount(room.monthlyRatePerBed)}/bed` : ""}
                             </Typography>
@@ -1502,7 +1654,7 @@ export default function TenantDetail() {
                   <TextField
                     select
                     required
-                    label="Bed"
+                    label={t("Bed")}
                     name="bedId"
                     value={formData.bedId}
                     onChange={handleChange}
@@ -1521,7 +1673,7 @@ export default function TenantDetail() {
                 </Box>
                 <TextField
                   required
-                  label="Monthly rent"
+                  label={t("Monthly rent")}
                   name="monthlyRent"
                   type="number"
                   value={formData.monthlyRent}
@@ -1535,11 +1687,11 @@ export default function TenantDetail() {
             </FormSection>
 
             {/* Lease */}
-            <FormSection icon={CalendarMonthOutlinedIcon} title="Lease" description="Pick the start and how long. The end date is worked out for you.">
+            <FormSection icon={CalendarMonthOutlinedIcon} title={t("Lease")} description="Pick the start and how long. The end date is worked out for you.">
               <Box sx={formStack}>
                 <Box>
                   <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>
-                    Duration
+                    {t("Duration")}
                   </Typography>
                   <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
                     {LEASE_DURATIONS.map((opt) => {
@@ -1566,9 +1718,9 @@ export default function TenantDetail() {
                 {formData.leaseDuration === "custom" && (
                   <TextField
                     required
-                    label="Custom lease term"
+                    label={t("Custom lease term")}
                     name="customLeaseDuration"
-                    placeholder="e.g. Month-to-month, 2 years"
+                    placeholder={t("e.g. Month-to-month, 2 years")}
                     value={formData.customLeaseDuration}
                     onChange={handleChange}
                     fullWidth
@@ -1578,7 +1730,7 @@ export default function TenantDetail() {
                 <Box sx={formPair}>
                   <TextField
                     required
-                    label="Start date"
+                    label={t("Start date")}
                     name="leaseStart"
                     type="date"
                     slotProps={{ inputLabel: { shrink: true } }}
@@ -1589,7 +1741,7 @@ export default function TenantDetail() {
                   />
                   <TextField
                     required={formData.leaseDuration !== "custom"}
-                    label="End date"
+                    label={t("End date")}
                     name="leaseEnd"
                     type="date"
                     slotProps={{ inputLabel: { shrink: true } }}
@@ -1607,7 +1759,7 @@ export default function TenantDetail() {
                       {formatDate(formData.leaseStart)} → {formatDate(formData.leaseEnd)}
                       <Box component="span" sx={{ color: "text.secondary", fontWeight: 400 }}>
                         {" "}· {formData.leaseDuration === "custom"
-                          ? formData.customLeaseDuration || "custom term"
+                          ? formData.customLeaseDuration || t("custom term")
                           : LEASE_DURATIONS.find((d) => d.value === formData.leaseDuration)?.label || ""}
                       </Box>
                     </Typography>
@@ -1617,23 +1769,23 @@ export default function TenantDetail() {
             </FormSection>
 
             {/* Emergency contact */}
-            <FormSection icon={ContactEmergencyOutlinedIcon} title="Emergency contact" description="Who to call if something happens to this tenant.">
+            <FormSection icon={ContactEmergencyOutlinedIcon} title={t("Emergency contact")} description="Who to call if something happens to this tenant.">
               <Box sx={formStack}>
                 <Box sx={formPair}>
-                  <TextField label="Contact name" name="emergencyName" value={formData.emergencyName} onChange={handleChange} fullWidth />
-                  <TextField label="Relationship" name="emergencyRelationship" placeholder="e.g. Mother" value={formData.emergencyRelationship} onChange={handleChange} fullWidth />
+                  <TextField label={t("Contact name")} name="emergencyName" value={formData.emergencyName} onChange={handleChange} fullWidth />
+                  <TextField label={t("Relationship")} name="emergencyRelationship" placeholder={t("e.g. Mother")} value={formData.emergencyRelationship} onChange={handleChange} fullWidth />
                 </Box>
-                <TextField label="Contact's phone" name="emergencyPhone" type="tel" value={formData.emergencyPhone} onChange={handleChange} fullWidth />
+                <TextField label={t("Contact's phone")} name="emergencyPhone" type="tel" value={formData.emergencyPhone} onChange={handleChange} fullWidth />
               </Box>
             </FormSection>
 
             {/* Notes */}
-            <FormSection icon={StickyNote2OutlinedIcon} title="Notes" description="Only you can see these.">
+            <FormSection icon={StickyNote2OutlinedIcon} title={t("Notes")} description="Only you can see these.">
               <TextField
                 name="notes"
                 multiline
                 minRows={3}
-                placeholder="Requirements, agreements, reminders…"
+                placeholder={t("Requirements, agreements, reminders…")}
                 value={formData.notes}
                 onChange={handleChange}
                 fullWidth
@@ -1645,7 +1797,7 @@ export default function TenantDetail() {
 
         <DialogActions sx={{ px: { xs: 2, sm: 3 }, py: 1.75, gap: 1, borderTop: "1px solid", borderColor: "divider", bgcolor: (t) => alpha(t.palette.background.paper, 0.35) }}>
           <Button onClick={() => setOpenEdit(false)} color="inherit" disabled={saving} sx={{ fontWeight: 700, borderRadius: "10px", flex: { xs: 1, sm: "none" } }}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button
             variant="contained"
@@ -1655,19 +1807,33 @@ export default function TenantDetail() {
             startIcon={saving ? <CircularProgress size={18} color="inherit" /> : <SaveOutlinedIcon />}
             sx={{ px: 3, fontWeight: 700, borderRadius: "10px", flex: { xs: 1, sm: "none" } }}
           >
-            {saving ? "Saving…" : "Save changes"}
+            {saving ? t("Saving…") : t("Save changes")}
           </Button>
         </DialogActions>
       </Dialog>
 
+      {feeDialog.open && (
+        <AddFeeDialog
+          key={feeDialog.key}
+          open
+          onClose={() => setFeeDialog((d) => ({ ...d, open: false }))}
+          onSaved={(message) => setSnackbar({ message, severity: "success" })}
+          ownerUid={ownerUid}
+          tenants={[feeTenant]}
+          initialTenantIds={[feeTenant.id]}
+          charges={charges}
+          editing={feeDialog.editing}
+        />
+      )}
+
       <Snackbar
-        open={snackbar}
+        open={Boolean(snackbar)}
         autoHideDuration={3500}
-        onClose={() => setSnackbar(false)}
+        onClose={() => setSnackbar(null)}
         anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
       >
-        <Alert severity="success" variant="filled" onClose={() => setSnackbar(false)} sx={{ width: "100%" }}>
-          Tenant details updated.
+        <Alert severity={snackbar?.severity || "success"} variant="filled" onClose={() => setSnackbar(null)} sx={{ width: "100%" }}>
+          {snackbar?.message}
         </Alert>
       </Snackbar>
     </Container>

@@ -1,0 +1,80 @@
+# Checks every push and pull request to dev and main, so a change that breaks
+# the app or the database rules shows up as a red ✗ on GitHub before it reaches users.
+#
+#  app:    lint, unit tests (fees, rent reminders, duplicates), production build
+#  rules:  firestore.rules against every role's real queries, in the local emulator
+#  server: the Cloud Functions helper tests (functions/)
+name: Checks
+
+on:
+  push:
+    branches: [dev, main]
+  pull_request:
+    branches: [dev, main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npm run build
+        env:
+          # The build only needs the names; real values stay in your .env.local
+          VITE_FIREBASE_API_KEY: ci
+          VITE_FIREBASE_AUTH_DOMAIN: ci
+          VITE_FIREBASE_PROJECT_ID: ci
+          VITE_FIREBASE_STORAGE_BUCKET: ci
+          VITE_FIREBASE_MESSAGING_SENDER_ID: ci
+          VITE_FIREBASE_APP_ID: ci
+
+  rules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - run: npm ci
+      - name: Install the Firebase CLI
+        run: npm install -g firebase-tools@15
+      - name: Database rules tests
+        run: npm run test:rules
+
+  server:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+      - working-directory: functions
+        run: npm ci --ignore-scripts
+      - working-directory: functions
+        run: node --test src/*.test.js

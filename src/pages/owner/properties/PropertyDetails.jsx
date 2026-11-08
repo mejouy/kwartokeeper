@@ -37,6 +37,8 @@ import { doc, getDoc, updateDoc, deleteField } from "firebase/firestore";
 import { uploadToCloudinary, uploadFileToCloudinary } from "../../../utils/cloudinary";
 import { getPropertyCoverPhotoUrl } from "../../../utils/getPropertyCoverPhotoUrl";
 import AddressFields from "../../../components/AddressFields";
+import { findDuplicateProperty } from "../../../utils/duplicates";
+import { t } from "../../../i18n";
 
 // Must match the owner layout: top bar height, and bottom nav height on phones
 const BAR_H = { xs: 56, md: 72 };
@@ -143,7 +145,7 @@ function RateInput({ value, onChange }) {
         fullWidth
         size="small"
         type="number"
-        label="Monthly Rate / Bed"
+        label={t("Monthly Rate / Bed")}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         sx={fieldSx}
@@ -153,7 +155,7 @@ function RateInput({ value, onChange }) {
             startAdornment: <InputAdornment position="start">₱</InputAdornment>,
             endAdornment: (
               <InputAdornment position="end">
-                <IconButton size="small" edge="end" onClick={(e) => setAnchorEl(e.currentTarget)} aria-label="Quick rate presets">
+                <IconButton size="small" edge="end" onClick={(e) => setAnchorEl(e.currentTarget)} aria-label={t("Quick rate presets")}>
                   <ExpandMoreIcon fontSize="small" />
                 </IconButton>
               </InputAdornment>
@@ -171,7 +173,7 @@ function RateInput({ value, onChange }) {
               setAnchorEl(null);
             }}
           >
-            ₱{preset.toLocaleString()} / bed
+            ₱{preset.toLocaleString()}{" "}{t("/ bed")}
           </MenuItem>
         ))}
       </Menu>
@@ -398,7 +400,7 @@ export default function PropertyDetails() {
     const trimmed = customAmenityInput.trim();
     if (!trimmed) return;
     if (formData.amenities.includes(trimmed)) {
-      setToast({ open: true, message: "Amenity already exists", severity: "warning" });
+      setToast({ open: true, message: t("Amenity already exists"), severity: "warning" });
       return;
     }
     setFormData(prev => ({ ...prev, amenities: [...prev.amenities, trimmed] }));
@@ -438,11 +440,11 @@ export default function PropertyDetails() {
 
   const handleCreateRoom = () => {
     if (!newRoomData.roomName.trim()) {
-      setToast({ open: true, message: "Please provide a room name", severity: "error" });
+      setToast({ open: true, message: t("Please provide a room name"), severity: "error" });
       return;
     }
     if (formData.rooms.some((r) => String(r.roomName).trim().toLowerCase() === newRoomData.roomName.trim().toLowerCase())) {
-      setToast({ open: true, message: "A room with that name already exists", severity: "error" });
+      setToast({ open: true, message: t("A room with that name already exists"), severity: "error" });
       return;
     }
 
@@ -482,7 +484,7 @@ export default function PropertyDetails() {
     e.target.value = "";
     if (!file || coverPreparing) return;
     if (!file.type.startsWith("image/") || /heic|heif/i.test(file.type)) {
-      setToast({ open: true, message: "Please choose a JPG or PNG photo.", severity: "error" });
+      setToast({ open: true, message: t("Please choose a JPG or PNG photo."), severity: "error" });
       return;
     }
     if (file.size > MAX_COVER_MB * 1024 * 1024) {
@@ -495,7 +497,7 @@ export default function PropertyDetails() {
       const { blob, ext } = await shrinkImage(file);
       const ready = blob instanceof File ? blob : new File([blob], `cover_${Date.now()}.${ext}`, { type: blob.type || file.type });
       if (ready.size > 5 * 1024 * 1024) {
-        setToast({ open: true, message: "That photo is still over 5 MB after resizing. Choose a smaller one.", severity: "error" });
+        setToast({ open: true, message: t("That photo is still over 5 MB after resizing. Choose a smaller one."), severity: "error" });
         return;
       }
       setCoverFile(ready);
@@ -539,7 +541,7 @@ export default function PropertyDetails() {
         continue;
       }
       if (!auth.currentUser) {
-        setToast({ open: true, message: "You're signed out. Sign in again and retry.", severity: "error" });
+        setToast({ open: true, message: t("You're signed out. Sign in again and retry."), severity: "error" });
         break;
       }
       const uploadId = `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -612,6 +614,13 @@ export default function PropertyDetails() {
 
     setSaving(true);
     try {
+      // Renamed or moved onto one of their other properties?
+      const dup = await findDuplicateProperty(auth.currentUser?.uid, { propertyName: formData.propertyName, address: formData.address, excludeId: id }).catch(() => null);
+      if (dup) {
+        fail(dup.message, 0);
+        return;
+      }
+
       // 1. A newly picked cover is uploaded now, only because the owner is saving it
       let coverUrl = formData.coverPhotoUrl || "";
       if (coverFile) {
@@ -621,7 +630,7 @@ export default function PropertyDetails() {
           if (!coverUrl) throw new Error("No link came back");
         } catch (error) {
           console.error("Cover upload error:", error);
-          setToast({ open: true, message: "The cover photo couldn't be uploaded. Check your connection and try again.", severity: "error" });
+          setToast({ open: true, message: t("The cover photo couldn't be uploaded. Check your connection and try again."), severity: "error" });
           return;
         }
       }
@@ -688,10 +697,10 @@ export default function PropertyDetails() {
       setSavedDocUrls(formData.ruleFiles.map((f) => f.url).filter(Boolean));
       setCoverFile(null);
       setCoverPreview("");
-      setToast({ open: true, message: "Changes saved.", severity: "success" });
+      setToast({ open: true, message: t("Changes saved."), severity: "success" });
     } catch (error) {
       console.error("Error updating property:", error);
-      setToast({ open: true, message: "Failed to save property.", severity: "error" });
+      setToast({ open: true, message: t("Failed to save property."), severity: "error" });
     } finally {
       setSaving(false);
       setSavingStep("");
@@ -723,14 +732,14 @@ export default function PropertyDetails() {
     return (
       <Box sx={{ maxWidth: 520, mx: "auto", mt: { xs: 4, md: 8 }, textAlign: "center", px: 2 }}>
         <ErrorOutlineIcon color="error" sx={{ fontSize: 40, mb: 1 }} />
-        <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.2rem", mb: 0.5 }}>Can't open this property</Typography>
+        <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.2rem", mb: 0.5 }}>{t("Can't open this property")}</Typography>
         <Typography color="text.secondary" sx={{ mb: 3 }}>{loadError}</Typography>
         <Box sx={{ display: "flex", gap: 1.5, justifyContent: "center", flexWrap: "wrap" }}>
           <Button variant="outlined" startIcon={<ArrowBackIcon />} onClick={() => navigate("/owner/properties")} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 46 }}>
-            Back to properties
+            {t("Back to properties")}
           </Button>
           <Button variant="contained" startIcon={<RefreshOutlinedIcon />} onClick={() => setReloadKey((k) => k + 1)} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 46 }}>
-            Try again
+            {t("Try again")}
           </Button>
         </Box>
       </Box>
@@ -754,15 +763,15 @@ export default function PropertyDetails() {
     <Box sx={{ pb: { xs: 2, md: 6 }, maxWidth: 1080, mx: "auto", minWidth: 0 }}>
       {/* HEADER: back, what you're editing, and saving */}
       <Box sx={{ ...row, gap: { xs: 1.25, sm: 1.75 }, mb: { xs: 2, md: 2.5 } }}>
-        <IconButton aria-label="Back to the property" onClick={goBack} sx={{ flexShrink: 0, border: "1px solid", borderColor: "divider", bgcolor: "background.default" }}>
+        <IconButton aria-label={t("Back to the property")} onClick={goBack} sx={{ flexShrink: 0, border: "1px solid", borderColor: "divider", bgcolor: "background.default" }}>
           <ArrowBackIcon />
         </IconButton>
         <Box sx={{ flex: 1, minWidth: 0 }}>
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, display: "block", lineHeight: 1.2 }}>
-            Edit property
+            {t("Edit property")}
           </Typography>
           <Typography sx={{ fontFamily: HEAD, fontWeight: 800, letterSpacing: "-0.02em", fontSize: { xs: "1.15rem", sm: "1.45rem" }, lineHeight: 1.25 }} noWrap>
-            {formData.propertyName || "Unnamed Property"}
+            {formData.propertyName || t("Unnamed Property")}
           </Typography>
         </Box>
 
@@ -770,7 +779,7 @@ export default function PropertyDetails() {
         <Box sx={{ display: { xs: "none", sm: "flex" }, alignItems: "center", gap: 1.5, flexShrink: 0 }}>
           <Typography variant="body2" sx={{ ...row, gap: 0.75, fontWeight: 700, color: isDirty ? "warning.dark" : "text.secondary" }}>
             {isDirty ? <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "warning.main" }} /> : <CheckCircleOutlineIcon sx={{ fontSize: 17, color: "success.main" }} />}
-            {isDirty ? "Unsaved changes" : "All changes saved"}
+            {isDirty ? t("Unsaved changes") : t("All changes saved")}
           </Typography>
           <Button
             variant="contained"
@@ -818,17 +827,17 @@ export default function PropertyDetails() {
             "& .MuiTab-root.Mui-selected": { color: "text.primary" },
           }}
         >
-          <Tab label="General" />
+          <Tab label={t("General")} />
           <Tab label={`Rooms & rates (${formData.rooms.length})`} />
-          <Tab label="Rules & curfew" />
-          <Tab label="Amenities" />
+          <Tab label={t("Rules & curfew")} />
+          <Tab label={t("Amenities")} />
         </Tabs>
       </Box>
 
       {/* TAB 0: GENERAL */}
       {tabValue === 0 && (
         <Paper elevation={0} sx={{ ...cardSx, px: { xs: 2, sm: 3.5 } }}>
-          <Section first title="Cover photo" description="Shown on the property page and on tenants' dashboards.">
+          <Section first title={t("Cover photo")} description="Shown on the property page and on tenants' dashboards.">
             <Box sx={{ display: "flex", flexDirection: { xs: "column", sm: "row" }, gap: 2, alignItems: { sm: "center" } }}>
               <Box
                 sx={{
@@ -847,7 +856,7 @@ export default function PropertyDetails() {
                 }}
               >
                 {shownCover && !coverFailed ? (
-                  <Box component="img" src={shownCover} alt="Property cover" onError={() => setCoverFailed(true)} sx={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
+                  <Box component="img" src={shownCover} alt={t("Property cover")} onError={() => setCoverFailed(true)} sx={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }} />
                 ) : coverRemovalPending ? (
                   <DeleteOutlineIcon sx={{ color: "error.main", fontSize: 32 }} />
                 ) : (
@@ -855,7 +864,7 @@ export default function PropertyDetails() {
                 )}
                 {coverFile && (
                   <Box sx={{ position: "absolute", top: 8, left: 8, px: 0.75, py: 0.2, borderRadius: "6px", bgcolor: "warning.main", color: "#fff", fontSize: 11, fontWeight: 700 }}>
-                    Not saved yet
+                    {t("Not saved yet")}
                   </Box>
                 )}
                 {coverPreparing && (
@@ -868,27 +877,27 @@ export default function PropertyDetails() {
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="body2" sx={{ fontWeight: 600, color: coverRemovalPending ? "error.main" : "text.secondary", mb: 1.25 }}>
                   {coverRemovalPending
-                    ? "This photo will be deleted when you save."
+                    ? t("This photo will be deleted when you save.")
                     : coverFile
-                    ? "New photo. It's uploaded when you save."
+                    ? t("New photo. It's uploaded when you save.")
                     : shownCover && coverFailed
-                    ? "This photo couldn't be shown. Upload another."
+                    ? t("This photo couldn't be shown. Upload another.")
                     : shownCover
-                    ? "JPG, PNG or WebP. Large photos are resized for you."
-                    : "No cover photo yet. JPG, PNG or WebP."}
+                    ? t("JPG, PNG or WebP. Large photos are resized for you.")
+                    : t("No cover photo yet. JPG, PNG or WebP.")}
                 </Typography>
                 <Box sx={{ display: "flex", gap: 1, flexWrap: "wrap" }}>
-                  <Button component="label" variant="outlined" size="small" startIcon={<AddPhotoAlternateOutlinedIcon />} disabled={coverPreparing || saving} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 38 }}>
-                    {shownCover ? "Change" : "Upload photo"}
+                  <Button component="label" role={undefined} variant="outlined" size="small" startIcon={<AddPhotoAlternateOutlinedIcon />} disabled={coverPreparing || saving} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 38 }}>
+                    {shownCover ? t("Change") : t("Upload photo")}
                     <input hidden type="file" accept="image/jpeg,image/png,image/webp" onChange={handleCoverPick} />
                   </Button>
                   {coverRemovalPending ? (
                     <Button size="small" startIcon={<UndoRoundedIcon />} onClick={handleUndoRemoveCover} disabled={saving} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 38 }}>
-                      Keep it
+                      {t("Keep it")}
                     </Button>
                   ) : shownCover ? (
                     <Button size="small" color="error" startIcon={coverFile ? <UndoRoundedIcon /> : <DeleteOutlineIcon />} onClick={handleRemoveCover} disabled={coverPreparing || saving} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 38 }}>
-                      {coverFile ? "Cancel" : "Remove"}
+                      {coverFile ? t("Cancel") : t("Remove")}
                     </Button>
                   ) : null}
                 </Box>
@@ -896,22 +905,22 @@ export default function PropertyDetails() {
             </Box>
           </Section>
 
-          <Section title="Basic information" description="The name and type tenants see, and who to call in an emergency.">
+          <Section title={t("Basic information")} description="The name and type tenants see, and who to call in an emergency.">
             <Box sx={fieldStack}>
-              <TextField fullWidth label="Property name" name="propertyName" value={formData.propertyName} onChange={handleChange} sx={fieldSx} />
+              <TextField fullWidth label={t("Property name")} name="propertyName" value={formData.propertyName} onChange={handleChange} sx={fieldSx} />
               <Box sx={fieldPair}>
-                <TextField fullWidth label="Property type" name="propertyType" value={formData.propertyType} onChange={handleChange} sx={fieldSx} />
-                <TextField fullWidth label="Emergency phone" name="emergencyPhone" type="tel" value={formData.emergencyPhone} onChange={handleChange} sx={fieldSx} />
+                <TextField fullWidth label={t("Property type")} name="propertyType" value={formData.propertyType} onChange={handleChange} sx={fieldSx} />
+                <TextField fullWidth label={t("Emergency phone")} name="emergencyPhone" type="tel" value={formData.emergencyPhone} onChange={handleChange} sx={fieldSx} />
               </Box>
               <Box sx={fieldPair}>
-                <TextField select fullWidth label="Status" name="status" value={formData.status} onChange={handleChange} sx={fieldSx}>
-                  <MenuItem value="Active">Active</MenuItem>
-                  <MenuItem value="Inactive">Inactive</MenuItem>
+                <TextField select fullWidth label={t("Status")} name="status" value={formData.status} onChange={handleChange} sx={fieldSx}>
+                  <MenuItem value="Active">{t("Active")}</MenuItem>
+                  <MenuItem value="Inactive">{t("Inactive")}</MenuItem>
                 </TextField>
                 <TextField
                   fullWidth
                   type="number"
-                  label="Number of floors"
+                  label={t("Number of floors")}
                   name="totalFloors"
                   value={formData.totalFloors}
                   onChange={(e) => setFormData(prev => ({ ...prev, totalFloors: Math.max(1, Number(e.target.value)) }))}
@@ -922,7 +931,7 @@ export default function PropertyDetails() {
             </Box>
           </Section>
 
-          <Section title="Location" description="Pick the region first; each list narrows down the next.">
+          <Section title={t("Location")} description="Pick the region first; each list narrows down the next.">
             <AddressFields key={reloadKey} value={formData.address} onChange={handleAddressPatch} fieldSx={fieldSx} />
           </Section>
         </Paper>
@@ -933,19 +942,19 @@ export default function PropertyDetails() {
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
           <Box sx={{ ...row, justifyContent: "space-between", gap: 2, mb: 0.5 }}>
             <Typography variant="body2" color="text.secondary" sx={{ minWidth: 0 }}>
-              Set bed rates, capacity and floors for each room.
+              {t("Set bed rates, capacity and floors for each room.")}
             </Typography>
             <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpenAddRoomModal(true)} sx={{ borderRadius: R.sm, fontWeight: 700, flexShrink: 0, boxShadow: "none" }}>
-              Add room
+              {t("Add room")}
             </Button>
           </Box>
 
           {floorNumbers.length === 0 ? (
             <Paper elevation={0} sx={{ ...cardSx, py: 6, px: 2, textAlign: "center", borderStyle: "dashed" }}>
               <MeetingRoomOutlinedIcon sx={{ color: "text.disabled", fontSize: 34 }} />
-              <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mt: 1 }}>No rooms added yet</Typography>
+              <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mt: 1 }}>{t("No rooms added yet")}</Typography>
               <Button startIcon={<AddIcon />} sx={{ mt: 1, fontWeight: 700 }} onClick={() => setOpenAddRoomModal(true)}>
-                Add your first room
+                {t("Add your first room")}
               </Button>
             </Paper>
           ) : (
@@ -965,9 +974,9 @@ export default function PropertyDetails() {
                   <AccordionSummary expandIcon={<ExpandMoreIcon />} sx={{ px: { xs: 2, sm: 2.5 }, "& .MuiAccordionSummary-content": { alignItems: "center", my: 1.5, minWidth: 0 } }}>
                     <Box sx={{ ...row, gap: 1.25, flexWrap: "wrap", minWidth: 0 }}>
                       <LayersOutlinedIcon fontSize="small" sx={{ color: "text.secondary" }} />
-                      <Typography sx={{ fontFamily: HEAD, fontWeight: 800 }}>Floor {floorNum}</Typography>
+                      <Typography sx={{ fontFamily: HEAD, fontWeight: 800 }}>{t("Floor")}{" "}{floorNum}</Typography>
                       <Typography variant="body2" color="text.secondary">
-                        {floorRooms.length} {floorRooms.length === 1 ? "room" : "rooms"} · {floorOccupied}/{floorBeds} beds occupied
+                        {floorRooms.length} {floorRooms.length === 1 ? "room" : "rooms"} · {floorOccupied}/{floorBeds}{" "}{t("beds occupied")}
                       </Typography>
                     </Box>
                   </AccordionSummary>
@@ -986,7 +995,7 @@ export default function PropertyDetails() {
                                 <TextField
                                   size="small"
                                   fullWidth
-                                  label="Room name"
+                                  label={t("Room name")}
                                   value={room.roomName}
                                   onChange={(e) => handleRoomChange(idx, "roomName", e.target.value)}
                                   disabled={occupied > 0}
@@ -999,8 +1008,8 @@ export default function PropertyDetails() {
                               </Box>
                               <Chip label={`${occupied} / ${capacity} beds occupied`} size="small" sx={{ mt: 1.25, ...occupancyChipSx(occupied, capacity) }} />
                               <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1.5, mt: 1.5 }}>
-                                <TextField type="number" size="small" label="Floor" value={room.floor} onChange={(e) => handleRoomChange(idx, "floor", e.target.value)} sx={fieldSx} slotProps={{ htmlInput: { inputMode: "numeric", min: 0 } }} />
-                                <TextField type="number" size="small" label="Beds" value={room.capacity} onChange={(e) => handleRoomChange(idx, "capacity", e.target.value)} sx={fieldSx} slotProps={{ htmlInput: { inputMode: "numeric", min: 0 } }} />
+                                <TextField type="number" size="small" label={t("Floor")} value={room.floor} onChange={(e) => handleRoomChange(idx, "floor", e.target.value)} sx={fieldSx} slotProps={{ htmlInput: { inputMode: "numeric", min: 0 } }} />
+                                <TextField type="number" size="small" label={t("Beds")} value={room.capacity} onChange={(e) => handleRoomChange(idx, "capacity", e.target.value)} sx={fieldSx} slotProps={{ htmlInput: { inputMode: "numeric", min: 0 } }} />
                               </Box>
                               <Box sx={{ mt: 1.5 }}>
                                 <RateInput value={room.monthlyRatePerBed} onChange={(val) => handleRoomChange(idx, "monthlyRatePerBed", val)} />
@@ -1014,11 +1023,11 @@ export default function PropertyDetails() {
                         <Table size="small">
                           <TableHead>
                             <TableRow sx={{ "& th": { fontWeight: 700, color: "text.secondary", whiteSpace: "nowrap", py: 1.25, borderColor: "divider" } }}>
-                              <TableCell sx={{ pl: 2.5 }}>Room</TableCell>
-                              <TableCell>Floor</TableCell>
-                              <TableCell>Beds</TableCell>
-                              <TableCell>Occupancy</TableCell>
-                              <TableCell>Rate / bed</TableCell>
+                              <TableCell sx={{ pl: 2.5 }}>{t("Room")}</TableCell>
+                              <TableCell>{t("Floor")}</TableCell>
+                              <TableCell>{t("Beds")}</TableCell>
+                              <TableCell>{t("Occupancy")}</TableCell>
+                              <TableCell>{t("Rate / bed")}</TableCell>
                               <TableCell align="right" />
                             </TableRow>
                           </TableHead>
@@ -1079,19 +1088,19 @@ export default function PropertyDetails() {
         <Paper elevation={0} sx={{ ...cardSx, px: { xs: 2, sm: 3.5 } }}>
           <Section
             first
-            title="Curfew"
+            title={t("Curfew")}
             description="The time tenants are expected to be in. Caretakers run curfew checks at this time."
             action={<Switch checked={formData.curfew.enabled} onChange={handleCurfewToggle} color="primary" slotProps={{ input: { "aria-label": "Curfew on or off" } }} sx={{ display: { md: "none" } }} />}
           >
             <Box sx={{ ...row, justifyContent: "space-between", gap: 2, display: { xs: "none", md: "flex" }, mb: formData.curfew.enabled ? 2 : 0 }}>
-              <Typography sx={{ fontWeight: 700 }}>{formData.curfew.enabled ? "Curfew is on" : "Curfew is off"}</Typography>
+              <Typography sx={{ fontWeight: 700 }}>{formData.curfew.enabled ? t("Curfew is on") : t("Curfew is off")}</Typography>
               <Switch checked={formData.curfew.enabled} onChange={handleCurfewToggle} color="primary" slotProps={{ input: { "aria-label": "Curfew on or off" } }} />
             </Box>
             {formData.curfew.enabled ? (
               <Box sx={{ display: "flex", flexDirection: { xs: "column", sm: "row" }, gap: 1.5, alignItems: { sm: "center" } }}>
                 <TextField
                   type="time"
-                  label="Starts at"
+                  label={t("Starts at")}
                   value={formatTo24Hour(formData.curfew.startTime)}
                   onChange={handleCurfewTimeChange}
                   sx={{ ...fieldSx, width: { xs: "100%", sm: 180 } }}
@@ -1116,18 +1125,18 @@ export default function PropertyDetails() {
               </Box>
             ) : (
               <Typography variant="body2" color="text.secondary" sx={{ display: { md: "none" } }}>
-                Curfew is off.
+                {t("Curfew is off.")}
               </Typography>
             )}
           </Section>
 
           {/* House rules: typed, uploaded as a document, or both — one section */}
           <Section
-            title="House rules"
+            title={t("House rules")}
             description={`Type them here, upload a signed rules document, or both. Tenants see them on their dashboard.`}
           >
             <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>
-              Written rules
+              {t("Written rules")}
             </Typography>
             <TextField
               fullWidth
@@ -1144,10 +1153,10 @@ export default function PropertyDetails() {
 
             <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mt: 3, mb: 1 }}>
               <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                Rule documents
+                {t("Rule documents")}
               </Typography>
               <Typography variant="caption" color="text.secondary">
-                PDF or Word, up to {MAX_DOC_MB} MB each
+                {t("PDF or Word, up to")}{" "}{MAX_DOC_MB}{" "}{t("MB each")}
               </Typography>
             </Box>
             {/* Drop zone / button */}
@@ -1177,10 +1186,10 @@ export default function PropertyDetails() {
               <CloudUploadOutlinedIcon sx={{ color: "primary.main" }} />
               <Box sx={{ minWidth: 0 }}>
                 <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                  <Box component="span" sx={{ display: { xs: "inline", md: "none" } }}>Tap to upload</Box>
-                  <Box component="span" sx={{ display: { xs: "none", md: "inline" } }}>Click or drop files here</Box>
+                  <Box component="span" sx={{ display: { xs: "inline", md: "none" } }}>{t("Tap to upload")}</Box>
+                  <Box component="span" sx={{ display: { xs: "none", md: "inline" } }}>{t("Click or drop files here")}</Box>
                 </Typography>
-                <Typography variant="caption" color="text.secondary">PDF, DOC or DOCX</Typography>
+                <Typography variant="caption" color="text.secondary">{t("PDF, DOC or DOCX")}</Typography>
               </Box>
               <input
                 type="file"
@@ -1204,11 +1213,11 @@ export default function PropertyDetails() {
                           <CloseIcon fontSize="small" />
                         </IconButton>
                       ) : (
-                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>Uploading...</Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>{t("Uploading...")}</Typography>
                       )}
                     </Box>
                     {u.error ? (
-                      <Typography variant="caption" color="error">{u.error}. Check your connection and try again.</Typography>
+                      <Typography variant="caption" color="error">{u.error}{t(". Check your connection and try again.")}</Typography>
                     ) : (
                       <LinearProgress sx={{ mt: 1, height: 5, borderRadius: 3 }} />
                     )}
@@ -1239,7 +1248,7 @@ export default function PropertyDetails() {
                           <Typography className="kk-file-name" variant="body2" noWrap sx={{ fontWeight: 700, transition: "color .15s" }}>{file.name}</Typography>
                           <Typography variant="caption" color="text.secondary" noWrap component="div">
                             {meta}
-                            {isNew && <Box component="span" sx={{ color: "warning.main", fontWeight: 700 }}>{meta ? " · " : ""}Not saved yet</Box>}
+                            {isNew && <Box component="span" sx={{ color: "warning.main", fontWeight: 700 }}>{meta ? " · " : ""}{t("Not saved yet")}</Box>}
                           </Typography>
                         </Box>
                       </Box>
@@ -1258,7 +1267,7 @@ export default function PropertyDetails() {
       {/* TAB 3: AMENITIES — one list of tap-to-toggle chips */}
       {tabValue === 3 && (
         <Paper elevation={0} sx={{ ...cardSx, px: { xs: 2, sm: 3.5 } }}>
-          <Section first title="Amenities & facilities" description={`Tap to turn on or off. ${formData.amenities.length} selected.`}>
+          <Section first title={t("Amenities & facilities")} description={`Tap to turn on or off. ${formData.amenities.length} selected.`}>
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1 }}>
               {[...DEFAULT_AMENITIES, ...formData.amenities.filter((a) => !DEFAULT_AMENITIES.includes(a))].map((amenity) => {
                 const selected = formData.amenities.includes(amenity);
@@ -1278,12 +1287,12 @@ export default function PropertyDetails() {
             </Box>
           </Section>
 
-          <Section title="Add your own" description="Anything not in the list above.">
+          <Section title={t("Add your own")} description="Anything not in the list above.">
             <Box sx={{ display: "flex", gap: 1 }}>
               <TextField
                 fullWidth
                 size="small"
-                placeholder="e.g., Solar power, Swimming pool"
+                placeholder={t("e.g., Solar power, Swimming pool")}
                 value={customAmenityInput}
                 onChange={(e) => setCustomAmenityInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -1296,7 +1305,7 @@ export default function PropertyDetails() {
                 slotProps={{ htmlInput: { "aria-label": "New amenity" } }}
               />
               <Button variant="outlined" startIcon={<AddIcon />} onClick={handleAddCustomAmenity} sx={{ whiteSpace: "nowrap", fontWeight: 700, borderRadius: R.sm }}>
-                Add
+                {t("Add")}
               </Button>
             </Box>
           </Section>
@@ -1305,14 +1314,14 @@ export default function PropertyDetails() {
 
       {/* Dialog: Add New Room */}
       <Dialog open={openAddRoomModal} onClose={() => setOpenAddRoomModal(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: R.lg } } }}>
-        <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>Add new room</DialogTitle>
+        <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>{t("Add new room")}</DialogTitle>
         <DialogContent dividers>
           <Box sx={{ ...fieldStack, pt: 1 }}>
             <TextField
               fullWidth
               autoFocus
-              label="Room name / number"
-              placeholder="e.g. Room 101"
+              label={t("Room name / number")}
+              placeholder={t("e.g. Room 101")}
               value={newRoomData.roomName}
               onChange={(e) => setNewRoomData(prev => ({ ...prev, roomName: e.target.value }))}
               sx={fieldSx}
@@ -1321,7 +1330,7 @@ export default function PropertyDetails() {
               <TextField
                 fullWidth
                 type="number"
-                label="Floor"
+                label={t("Floor")}
                 value={newRoomData.floor}
                 onChange={(e) => setNewRoomData(prev => ({ ...prev, floor: Math.max(1, Number(e.target.value)) }))}
                 sx={fieldSx}
@@ -1330,7 +1339,7 @@ export default function PropertyDetails() {
               <TextField
                 fullWidth
                 type="number"
-                label="Beds"
+                label={t("Beds")}
                 value={newRoomData.capacity}
                 onChange={(e) => setNewRoomData(prev => ({ ...prev, capacity: Math.max(1, Number(e.target.value)) }))}
                 sx={fieldSx}
@@ -1340,7 +1349,7 @@ export default function PropertyDetails() {
             <TextField
               fullWidth
               type="number"
-              label="Monthly rate per bed"
+              label={t("Monthly rate per bed")}
               value={newRoomData.monthlyRatePerBed}
               onChange={(e) => setNewRoomData(prev => ({ ...prev, monthlyRatePerBed: Math.max(0, Number(e.target.value)) }))}
               sx={fieldSx}
@@ -1352,23 +1361,23 @@ export default function PropertyDetails() {
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setOpenAddRoomModal(false)} sx={{ fontWeight: 700 }}>Cancel</Button>
-          <Button variant="contained" onClick={handleCreateRoom} sx={{ fontWeight: 700, borderRadius: R.sm, boxShadow: "none" }}>Add room</Button>
+          <Button onClick={() => setOpenAddRoomModal(false)} sx={{ fontWeight: 700 }}>{t("Cancel")}</Button>
+          <Button variant="contained" onClick={handleCreateRoom} sx={{ fontWeight: 700, borderRadius: R.sm, boxShadow: "none" }}>{t("Add room")}</Button>
         </DialogActions>
       </Dialog>
 
       {/* Dialog: confirm room delete */}
       <Dialog open={roomToDelete !== null} onClose={() => setRoomToDelete(null)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: R.lg } } }}>
-        <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>Delete {roomToDelete !== null ? `"${roomName(formData.rooms[roomToDelete])}"` : "room"}?</DialogTitle>
+        <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>{t("Delete")}{" "}{roomToDelete !== null ? `"${roomName(formData.rooms[roomToDelete])}"` : "room"}?</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
             {roomToDelete !== null && Number(formData.rooms[roomToDelete]?.occupiedBeds) > 0
-              ? "This room has tenants assigned, so it can't be deleted. Move or remove the tenants first."
-              : "The room is removed from this form. You can still undo it by reloading the page before you save."}
+              ? t("This room has tenants assigned, so it can't be deleted. Move or remove the tenants first.")
+              : t("The room is removed from this form. You can still undo it by reloading the page before you save.")}
           </Typography>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
-          <Button onClick={() => setRoomToDelete(null)} sx={{ fontWeight: 700 }}>Keep room</Button>
+          <Button onClick={() => setRoomToDelete(null)} sx={{ fontWeight: 700 }}>{t("Keep room")}</Button>
           <Button
             color="error"
             variant="contained"
@@ -1379,23 +1388,23 @@ export default function PropertyDetails() {
             }}
             sx={{ fontWeight: 700, borderRadius: R.sm, boxShadow: "none" }}
           >
-            Delete
+            {t("Delete")}
           </Button>
         </DialogActions>
       </Dialog>
 
       {/* Dialog: leave with unsaved changes */}
       <Dialog open={leaveOpen} onClose={() => setLeaveOpen(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: R.lg, m: 2, width: "calc(100% - 32px)" } } }}>
-        <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>Leave without saving?</DialogTitle>
+        <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>{t("Leave without saving?")}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary">
-            {isUploading ? "A file is still uploading. " : ""}Your changes on this page haven't been saved and will be lost.
+            {isUploading ? t("A file is still uploading. ") : ""}{t("Your changes on this page haven't been saved and will be lost.")}
           </Typography>
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1, "& .MuiButton-root": { minHeight: 44 } }}>
-          <Button onClick={() => setLeaveOpen(false)} sx={{ fontWeight: 700 }}>Stay</Button>
+          <Button onClick={() => setLeaveOpen(false)} sx={{ fontWeight: 700 }}>{t("Stay")}</Button>
           <Button color="error" variant="contained" onClick={() => navigate(`/owner/properties/${id}`)} sx={{ fontWeight: 700, borderRadius: R.sm, boxShadow: "none" }}>
-            Leave
+            {t("Leave")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1422,7 +1431,7 @@ export default function PropertyDetails() {
         >
           <Box sx={{ flex: 1, ...row, gap: 1 }}>
             <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "warning.main", flexShrink: 0 }} />
-            <Typography variant="body2" sx={{ fontWeight: 700 }}>Unsaved changes</Typography>
+            <Typography variant="body2" sx={{ fontWeight: 700 }}>{t("Unsaved changes")}</Typography>
           </Box>
           <Button
             variant="contained"
@@ -1431,7 +1440,7 @@ export default function PropertyDetails() {
             disabled={saving || isUploading}
             sx={{ fontWeight: 700, borderRadius: R.sm, flexShrink: 0, boxShadow: "none", "&.Mui-disabled": { bgcolor: "rgba(255,255,255,.15)", color: "rgba(255,255,255,.6)" } }}
           >
-            {isUploading ? "Uploading..." : saveLabel}
+            {isUploading ? t("Uploading...") : saveLabel}
           </Button>
         </Box>
       )}

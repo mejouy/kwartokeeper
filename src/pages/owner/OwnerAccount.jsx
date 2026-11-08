@@ -30,6 +30,9 @@ import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlined";
 import MailOutlineIcon from "@mui/icons-material/MailOutlined";
 import LockOutlinedIcon from "@mui/icons-material/LockOutlined";
 import VerifiedUserOutlinedIcon from "@mui/icons-material/VerifiedUserOutlined";
+import BackupOutlinedIcon from "@mui/icons-material/BackupOutlined";
+import BackupButton from "../../components/BackupButton";
+import { downloadOwnerBackup } from "../../utils/backup";
 import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
 import StorefrontOutlinedIcon from "@mui/icons-material/StorefrontOutlined";
 import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
@@ -49,6 +52,7 @@ import { uploadFileToCloudinary } from "../../utils/cloudinary";
 import { formatReceiptNo } from "../../utils/receipt";
 import { resubmissionPatch } from "../../utils/ownerAccess";
 import FilePreviewDialog from "../../components/FilePreviewDialog";
+import { t } from "../../i18n";
 
 const HEAD = '"Inter", sans-serif';
 const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
@@ -58,28 +62,29 @@ const panelSx = { bgcolor: "background.default", border: "1px solid", borderColo
 const fieldSx = { "& .MuiOutlinedInput-root": { borderRadius: R.sm } };
 
 const STATUS = {
-  pending: { label: "Under review", tone: "warning" },
-  approved: { label: "Verified", tone: "success" },
-  verified: { label: "Verified", tone: "success" },
-  rejected: { label: "Needs attention", tone: "error" },
+  pending: { label: t("Under review"), tone: "warning" },
+  approved: { label: t("Verified"), tone: "success" },
+  verified: { label: t("Verified"), tone: "success" },
+  rejected: { label: t("Needs attention"), tone: "error" },
 };
 
 const DOC_SLOTS = [
-  { key: "idUrl", label: "Government ID", hint: "A clear photo or PDF of a valid ID (PhilID, driver's license, passport...)." },
-  { key: "clearanceUrl", label: "Proof of ownership", hint: "Land title, tax declaration, lease / authorization letter, or a business permit." },
+  { key: "idUrl", label: t("Government ID"), hint: t("A clear photo or PDF of a valid ID (PhilID, driver's license, passport...).") },
+  { key: "clearanceUrl", label: t("Proof of ownership"), hint: t("Land title, tax declaration, lease / authorization letter, or a business permit.") },
 ];
 
 const VAT_OPTIONS = [
-  { value: "", label: "Not shown on receipts" },
-  { value: "non_vat", label: "NON-VAT Registered" },
-  { value: "vat", label: "VAT Registered" },
+  { value: "", label: t("Not shown on receipts") },
+  { value: "non_vat", label: t("NON-VAT Registered") },
+  { value: "vat", label: t("VAT Registered") },
 ];
 
 const SECTIONS = [
-  { id: "profile", label: "Profile", Icon: PersonOutlineIcon },
-  { id: "business", label: "Business & receipts", Icon: StorefrontOutlinedIcon },
-  { id: "security", label: "Sign-in & security", Icon: ShieldOutlinedIcon },
-  { id: "verification", label: "Verification", Icon: VerifiedUserOutlinedIcon },
+  { id: "profile", label: t("Profile"), Icon: PersonOutlineIcon },
+  { id: "business", label: t("Business & receipts"), Icon: StorefrontOutlinedIcon },
+  { id: "security", label: t("Sign-in & security"), Icon: ShieldOutlinedIcon },
+  { id: "data", label: t("Your data"), Icon: BackupOutlinedIcon },
+  { id: "verification", label: t("Verification"), Icon: VerifiedUserOutlinedIcon },
 ];
 
 const initials = (name) =>
@@ -253,7 +258,7 @@ const friendlyAuthError = (err) => {
 function DocCard({ slot, current, file, onPick, onUndo, onView }) {
   const [imgFailed, setImgFailed] = useState(false);
   const showThumb = current && !file && !isPdfUrl(current) && !imgFailed;
-  const state = file ? { label: "New file ready", tone: "info" } : current ? { label: "On file", tone: "success" } : { label: "Missing", tone: "warning" };
+  const state = file ? { label: t("New file ready"), tone: "info" } : current ? { label: t("On file"), tone: "success" } : { label: t("Missing"), tone: "warning" };
 
   return (
     <Box sx={{ border: "1px solid", borderColor: file ? "primary.main" : "divider", borderRadius: R.md, p: 1.5, bgcolor: file ? (t) => alpha(t.palette.primary.main, 0.03) : "transparent" }}>
@@ -286,18 +291,18 @@ function DocCard({ slot, current, file, onPick, onUndo, onView }) {
       </Box>
 
       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 1.5 }}>
-        <Button component="label" variant="outlined" size="small" startIcon={<UploadFileIcon />} sx={{ fontWeight: 700, minHeight: 40, borderRadius: R.sm, flex: { xs: 1, sm: "none" } }}>
-          {current || file ? "Replace" : "Upload"}
+        <Button component="label" role={undefined} variant="outlined" size="small" startIcon={<UploadFileIcon />} sx={{ fontWeight: 700, minHeight: 40, borderRadius: R.sm, flex: { xs: 1, sm: "none" } }}>
+          {current || file ? t("Replace") : t("Upload")}
           <input type="file" hidden accept="image/*,.pdf" onChange={(e) => { onPick(e.target.files?.[0] || null); e.target.value = ""; }} />
         </Button>
         {current && !file && (
           <Button size="small" onClick={onView} sx={{ fontWeight: 700, minHeight: 40, flex: { xs: 1, sm: "none" } }}>
-            View
+            {t("View")}
           </Button>
         )}
         {file && (
           <Button size="small" color="inherit" onClick={onUndo} sx={{ fontWeight: 700, minHeight: 40, flex: { xs: 1, sm: "none" } }}>
-            Undo
+            {t("Undo")}
           </Button>
         )}
       </Box>
@@ -490,9 +495,9 @@ export default function OwnerAccount() {
 
   // ---------- password ----------
   const pwChecks = [
-    { ok: newPw.length >= 8, label: "At least 8 characters" },
-    { ok: newPw.length > 0 && newPw !== curPw, label: "Different from your current password" },
-    { ok: confirmPw.length > 0 && confirmPw === newPw, label: "Both new passwords match" },
+    { ok: newPw.length >= 8, label: t("At least 8 characters") },
+    { ok: newPw.length > 0 && newPw !== curPw, label: t("Different from your current password") },
+    { ok: confirmPw.length > 0 && confirmPw === newPw, label: t("Both new passwords match") },
   ];
 
   const changePassword = async () => {
@@ -573,7 +578,7 @@ export default function OwnerAccount() {
   }
 
   if (!owner) {
-    return <Alert severity="error" sx={{ borderRadius: R.md }}>Couldn't load your account. Please refresh the page.</Alert>;
+    return <Alert severity="error" sx={{ borderRadius: R.md }}>{t("Couldn't load your account. Please refresh the page.")}</Alert>;
   }
 
   const statusKey = String(owner.approvalStatus || "pending").toLowerCase();
@@ -587,17 +592,17 @@ export default function OwnerAccount() {
   const showBizErr = (k) => (bizTouched ? bizErrors[k] : k === "receiptNextNo" || k === "receiptPrefix" ? bizErrors[k] : "");
 
   const statusNote = {
-    pending: { Icon: HourglassTopIcon, severity: "warning", text: "Your documents are being reviewed by our admin team. You'll get a notification when it's done." },
-    approved: { Icon: CheckCircleOutlinedIcon, severity: "success", text: "Your account is verified. Replacing a document sends your account back for review." },
-    verified: { Icon: CheckCircleOutlinedIcon, severity: "success", text: "Your account is verified. Replacing a document sends your account back for review." },
-    rejected: { Icon: ErrorOutlineIcon, severity: "error", text: "Your last submission was declined. Replace the documents below and submit them again." },
+    pending: { Icon: HourglassTopIcon, severity: "warning", text: t("Your documents are being reviewed by our admin team. You'll get a notification when it's done.") },
+    approved: { Icon: CheckCircleOutlinedIcon, severity: "success", text: t("Your account is verified. Replacing a document sends your account back for review.") },
+    verified: { Icon: CheckCircleOutlinedIcon, severity: "success", text: t("Your account is verified. Replacing a document sends your account back for review.") },
+    rejected: { Icon: ErrorOutlineIcon, severity: "error", text: t("Your last submission was declined. Replace the documents below and submit them again.") },
   }[statusKey] || null;
 
   const tiles = [
-    { label: "Verification", icon: <VerifiedUserOutlinedIcon />, value: status.label, tone: status.tone, sub: `${docsOnFile} of ${DOC_SLOTS.length} documents on file` },
-    { label: "Next receipt", icon: <ReceiptLongOutlinedIcon />, value: formatReceiptNo(owner.receiptPrefix, minNextNo), sub: owner.registeredName ? `Issued as ${owner.registeredName}` : "Add business details below" , tone: owner.registeredName ? null : "warning" },
-    { label: "Sign-in", icon: <LockOutlinedIcon />, value: hasPassword ? "Email & password" : "Outside account", sub: user?.email || owner.email || "" },
-    { label: "Member since", icon: <PersonOutlineIcon />, value: memberSince || "—", sub: owner.phoneNumber || owner.phone || "No mobile number" },
+    { label: t("Verification"), icon: <VerifiedUserOutlinedIcon />, value: status.label, tone: status.tone, sub: `${docsOnFile} of ${DOC_SLOTS.length} documents on file` },
+    { label: t("Next receipt"), icon: <ReceiptLongOutlinedIcon />, value: formatReceiptNo(owner.receiptPrefix, minNextNo), sub: owner.registeredName ? `Issued as ${owner.registeredName}` : "Add business details below" , tone: owner.registeredName ? null : "warning" },
+    { label: t("Sign-in"), icon: <LockOutlinedIcon />, value: hasPassword ? "Email & password" : "Outside account", sub: user?.email || owner.email || "" },
+    { label: t("Member since"), icon: <PersonOutlineIcon />, value: memberSince || "—", sub: owner.phoneNumber || owner.phone || "No mobile number" },
   ];
 
   const jump = (id) => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -626,7 +631,7 @@ export default function OwnerAccount() {
               <Pill label={status.label} tone={status.tone} icon={status.tone === "success" ? <CheckCircleOutlinedIcon /> : status.tone === "error" ? <ErrorOutlineIcon /> : <HourglassTopIcon />} />
             </Box>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, overflowWrap: "anywhere" }}>
-              Property owner · {user?.email || owner.email}
+              {t("Property owner ·")}{" "}{user?.email || owner.email}
             </Typography>
           </Box>
         </Box>
@@ -659,7 +664,7 @@ export default function OwnerAccount() {
         {/* ───── Section nav: sticky list on desktop, scrolling pills on phones ───── */}
         <Box
           component="nav"
-          aria-label="Account sections"
+          aria-label={t("Account sections")}
           sx={{
             position: { md: "sticky" },
             top: { md: 96 },
@@ -710,24 +715,24 @@ export default function OwnerAccount() {
             <Section
               id="profile"
               icon={PersonOutlineIcon}
-              title="Profile"
-              subtitle="How you appear to your tenants and caretakers."
+              title={t("Profile")}
+              subtitle={t("How you appear to your tenants and caretakers.")}
               footer={
                 <>
                   {profileDirty && (
                     <Button color="inherit" onClick={() => { setName(owner.fullName || owner.name || ""); setPhone(owner.phoneNumber || owner.phone || owner.mobile || ""); setProfileTouched(false); }} sx={{ fontWeight: 700 }}>
-                      Discard
+                      {t("Discard")}
                     </Button>
                   )}
                   <SaveButton type="submit" busy={savingProfile} disabled={!profileDirty}>
-                    {savingProfile ? "Saving…" : "Save profile"}
+                    {savingProfile ? t("Saving…") : t("Save profile")}
                   </SaveButton>
                 </>
               }
             >
               <Box sx={twoCols}>
                 <TextField
-                  label="Full name"
+                  label={t("Full name")}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   fullWidth
@@ -738,7 +743,7 @@ export default function OwnerAccount() {
                   sx={fieldSx}
                 />
                 <TextField
-                  label="Mobile number"
+                  label={t("Mobile number")}
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   fullWidth
@@ -758,17 +763,17 @@ export default function OwnerAccount() {
             <Section
               id="business"
               icon={StorefrontOutlinedIcon}
-              title="Business & receipts"
-              subtitle="Printed at the top of every rent receipt. Match your BIR-registered receipt booklet."
+              title={t("Business & receipts")}
+              subtitle={t("Printed at the top of every rent receipt. Match your BIR-registered receipt booklet.")}
               footer={
                 <>
                   {bizDirty && (
                     <Button color="inherit" onClick={() => { setBiz(bizFrom(owner)); setBizTouched(false); }} sx={{ fontWeight: 700 }}>
-                      Discard
+                      {t("Discard")}
                     </Button>
                   )}
                   <SaveButton type="submit" busy={savingBiz} disabled={!bizDirty}>
-                    {savingBiz ? "Saving…" : "Save business details"}
+                    {savingBiz ? t("Saving…") : t("Save business details")}
                   </SaveButton>
                 </>
               }
@@ -776,12 +781,12 @@ export default function OwnerAccount() {
               <Box sx={formSx}>
                 <Box sx={twoCols}>
                   <TextField
-                    label="Registered name"
+                    label={t("Registered name")}
                     value={biz.registeredName}
                     onChange={setBizField("registeredName")}
                     fullWidth
                     placeholder={displayName}
-                    helperText="Your name or business name as registered. Leave empty to use your profile name."
+                    helperText={t("Your name or business name as registered. Leave empty to use your profile name.")}
                     sx={fieldSx}
                   />
                   <TextField
@@ -797,7 +802,7 @@ export default function OwnerAccount() {
                   />
                 </Box>
                 <TextField
-                  label="Business address"
+                  label={t("Business address")}
                   value={biz.businessAddress}
                   onChange={setBizField("businessAddress")}
                   fullWidth
@@ -807,7 +812,7 @@ export default function OwnerAccount() {
                   helperText={showBizErr("businessAddress") || "Optional"}
                   sx={fieldSx}
                 />
-                <TextField select label="VAT status" value={biz.vatStatus} onChange={setBizField("vatStatus")} fullWidth sx={{ ...fieldSx, maxWidth: { sm: "calc(50% - 8px)" } }}>
+                <TextField select label={t("VAT status")} value={biz.vatStatus} onChange={setBizField("vatStatus")} fullWidth sx={{ ...fieldSx, maxWidth: { sm: "calc(50% - 8px)" } }}>
                   {VAT_OPTIONS.map((o) => (
                     <MenuItem key={o.value || "none"} value={o.value}>
                       {o.label}
@@ -820,28 +825,28 @@ export default function OwnerAccount() {
                   <Box sx={{ ...row, justifyContent: "space-between", gap: 1.5, flexWrap: "wrap", mb: 1.5 }}>
                     <Box sx={{ ...row, gap: 1 }}>
                       <ReceiptLongOutlinedIcon sx={{ fontSize: 19, color: "text.secondary" }} />
-                      <Typography sx={{ fontWeight: 800, fontSize: "0.95rem" }}>Receipt numbers</Typography>
+                      <Typography sx={{ fontWeight: 800, fontSize: "0.95rem" }}>{t("Receipt numbers")}</Typography>
                     </Box>
                     <Box sx={{ ...row, gap: 0.75 }}>
-                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>Next receipt</Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>{t("Next receipt")}</Typography>
                       <Box component="span" sx={{ px: 1.25, py: 0.4, borderRadius: R.sm, bgcolor: "#fff", border: "1px dashed", borderColor: "divider", fontFamily: "ui-monospace, Menlo, Consolas, monospace", fontWeight: 800, fontSize: 14 }}>
-                        No. {receiptPreview}
+                        {t("No.")}{" "}{receiptPreview}
                       </Box>
                     </Box>
                   </Box>
                   <Box sx={twoCols}>
                     <TextField
-                      label="Prefix"
+                      label={t("Prefix")}
                       value={biz.receiptPrefix}
                       onChange={setBizField("receiptPrefix")}
                       fullWidth
-                      placeholder="e.g. OR-"
+                      placeholder={t("e.g. OR-")}
                       error={!!showBizErr("receiptPrefix")}
                       helperText={showBizErr("receiptPrefix") || "Optional"}
                       sx={{ ...fieldSx, "& .MuiOutlinedInput-root": { borderRadius: R.sm, bgcolor: "background.default" } }}
                     />
                     <TextField
-                      label="Next number"
+                      label={t("Next number")}
                       value={biz.receiptNextNo}
                       onChange={(e) => setBiz((b) => ({ ...b, receiptNextNo: e.target.value.replace(/\D/g, "") }))}
                       fullWidth
@@ -853,7 +858,7 @@ export default function OwnerAccount() {
                   </Box>
                 </Box>
                 <Typography variant="caption" color="text.secondary">
-                  Changes apply to new receipts. Receipts already issued keep the details they were printed with.
+                  {t("Changes apply to new receipts. Receipts already issued keep the details they were printed with.")}
                 </Typography>
               </Box>
             </Section>
@@ -861,17 +866,17 @@ export default function OwnerAccount() {
 
           {/* ───── Sign-in & security ───── */}
           {hasPassword ? (
-            <Section id="security" icon={ShieldOutlinedIcon} title="Sign-in & security" subtitle={`You sign in with ${user.email}`}>
+            <Section id="security" icon={ShieldOutlinedIcon} title={t("Sign-in & security")} subtitle={`You sign in with ${user.email}`}>
               <SubHeading icon={MailOutlineIcon} first>
-                Change email
+                {t("Change email")}
               </SubHeading>
               {emailSent ? (
                 <Box sx={formSx}>
                   <Alert severity="success" sx={{ borderRadius: R.sm }}>
-                    We sent a confirmation link to your new address. Open it to finish the change. Until then, keep logging in with your current email.
+                    {t("We sent a confirmation link to your new address. Open it to finish the change. Until then, keep logging in with your current email.")}
                   </Alert>
                   <Button onClick={() => setEmailSent(false)} sx={{ fontWeight: 700, alignSelf: "flex-start" }}>
-                    Use a different email
+                    {t("Use a different email")}
                   </Button>
                 </Box>
               ) : (
@@ -880,7 +885,7 @@ export default function OwnerAccount() {
                   {emailError && <Alert severity="error" sx={{ borderRadius: R.sm }}>{emailError}</Alert>}
                   <Box sx={twoCols}>
                     <TextField
-                      label="New email"
+                      label={t("New email")}
                       type="email"
                       value={newEmail}
                       onChange={(e) => setNewEmail(e.target.value)}
@@ -889,24 +894,24 @@ export default function OwnerAccount() {
                       slotProps={{ htmlInput: { inputMode: "email", autoCapitalize: "none" } }}
                       sx={fieldSx}
                     />
-                    <PasswordField label="Current password" value={emailPassword} onChange={setEmailPassword} autoComplete="current-password" helperText="Needed to confirm it's you." />
+                    <PasswordField label={t("Current password")} value={emailPassword} onChange={setEmailPassword} autoComplete="current-password" helperText={t("Needed to confirm it's you.")} />
                   </Box>
                   <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
                     <SaveButton type="submit" busy={savingEmail} disabled={!newEmail || !emailPassword} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 44, px: 2.5, width: { xs: "100%", sm: "auto" } }}>
-                      {savingEmail ? "Sending…" : "Send confirmation link"}
+                      {savingEmail ? t("Sending…") : t("Send confirmation link")}
                     </SaveButton>
                   </Box>
                 </Box>
               )}
 
-              <SubHeading icon={LockOutlinedIcon}>Change password</SubHeading>
+              <SubHeading icon={LockOutlinedIcon}>{t("Change password")}</SubHeading>
               <Box component="form" noValidate onSubmit={onSubmit(changePassword)} sx={formSx}>
                 <input type="text" name="username" autoComplete="username" value={user.email} readOnly hidden />
                 {pwError && <Alert severity="error" sx={{ borderRadius: R.sm }}>{pwError}</Alert>}
-                <PasswordField label="Current password" value={curPw} onChange={setCurPw} autoComplete="current-password" />
+                <PasswordField label={t("Current password")} value={curPw} onChange={setCurPw} autoComplete="current-password" />
                 <Box sx={twoCols}>
-                  <PasswordField label="New password" value={newPw} onChange={setNewPw} autoComplete="new-password" />
-                  <PasswordField label="Confirm new password" value={confirmPw} onChange={setConfirmPw} autoComplete="new-password" />
+                  <PasswordField label={t("New password")} value={newPw} onChange={setNewPw} autoComplete="new-password" />
+                  <PasswordField label={t("Confirm new password")} value={confirmPw} onChange={setConfirmPw} autoComplete="new-password" />
                 </Box>
                 <Box sx={{ display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: { sm: "center" }, justifyContent: "space-between", gap: 1.5 }}>
                   <Box component="ul" sx={{ listStyle: "none", m: 0, p: 0, display: "flex", flexDirection: "column", gap: 0.4 }}>
@@ -920,27 +925,36 @@ export default function OwnerAccount() {
                     ))}
                   </Box>
                   <SaveButton type="submit" busy={savingPw} disabled={!curPw || !pwChecks.every((c) => c.ok)} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 44, px: 2.5, width: { xs: "100%", sm: "auto" }, flexShrink: 0 }}>
-                    {savingPw ? "Changing…" : "Change password"}
+                    {savingPw ? t("Changing…") : t("Change password")}
                   </SaveButton>
                 </Box>
               </Box>
             </Section>
           ) : (
             <Alert severity="info" sx={{ borderRadius: R.md }}>
-              You sign in with an outside account, so your email and password are managed there.
+              {t("You sign in with an outside account, so your email and password are managed there.")}
             </Alert>
           )}
+
+          {/* ───── Your data (backup) ───── */}
+          <Section id="data" icon={BackupOutlinedIcon} title={t("Your data")} subtitle={t("Keep your own copy of everything in KwartoKeeper.")}>
+            <BackupButton
+              onDownload={() => downloadOwnerBackup(user.uid)}
+              label={t("Download a backup")}
+              note="One file with your properties, tenants, caretakers, payments, fees, repairs, curfew records and caretaker activity. Make one every month or so. For spreadsheets you can open in Excel, use Reports."
+            />
+          </Section>
 
           {/* ───── Verification ───── */}
           <Section
             id="verification"
             icon={VerifiedUserOutlinedIcon}
-            title="Verification documents"
+            title={t("Verification documents")}
             subtitle={docs.submittedAt ? `Last submitted ${formatDate(docs.submittedAt)}` : "What our admin team checks to verify you."}
             footer={
               chosen.length > 0 ? (
                 <SaveButton onClick={askToSubmitDocs}>
-                  Submit {chosen.length === 1 ? "document" : `${chosen.length} documents`} for review
+                  {t("Submit")}{" "}{chosen.length === 1 ? "document" : `${chosen.length} documents`}{" "}{t("for review")}
                 </SaveButton>
               ) : null
             }
@@ -949,7 +963,7 @@ export default function OwnerAccount() {
               <Alert severity={statusNote.severity} icon={<statusNote.Icon fontSize="small" />} sx={{ borderRadius: R.sm, mb: 2 }}>
                 {statusNote.text}
                 {statusKey === "rejected" && owner.rejectionReason && (
-                  <Box component="div" sx={{ mt: 0.5, fontWeight: 700 }}>Reason: {owner.rejectionReason}</Box>
+                  <Box component="div" sx={{ mt: 0.5, fontWeight: 700 }}>{t("Reason:")}{" "}{owner.rejectionReason}</Box>
                 )}
               </Alert>
             )}
@@ -975,18 +989,18 @@ export default function OwnerAccount() {
       <FilePreviewDialog file={previewFile} onClose={() => setPreviewFile(null)} />
 
       <Dialog open={confirmDocs} onClose={() => !savingDocs && setConfirmDocs(false)} fullWidth maxWidth="xs" slotProps={{ paper: { sx: { borderRadius: R.xl } } }}>
-        <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>Submit for review?</DialogTitle>
+        <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>{t("Submit for review?")}</DialogTitle>
         <DialogContent>
           <DialogContentText>
             {wasApproved
-              ? "Your account will go back to \"Under review\" until our admin team approves the new documents. You can still use the dashboard, but adding properties, tenants and caretakers is locked in the meantime."
-              : "Our admin team will review your updated documents."}
+              ? t("Your account will go back to \"Under review\" until our admin team approves the new documents. You can still use the dashboard, but adding properties, tenants and caretakers is locked in the meantime.")
+              : t("Our admin team will review your updated documents.")}
           </DialogContentText>
         </DialogContent>
         <DialogActions sx={{ px: 3, pb: 2, gap: 1 }}>
-          <Button onClick={() => setConfirmDocs(false)} color="inherit" disabled={savingDocs} sx={{ fontWeight: 700 }}>Cancel</Button>
+          <Button onClick={() => setConfirmDocs(false)} color="inherit" disabled={savingDocs} sx={{ fontWeight: 700 }}>{t("Cancel")}</Button>
           <SaveButton onClick={submitDocs} busy={savingDocs}>
-            {savingDocs ? "Submitting…" : "Submit"}
+            {savingDocs ? t("Submitting…") : t("Submit")}
           </SaveButton>
         </DialogActions>
       </Dialog>

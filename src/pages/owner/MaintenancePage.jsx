@@ -52,6 +52,7 @@ import {
   notifyMaintenanceCancelled,
 } from "../../services/notificationService";
 import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
+import { t } from "../../i18n";
 
 const HEAD = '"Inter", sans-serif';
 const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
@@ -71,12 +72,12 @@ const isClosed = (t) => ["Resolved", "Cancelled"].includes(statusOf(t));
 
 // Views. "Active" is the default so finished work doesn't bury what needs attention.
 const VIEWS = [
-  { key: "active", label: "Active", test: (t) => !isClosed(t) },
-  { key: "pending", label: "Pending", test: (t) => statusOf(t) === "Pending" },
-  { key: "progress", label: "In progress", test: (t) => statusOf(t) === "In Progress" },
-  { key: "resolved", label: "Resolved", test: (t) => statusOf(t) === "Resolved" },
-  { key: "cancelled", label: "Cancelled", test: (t) => statusOf(t) === "Cancelled" },
-  { key: "all", label: "All", test: () => true },
+  { key: "active", label: t("Active"), test: (t) => !isClosed(t) },
+  { key: "pending", label: t("Pending"), test: (t) => statusOf(t) === "Pending" },
+  { key: "progress", label: t("In progress"), test: (t) => statusOf(t) === "In Progress" },
+  { key: "resolved", label: t("Resolved"), test: (t) => statusOf(t) === "Resolved" },
+  { key: "cancelled", label: t("Cancelled"), test: (t) => statusOf(t) === "Cancelled" },
+  { key: "all", label: t("All"), test: () => true },
 ];
 
 const toDate = (v) => {
@@ -186,10 +187,10 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
       <Box sx={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 1.5, opacity: closed ? 0.75 : 1 }}>
         <Box sx={{ minWidth: 0, flex: 1 }}>
           <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.02rem", lineHeight: 1.3, overflowWrap: "anywhere" }}>
-            {ticket.title || "Untitled request"}
+            {ticket.title || t("Untitled request")}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, overflowWrap: "anywhere" }}>
-            {ticket.tenantName || "Unknown tenant"} · {ticket.propertyName || "Dormitory"} · Room {ticket.roomNumber || "N/A"}
+            {ticket.tenantName || t("Unknown tenant")} · {ticket.propertyName || t("Dormitory")}{" "}{t("· Room")}{" "}{ticket.roomNumber || "N/A"}
           </Typography>
         </Box>
         <Box sx={{ display: "flex", gap: 0.75, flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -237,14 +238,14 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
               </Typography>
               {longDescription && (
                 <Button size="small" onClick={() => setExpanded((v) => !v)} sx={{ mt: 0.25, ml: -0.75, fontWeight: 700 }}>
-                  {expanded ? "Show less" : "Show more"}
+                  {expanded ? t("Show less") : t("Show more")}
                 </Button>
               )}
             </Box>
           )}
           {ticket.photoUrl && (
-            <Box component="a" href={ticket.photoUrl} target="_blank" rel="noopener noreferrer" aria-label="Open the photo" sx={{ display: "block", flexShrink: 0 }}>
-              <Box component="img" src={ticket.photoUrl} alt="Photo attached to the request" loading="lazy" sx={{ display: "block", width: { xs: "100%", sm: 168 }, maxWidth: 360, height: { xs: 180, sm: 112 }, objectFit: "cover", borderRadius: R.sm, border: "1px solid", borderColor: "divider" }} />
+            <Box component="a" href={ticket.photoUrl} target="_blank" rel="noopener noreferrer" aria-label={t("Open the photo")} sx={{ display: "block", flexShrink: 0 }}>
+              <Box component="img" src={ticket.photoUrl} alt={t("Photo attached to the request")} loading="lazy" sx={{ display: "block", width: { xs: "100%", sm: 168 }, maxWidth: 360, height: { xs: 180, sm: 112 }, objectFit: "cover", borderRadius: R.sm, border: "1px solid", borderColor: "divider" }} />
             </Box>
           )}
         </Box>
@@ -255,7 +256,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
         <Box sx={{ mt: 1.5, p: 1.25, borderRadius: R.sm, bgcolor: (th) => alpha(th.palette.info.main, 0.07) }}>
           <Typography variant="caption" sx={{ ...row, gap: 0.5, fontWeight: 800, color: "info.dark" }}>
             <ForumOutlinedIcon sx={{ fontSize: 15 }} />
-            {followUps.length === 1 ? "1 update from the tenant" : `${followUps.length} updates from the tenant`}
+            {followUps.length === 1 ? t("1 update from the tenant") : `${followUps.length} updates from the tenant`}
           </Typography>
           {followUps.map((f, i) => (
             <Box key={i} sx={{ mt: 0.75, display: "flex", gap: 1, alignItems: "flex-start" }}>
@@ -270,8 +271,8 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
                 </Typography>
               </Box>
               {f.photoUrl && (
-                <Box component="a" href={f.photoUrl} target="_blank" rel="noopener noreferrer" aria-label="Open the photo" sx={{ display: "block", flexShrink: 0 }}>
-                  <Box component="img" src={f.photoUrl} alt="Photo added by the tenant" loading="lazy" sx={{ display: "block", width: 64, height: 64, objectFit: "cover", borderRadius: "8px", border: "1px solid", borderColor: "divider" }} />
+                <Box component="a" href={f.photoUrl} target="_blank" rel="noopener noreferrer" aria-label={t("Open the photo")} sx={{ display: "block", flexShrink: 0 }}>
+                  <Box component="img" src={f.photoUrl} alt={t("Photo added by the tenant")} loading="lazy" sx={{ display: "block", width: 64, height: 64, objectFit: "cover", borderRadius: "8px", border: "1px solid", borderColor: "divider" }} />
                 </Box>
               )}
             </Box>
@@ -281,7 +282,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
 
       {status === "Cancelled" && ticket.cancelReason && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, overflowWrap: "anywhere" }}>
-          <strong>Reason:</strong> {ticket.cancelReason}
+          <strong>{t("Reason:")}</strong> {ticket.cancelReason}
         </Typography>
       )}
 
@@ -296,7 +297,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
               minRows={2}
               maxRows={5}
               autoFocus
-              placeholder="e.g. waiting for parts, scheduled for Tuesday"
+              placeholder={t("e.g. waiting for parts, scheduled for Tuesday")}
               value={draft}
               onChange={(e) => setDraft(e.target.value.slice(0, MAX_REMARKS))}
               helperText={`${draft.length}/${MAX_REMARKS} · the tenant can see this`}
@@ -304,7 +305,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
             />
             <Box sx={{ ...row, justifyContent: "flex-end", gap: 1, mt: 0.5 }}>
               <Button size="small" color="inherit" onClick={() => setDraft(null)} disabled={isSaving} sx={{ fontWeight: 700 }}>
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button
                 size="small"
@@ -314,7 +315,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
                 disabled={isSaving || draft.trim() === savedRemarks}
                 sx={{ fontWeight: 700, minWidth: 72, borderRadius: "8px" }}
               >
-                {isSaving ? <CircularProgress size={16} color="inherit" /> : "Save"}
+                {isSaving ? <CircularProgress size={16} color="inherit" /> : t("Save")}
               </Button>
             </Box>
           </>
@@ -323,7 +324,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
             component="button"
             type="button"
             onClick={() => setDraft(savedRemarks)}
-            aria-label="Edit remarks"
+            aria-label={t("Edit remarks")}
             sx={{
               width: "100%",
               textAlign: "left",
@@ -338,7 +339,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
             }}
           >
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block" }}>
-              Your remarks · tap to edit
+              {t("Your remarks · tap to edit")}
             </Typography>
             <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
               {savedRemarks}
@@ -346,7 +347,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
           </Box>
         ) : (
           <Button size="small" startIcon={<NotesOutlinedIcon />} onClick={() => setDraft("")} sx={{ ml: -0.75, fontWeight: 700 }}>
-            Add remarks
+            {t("Add remarks")}
           </Button>
         )}
       </Box>
@@ -359,12 +360,12 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
           value={STATUS_OPTIONS.includes(status) ? status : null}
           disabled={busy}
           onChange={(e, value) => value && onStatusChange(ticket, value)}
-          aria-label="Ticket status"
+          aria-label={t("Ticket status")}
           sx={{ ...segmentedSx(status), width: { xs: "100%", sm: "auto" }, "& .MuiToggleButton-root": { ...segmentedSx(status)["& .MuiToggleButton-root"], flex: { xs: 1, sm: "none" } } }}
         >
           {STATUS_OPTIONS.map((opt) => (
             <ToggleButton key={opt} value={opt}>
-              {status === "Cancelled" && opt === "Pending" ? "Reopen" : opt}
+              {status === "Cancelled" && opt === "Pending" ? t("Reopen") : opt}
             </ToggleButton>
           ))}
         </ToggleButtonGroup>
@@ -373,7 +374,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
           {busy && <CircularProgress size={18} />}
           {!closed && (
             <Button size="small" color="error" startIcon={<CancelOutlinedIcon />} onClick={() => onCancel(ticket)} disabled={busy} sx={{ fontWeight: 700, minHeight: 36, textTransform: "none" }}>
-              Cancel request
+              {t("Cancel request")}
             </Button>
           )}
         </Box>
@@ -590,10 +591,10 @@ export default function MaintenancePage() {
       : "Nothing in this view.";
 
   const tiles = [
-    { label: "Open requests", icon: <BuildOutlinedIcon />, value: stats.open },
-    { label: "High priority", icon: <ReportProblemOutlinedIcon />, value: stats.highPriority, accent: stats.highPriority > 0 ? "error.main" : undefined },
-    { label: "In progress", icon: <EngineeringOutlinedIcon />, value: stats.inProgress, accent: stats.inProgress > 0 ? "info.dark" : undefined },
-    { label: "Resolved this month", icon: <TaskAltOutlinedIcon />, value: stats.resolvedThisMonth, accent: stats.resolvedThisMonth > 0 ? "success.dark" : undefined },
+    { label: t("Open requests"), icon: <BuildOutlinedIcon />, value: stats.open },
+    { label: t("High priority"), icon: <ReportProblemOutlinedIcon />, value: stats.highPriority, accent: stats.highPriority > 0 ? "error.main" : undefined },
+    { label: t("In progress"), icon: <EngineeringOutlinedIcon />, value: stats.inProgress, accent: stats.inProgress > 0 ? "info.dark" : undefined },
+    { label: t("Resolved this month"), icon: <TaskAltOutlinedIcon />, value: stats.resolvedThisMonth, accent: stats.resolvedThisMonth > 0 ? "success.dark" : undefined },
   ];
 
   return (
@@ -602,7 +603,7 @@ export default function MaintenancePage() {
       <Paper elevation={0} component="section" sx={{ ...cardSx, borderRadius: R.xl, position: "relative", overflow: "hidden", p: { xs: 2, sm: 3 }, mb: { xs: 2, sm: 2.5 } }}>
         <Box aria-hidden sx={{ position: "absolute", top: -180, right: -120, width: 380, height: 380, borderRadius: "50%", background: "rgba(255,69,0,.10)", filter: "blur(70px)", pointerEvents: "none" }} />
         <Typography color="text.secondary" sx={{ position: "relative", fontSize: { xs: 14, sm: 15 }, mb: { xs: 2, sm: 2.5 } }}>
-          Repair requests from your tenants, most urgent first.
+          {t("Repair requests from your tenants, most urgent first.")}
         </Typography>
         <Box sx={{ position: "relative", display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, gap: { xs: 1, sm: 1.5 } }}>
           {tiles.map((t) => (
@@ -648,9 +649,9 @@ export default function MaintenancePage() {
             }}
           >
             <SearchIcon sx={{ color: "text.secondary" }} />
-            <InputBase fullWidth placeholder="Search title, tenant or room" value={search} onChange={(e) => setSearch(e.target.value)} inputProps={{ "aria-label": "Search requests" }} />
+            <InputBase fullWidth placeholder={t("Search title, tenant or room")} value={search} onChange={(e) => setSearch(e.target.value)} inputProps={{ "aria-label": "Search requests" }} />
             {search && (
-              <IconButton size="small" aria-label="Clear search" onClick={() => setSearch("")}>
+              <IconButton size="small" aria-label={t("Clear search")} onClick={() => setSearch("")}>
                 <CloseIcon fontSize="small" />
               </IconButton>
             )}
@@ -665,7 +666,7 @@ export default function MaintenancePage() {
               slotProps={{ htmlInput: { "aria-label": "Filter by property" } }}
               sx={{ minWidth: { md: 190 }, "& .MuiOutlinedInput-root": { borderRadius: R.sm, height: 44, bgcolor: "background.default" } }}
             >
-              <MenuItem value="all">All properties</MenuItem>
+              <MenuItem value="all">{t("All properties")}</MenuItem>
               {propertyOptions.map(([key, name]) => (
                 <MenuItem key={key} value={key}>{name}</MenuItem>
               ))}
@@ -675,7 +676,7 @@ export default function MaintenancePage() {
           {/* Segmented view filter with counts */}
           <Box
             role="group"
-            aria-label="Filter by status"
+            aria-label={t("Filter by status")}
             sx={{ display: "flex", gap: 0.5, p: 0.5, ...cardSx, borderRadius: R.md, overflowX: "auto", scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}
           >
             {VIEWS.map((v) => {
@@ -731,7 +732,7 @@ export default function MaintenancePage() {
           </Typography>
           {tickets.length > 0 && filtersActive && (
             <Button size="small" onClick={clearFilters} sx={{ mt: 1.5, fontWeight: 700 }}>
-              Back to active requests
+              {t("Back to active requests")}
             </Button>
           )}
         </Paper>
@@ -740,10 +741,10 @@ export default function MaintenancePage() {
           {filtersActive && (
             <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 1.25 }}>
               <Typography variant="body2" color="text.secondary">
-                Showing {visibleTickets.length} of {scoped.length} requests
+                {t("Showing")}{" "}{visibleTickets.length}{" "}{t("of")}{" "}{scoped.length}{" "}{t("requests")}
               </Typography>
               <Button size="small" onClick={clearFilters} sx={{ fontWeight: 700 }}>
-                Clear filters
+                {t("Clear filters")}
               </Button>
             </Box>
           )}
@@ -763,7 +764,7 @@ export default function MaintenancePage() {
         fullWidth
         slotProps={{ paper: { sx: { borderRadius: R.lg, m: 2, width: "calc(100% - 32px)" } } }}
       >
-        <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>Cancel this request?</DialogTitle>
+        <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>{t("Cancel this request?")}</DialogTitle>
         <DialogContent>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
             {cancelTarget ? `"${cancelTarget.title || "Untitled request"}" will move to Cancelled, and ${cancelTarget.tenantName || "the tenant"} will be notified.` : ""}
@@ -773,8 +774,8 @@ export default function MaintenancePage() {
             size="small"
             multiline
             minRows={2}
-            label="Reason (optional)"
-            placeholder="e.g. duplicate request, already fixed"
+            label={t("Reason (optional)")}
+            placeholder={t("e.g. duplicate request, already fixed")}
             value={cancelReason}
             onChange={(e) => setCancelReason(e.target.value.slice(0, MAX_REASON))}
             helperText={`${cancelReason.length}/${MAX_REASON} · shown to the tenant`}
@@ -783,10 +784,10 @@ export default function MaintenancePage() {
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1 }}>
           <Button color="inherit" onClick={() => setCancelTarget(null)} disabled={cancelling} sx={{ fontWeight: 700 }}>
-            Keep request
+            {t("Keep request")}
           </Button>
           <Button color="error" variant="contained" disableElevation onClick={confirmCancel} disabled={cancelling} sx={{ fontWeight: 700, minWidth: 130, borderRadius: R.sm }}>
-            {cancelling ? <CircularProgress size={20} color="inherit" /> : "Cancel request"}
+            {cancelling ? <CircularProgress size={20} color="inherit" /> : t("Cancel request")}
           </Button>
         </DialogActions>
       </Dialog>

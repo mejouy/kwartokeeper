@@ -33,6 +33,7 @@ test("skips a tenant who moved in after the due day", () => {
 });
 
 test("defaults the due day to 5", () => {
-  const { rentDueDay, ...noDay } = tenant;
+  const noDay = { ...tenant };
+  delete noDay.rentDueDay;
   assert.equal(getOverdueInfo(noDay, oct10, false).dueDay, 5);
 });

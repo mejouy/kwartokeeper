@@ -4,1058 +4,48 @@
 // which tab is open and passes it in as `activeTab` ("overview" | "payments" |
 // "profile" | "maintenance").
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Alert,
-  Avatar,
-  Box,
-  Button,
-  Chip,
-  CircularProgress,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-  Fab,
-  GlobalStyles,
-  IconButton,
-  LinearProgress,
-  Paper,
-  Skeleton,
-  Snackbar,
-  TextField,
-  Typography,
-  useMediaQuery,
-} from "@mui/material";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Fab, IconButton, LinearProgress, Paper, Skeleton, Snackbar, TextField, Typography, useMediaQuery } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
-import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
 import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";
 import AddIcon from "@mui/icons-material/Add";
 import CloseIcon from "@mui/icons-material/Close";
 import PaymentIcon from "@mui/icons-material/Payment";
 import QrCode2Icon from "@mui/icons-material/QrCode2";
-import HistoryIcon from "@mui/icons-material/History";
-import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import ContentCopyIcon from "@mui/icons-material/ContentCopy";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import ArrowBackIcon from "@mui/icons-material/ArrowBack";
 import CheckIcon from "@mui/icons-material/Check";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
-import HomeWorkOutlinedIcon from "@mui/icons-material/HomeWorkOutlined";
-import CampaignOutlinedIcon from "@mui/icons-material/CampaignOutlined";
-import PhoneOutlinedIcon from "@mui/icons-material/PhoneOutlined";
-import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
-import BoltOutlinedIcon from "@mui/icons-material/BoltOutlined";
-import BrushOutlinedIcon from "@mui/icons-material/BrushOutlined";
 import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import IosShareOutlinedIcon from "@mui/icons-material/IosShareOutlined";
 import WifiOffOutlinedIcon from "@mui/icons-material/WifiOffOutlined";
-import PhotoCameraOutlinedIcon from "@mui/icons-material/PhotoCameraOutlined";
-import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
 import ErrorOutlinedIcon from "@mui/icons-material/ErrorOutlined";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
 import ScheduleIcon from "@mui/icons-material/Schedule";
-import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
-import FilePreviewDialog from "../../components/FilePreviewDialog";
 import PolicyOutlinedIcon from "@mui/icons-material/PolicyOutlined";
-import PlaceOutlinedIcon from "@mui/icons-material/PlaceOutlined";
-import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
-import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
-import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
-import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
-import DoneAllIcon from "@mui/icons-material/DoneAll";
 import CloudOffOutlinedIcon from "@mui/icons-material/CloudOffOutlined";
-
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, getDoc, collection, addDoc, updateDoc, arrayUnion, query, where, onSnapshot, serverTimestamp, writeBatch } from "firebase/firestore";
-
+import { doc, collection, addDoc, updateDoc, arrayUnion, query, where, onSnapshot, serverTimestamp, writeBatch } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
-import {
-  notifyMaintenanceSubmitted,
-  notifyMaintenanceCancelled,
-  notifyMaintenanceFollowUp,
-  notifyPaymentSubmitted,
-} from "../../services/notificationService";
+import { notifyMaintenanceSubmitted, notifyMaintenanceCancelled, notifyMaintenanceFollowUp, notifyPaymentSubmitted } from "../../services/notificationService";
 import { normalizePayment } from "../../utils/normalizePayment";
-import { printReceipt as printReceiptDoc } from "../../utils/receiptPrint";
+import { saveReceiptImage } from "../../utils/receiptImage";
+import { leaseLengthText } from "../../utils/tenantRent";
+import { billSnapshot, chargeAppliesTo, isActiveCharge, monthBill } from "../../utils/charges";
+import { BillBreakdown } from "../../components/Fees";
 import { addMonthsClamped } from "../../utils/addMonthsClamped";
 import { uploadToCloudinary } from "../../utils/cloudinary";
 import { getPropertyCoverPhotoUrl } from "../../utils/getPropertyCoverPhotoUrl";
 import { CATEGORIES, rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
+import { ADVANCE_MONTHS, periodLabel, shortPeriod, periodsText, PAGE_SIZE, ANNOUNCE_PREVIEW, BOTTOM_NAV_H, row, cardSx, CATEGORY_OPTIONS, readPayMethods, prettyMobile, peso, getTodayInputValue, getTimestampMillis, fmtDate, LEASE_MONTHS, formatLeaseDuration, paymentTone, AnimationStyles, Pill, EmptyState, Facts, useToday, readOutbox, writeOutbox, useOnline, PhotoPicker, TabErrorBoundary, saveImage, parseClock, useClock } from "./tenantParts";
+import TenantOverviewTab from "./TenantOverviewTab";
+import TenantPaymentsTab from "./TenantPaymentsTab";
+import TenantProfileTab from "./TenantProfileTab";
+import TenantMaintenanceTab from "./TenantMaintenanceTab";
+import { t } from "../../i18n";
 
-/* ---------------------------------------------------------------------------
-   Constants
---------------------------------------------------------------------------- */
-const RULES_PREVIEW = 4; // rules shown before "Show all"
-const ADVANCE_MONTHS = 5; // how many months ahead a tenant can pay
-const periodLabel = (d) => d.toLocaleDateString("en-US", { month: "long", year: "numeric" });
-const shortPeriod = (label) => {
-  const [m, y] = String(label).split(" ");
-  return `${(m || "").slice(0, 3)} ${y || ""}`.trim();
-};
-// "October 2026" / "October 2026 – December 2026" / "Oct, Dec 2026"
-const periodsText = (list) => {
-  if (!list.length) return "";
-  if (list.length === 1) return list[0];
-  return `${shortPeriod(list[0])} – ${shortPeriod(list[list.length - 1])}${list.length > 2 ? ` (${list.length} months)` : ""}`;
-};
-const PAGE_SIZE = 6; // long lists show this many at a time
-const ANNOUNCE_PREVIEW = 3; // announcements on the overview before "Show more"
-const ATTENTION_PREVIEW = 2; // alerts shown before "Show N more"
-const BOTTOM_NAV_H = 66; // the phone bottom bar in AppShell
-const row = { display: "flex", alignItems: "center" };
-const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
-
-const CATEGORY_OPTIONS = [
-  { value: CATEGORIES.SAFETY, label: "Safety", hint: "e.g. exposed wiring, broken lock", Icon: ShieldOutlinedIcon },
-  { value: CATEGORIES.UTILITY, label: "Utility", hint: "e.g. clogged drain, appliance issue", Icon: BoltOutlinedIcon },
-  { value: CATEGORIES.ROUTINE, label: "Routine", hint: "e.g. paint chip, cosmetic issue", Icon: BrushOutlinedIcon },
-];
-
-const TIER_TONE = { High: "error", Medium: "warning", Low: "default" };
-const NOTE_TONE = { info: "info", warning: "warning", success: "success", error: "error" };
-
-/*
-|--------------------------------------------------------------------------
-| PAYMENT ACCOUNTS
-|--------------------------------------------------------------------------
-| The owner sets these up in Payments → Payment accounts. They are stored on
-| the property (properties/{id}.paymentMethods and .paymentNote) and read here.
-|--------------------------------------------------------------------------
-*/
-const PAY_METHOD_DEFS = [
-  { key: "GCash", label: "GCash", kind: "wallet" },
-  { key: "Maya", label: "Maya", kind: "wallet" },
-  { key: "QR Ph", label: "QR Ph", kind: "qrph" },
-];
-
-// Only methods the owner switched on AND gave something to pay to
-const readPayMethods = (raw) =>
-  PAY_METHOD_DEFS.map((d) => {
-    const m = raw?.[d.key] || {};
-    return {
-      ...d,
-      enabled: Boolean(m.enabled),
-      accountName: String(m.accountName || ""),
-      accountNumber: String(m.accountNumber || ""),
-      qrUrl: String(m.qrUrl || ""),
-    };
-  }).filter((m) => m.enabled && (m.accountNumber.trim() || m.qrUrl));
-
-const prettyMobile = (n) => (/^09\d{9}$/.test(String(n)) ? `${n.slice(0, 4)} ${n.slice(4, 7)} ${n.slice(7)}` : n);
-
-/* ---------------------------------------------------------------------------
-   Helpers
---------------------------------------------------------------------------- */
-const peso = (n) => `₱${Number(n || 0).toLocaleString()}`;
-
-function getTodayInputValue() {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  return `${now.getFullYear()}-${month}-${day}`;
-}
-
-function getTimestampMillis(value) {
-  if (!value) return 0;
-  if (typeof value?.toMillis === "function") return value.toMillis();
-  // "2026-10-05" (the date inputs) is read as a LOCAL date, not UTC midnight
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    const [y, m, d] = value.split("-").map(Number);
-    return new Date(y, m - 1, d).getTime();
-  }
-  const time = new Date(value).getTime();
-  return Number.isNaN(time) ? 0 : time;
-}
-
-const fmtDate = (value, opts = { month: "short", day: "numeric", year: "numeric" }) => {
-  const ms = getTimestampMillis(value);
-  return ms ? new Date(ms).toLocaleDateString("en-US", opts) : "";
-};
-
-const formatLeaseStart = (value) => {
-  if (!value || value === "Not specified") return "Not specified";
-  return fmtDate(value) || String(value);
-};
-
-const LEASE_MONTHS = { "3_months": 3, "6_months": 6, "12_months": 12 };
-
-function formatLeaseDuration(val) {
-  if (!val) return "Not specified";
-  switch (val) {
-    case "3_months":
-      return "3 Months";
-    case "6_months":
-      return "6 Months";
-    case "12_months":
-      return "12 Months";
-    case "custom":
-      return "Custom Term";
-    default:
-      return val;
-  }
-}
-
-function paymentTone(status) {
-  switch (String(status || "").toLowerCase()) {
-    case "paid":
-      return "success";
-    case "pending":
-    case "pending verification":
-    case "partial":
-      return "warning";
-    case "overdue":
-    case "rejected":
-      return "error";
-    default:
-      return "default";
-  }
-}
-
-const firstName = (name) => String(name || "").trim().split(/\s+/)[0] || "there";
-const initials = (name) =>
-  String(name || "")
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((w) => w[0].toUpperCase())
-    .join("") || "T";
-
-const greeting = () => {
-  const h = new Date().getHours();
-  return h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening";
-};
-
-/* ---------------------------------------------------------------------------
-   Visuals
---------------------------------------------------------------------------- */
-// Fade/slide-up on first paint; off for "reduce motion" users.
-const AnimationStyles = (
-  <GlobalStyles
-    styles={{
-      "@keyframes kkPop": { from: { opacity: 0, transform: "scale(0.6)" }, to: { opacity: 1, transform: "scale(1)" } },
-      "@keyframes kkFadeUp": { from: { opacity: 0, transform: "translateY(10px)" }, to: { opacity: 1, transform: "translateY(0)" } },
-      "@keyframes kkCheck": { from: { strokeDashoffset: 30 }, to: { strokeDashoffset: 0 } },
-      // Snappier taps on phones: no 300ms delay, no grey flash
-      "button, [role='button'], a": { WebkitTapHighlightColor: "transparent", touchAction: "manipulation" },
-      "@media (prefers-reduced-motion: reduce)": {
-        "*, *::before, *::after": { animationDuration: "0.001ms !important", transitionDuration: "0.001ms !important" },
-      },
-    }}
-  />
-);
-const rise = (i = 0) => ({ animation: `kkFadeUp .45s ease-out ${i * 70}ms both` });
-
-// Dorm-facade windows from the login page. Here: lit = share of the lease that has passed.
-const WINDOW_COUNT = 30;
-const LIGHT_ORDER = [3, 17, 8, 24, 1, 12, 27, 5, 20, 14, 9, 29, 2, 22, 11, 6, 25, 16, 0, 19, 28, 7, 13, 23, 4, 21, 10, 26, 15, 18];
-const WINDOW_RANK = LIGHT_ORDER.reduce((acc, cell, rank) => ({ ...acc, [cell]: rank }), {});
-
-function LeaseWindows({ progress, caption }) {
-  const lit = progress > 0 ? Math.max(1, Math.round(progress * WINDOW_COUNT)) : 0;
-  return (
-    <Box>
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(10, 1fr)", gap: { xs: 0.6, md: 0.8 }, width: "100%", maxWidth: 300 }}>
-        {Array.from({ length: WINDOW_COUNT }).map((_, i) => (
-          <Box
-            key={i}
-            sx={{
-              aspectRatio: "1",
-              borderRadius: "3px",
-              bgcolor: WINDOW_RANK[i] < lit ? "primary.main" : "rgba(202, 220, 246, 0.14)",
-              animation: `kkPop 0.4s ease-out ${i * 18}ms both`,
-            }}
-          />
-        ))}
-      </Box>
-      {caption && (
-        <Typography variant="caption" sx={{ color: "#cadcf6", display: "block", mt: 1 }}>
-          {caption}
-        </Typography>
-      )}
-    </Box>
-  );
-}
-
-// Horizontal progress track: steps are done / active / todo / error.
-function StepTrack({ steps, current = 0, complete = false, failed = false }) {
-  const last = steps.length - 1;
-  const stateOf = (i) => (failed && i === last ? "error" : complete || i < current ? "done" : i === current ? "active" : "todo");
-  return (
-    <Box sx={{ display: "flex", alignItems: "flex-start" }}>
-      {steps.map((label, i) => {
-        const st = stateOf(i);
-        const color = st === "error" ? "error.main" : st === "todo" ? "divider" : "primary.main";
-        return (
-          <React.Fragment key={`${label}-${i}`}>
-            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", width: 64, flexShrink: 0 }}>
-              <Box
-                sx={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: "50%",
-                  ...row,
-                  justifyContent: "center",
-                  border: "2px solid",
-                  borderColor: color,
-                  bgcolor: st === "done" ? "primary.main" : st === "error" ? "error.main" : "background.paper",
-                  color: "#fff",
-                  boxShadow: st === "active" ? (t) => `0 0 0 4px ${alpha(t.palette.primary.main, 0.18)}` : "none",
-                }}
-              >
-                {st === "done" && <CheckIcon sx={{ fontSize: 14 }} />}
-                {st === "error" && <CloseIcon sx={{ fontSize: 14 }} />}
-                {st === "active" && <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "primary.main" }} />}
-              </Box>
-              <Typography variant="caption" sx={{ mt: 0.5, fontWeight: st === "active" || st === "error" ? 800 : 600, color: st === "todo" ? "text.disabled" : "text.primary", textAlign: "center", lineHeight: 1.2 }}>
-                {label}
-              </Typography>
-            </Box>
-            {i < last && (
-              <Box sx={{ flex: 1, height: 2, mt: "10px", mx: -2, bgcolor: complete || i < current ? "primary.main" : "divider", borderRadius: 1 }} />
-            )}
-          </React.Fragment>
-        );
-      })}
-    </Box>
-  );
-}
-
-/* ---------------------------------------------------------------------------
-   Small UI pieces
---------------------------------------------------------------------------- */
-function Pill({ label, tone = "default", icon, sx }) {
-  return (
-    <Chip
-      label={label}
-      icon={icon}
-      size="small"
-      sx={{
-        fontWeight: 700,
-        "& .MuiChip-icon": { fontSize: 15, ml: 0.75, color: "inherit" },
-        bgcolor: (t) => (tone === "default" ? alpha(t.palette.text.primary, 0.07) : alpha(t.palette[tone].main, 0.13)),
-        color: (t) => (tone === "default" ? t.palette.text.secondary : t.palette[tone].dark),
-        ...sx,
-      }}
-    />
-  );
-}
-
-function Panel({ title, icon, action, children, sx }) {
-  return (
-    <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 3 }, display: "flex", flexDirection: "column", minWidth: 0, ...sx }}>
-      <Box sx={{ ...row, justifyContent: "space-between", gap: 1.5, mb: 2 }}>
-        <Box sx={{ ...row, gap: 1.25, minWidth: 0 }}>
-          {icon && (
-            <Box sx={{ width: 34, height: 34, borderRadius: 2, flexShrink: 0, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main" }}>
-              {icon}
-            </Box>
-          )}
-          <Typography variant="h6" noWrap sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 700, fontSize: "1.05rem" }}>
-            {title}
-          </Typography>
-        </Box>
-        {action}
-      </Box>
-      {children}
-    </Paper>
-  );
-}
-
-function EmptyState({ icon, title, body, action }) {
-  return (
-    <Box sx={{ textAlign: "center", py: { xs: 3, sm: 4 }, px: 2 }}>
-      <Box sx={{ width: 56, height: 56, borderRadius: "50%", mx: "auto", mb: 1.5, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
-        {icon}
-      </Box>
-      <Typography sx={{ fontWeight: 700 }}>{title}</Typography>
-      <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-        {body}
-      </Typography>
-      {action}
-    </Box>
-  );
-}
-
-function Facts({ items }) {
-  return (
-    <Box sx={{ display: "flex", flexDirection: "column" }}>
-      {items.map((it, i) => (
-        <Box
-          key={it.label}
-          sx={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 0.9fr) minmax(0, 1.4fr)",
-            gap: 1.5,
-            py: 1.1,
-            borderTop: i === 0 ? "none" : "1px solid",
-            borderColor: "divider",
-          }}
-        >
-          <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
-            {it.label}
-          </Typography>
-          <Typography variant="body2" sx={{ fontWeight: 700, overflowWrap: "anywhere", color: it.color }}>
-            {it.value}
-          </Typography>
-        </Box>
-      ))}
-    </Box>
-  );
-}
-
-function PaymentRow({ p, onClick }) {
-  const status = p.status || "Pending";
-  const date = fmtDate(p.paymentDate || p.createdAt);
-  return (
-    <Box
-      component="button"
-      type="button"
-      onClick={onClick}
-      sx={{
-        ...row,
-        gap: 1.5,
-        width: "100%",
-        textAlign: "left",
-        font: "inherit",
-        color: "inherit",
-        cursor: onClick ? "pointer" : "default",
-        p: 1.5,
-        borderRadius: 2.5,
-        bgcolor: (t) => alpha(t.palette.background.paper, 0.35),
-        border: "1px solid",
-        borderColor: "divider",
-        transition: "border-color .15s",
-        "&:hover": onClick ? { borderColor: "primary.main" } : undefined,
-        "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
-      }}
-    >
-      <Box sx={{ width: 40, height: 40, borderRadius: "50%", flexShrink: 0, ...row, justifyContent: "center", bgcolor: (t) => (paymentTone(status) === "default" ? alpha(t.palette.text.primary, 0.07) : alpha(t.palette[paymentTone(status)].main, 0.13)), color: (t) => (paymentTone(status) === "default" ? t.palette.text.secondary : t.palette[paymentTone(status)].dark) }}>
-        <ReceiptLongOutlinedIcon fontSize="small" />
-      </Box>
-      <Box sx={{ minWidth: 0, flex: 1 }}>
-        <Typography variant="subtitle2" noWrap sx={{ fontWeight: 700 }}>
-          {p.periodMonth || "Payment"}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" noWrap component="div">
-          {p.paymentMethod || "Unknown method"}
-          {date ? ` · ${date}` : ""}
-        </Typography>
-      </Box>
-      <Box sx={{ textAlign: "right", flexShrink: 0 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
-          {peso(p.amount)}
-        </Typography>
-        <Pill label={status} tone={paymentTone(status)} />
-      </Box>
-    </Box>
-  );
-}
-
-// With many requests, each one is a short summary row (title, status, priority,
-// date) that opens to the full details. `collapsible` turns that on.
-function TicketCard({ t, compact, onAction, collapsible = false, defaultOpen = true }) {
-  const [open, setOpen] = useState(defaultOpen);
-  const tier = t.priority?.tier || "Low";
-  const status = t.status || "Pending";
-  const statusTone = status === "Resolved" ? "success" : status === "In Progress" ? "info" : status === "Cancelled" ? "default" : "warning";
-  const date = fmtDate(t.createdAt);
-  const stepIndex = status === "Resolved" ? 2 : status === "In Progress" ? 1 : 0;
-  const details = !compact && (!collapsible || open);
-  const updates = Array.isArray(t.followUps) ? t.followUps.length : 0;
-  const hasNote = Boolean(t.remarks || t.resolutionNotes);
-
-  const summary = (
-    <>
-      <Box sx={{ ...row, alignItems: "flex-start", justifyContent: "space-between", gap: 1 }}>
-        <Typography sx={{ fontWeight: 800, overflowWrap: "anywhere", minWidth: 0 }}>{t.title}</Typography>
-        <Box sx={{ ...row, gap: 0.5, flexShrink: 0 }}>
-          <Pill label={status} tone={statusTone} />
-          {collapsible && <ExpandMoreIcon sx={{ color: "text.secondary", transform: open ? "rotate(180deg)" : "none", transition: "transform .2s" }} />}
-        </Box>
-      </Box>
-      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1 }}>
-        <Pill label={`${tier} priority`} tone={TIER_TONE[tier]} />
-        {t.category && <Pill label={String(t.category)} />}
-        {date && <Pill label={`Reported ${date}`} />}
-        {collapsible && !open && hasNote && <Pill label="Landlord replied" tone="info" />}
-        {collapsible && !open && updates > 0 && <Pill label={`${updates} ${updates === 1 ? "update" : "updates"}`} />}
-      </Box>
-    </>
-  );
-
-  return (
-    <Paper
-      elevation={0}
-      sx={{
-        ...cardSx,
-        p: { xs: 2, sm: 2.5 },
-        borderLeft: "4px solid",
-        borderLeftColor: (th) => (TIER_TONE[tier] === "default" ? th.palette.divider : th.palette[TIER_TONE[tier]].main),
-        minWidth: 0,
-      }}
-    >
-      {collapsible ? (
-        <Box
-          component="button"
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          sx={{ display: "block", width: "100%", p: 0, m: 0, border: 0, bgcolor: "transparent", font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer", "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 4, borderRadius: 1 } }}
-        >
-          {summary}
-        </Box>
-      ) : (
-        summary
-      )}
-      {t.description && details && (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1.25, whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-          {t.description}
-        </Typography>
-      )}
-      {status === "Cancelled" && t.cancelReason && details && (
-        <Typography variant="body2" color="text.secondary" sx={{ mt: 1.25, overflowWrap: "anywhere" }}>
-          <strong>Reason:</strong> {t.cancelReason}
-        </Typography>
-      )}
-      {details && status !== "Cancelled" && (
-        <Box sx={{ mt: 2, px: 0.5 }}>
-          <StepTrack steps={["Reported", "In progress", "Resolved"]} current={stepIndex} complete={stepIndex === 2} />
-        </Box>
-      )}
-      {t.photoUrl && details && (
-        <Box component="a" href={t.photoUrl} target="_blank" rel="noopener noreferrer" sx={{ display: "inline-block", mt: 1.25 }}>
-          <Box component="img" src={t.photoUrl} alt="Photo of the issue" loading="lazy" sx={{ width: 96, height: 96, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider", display: "block" }} />
-        </Box>
-      )}
-      {hasNote && (compact || details) && (
-        <Box sx={{ mt: 1.5, p: 1.25, borderRadius: 2, bgcolor: (th) => alpha(th.palette.info.main, 0.08) }}>
-          <Typography variant="caption" sx={{ fontWeight: 800, color: "info.dark" }}>
-            Note from your landlord
-          </Typography>
-          <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
-            {t.remarks || t.resolutionNotes}
-          </Typography>
-        </Box>
-      )}
-      {details && updates > 0 && (
-        <Box sx={{ mt: 1.5 }}>
-          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
-            YOUR UPDATES
-          </Typography>
-          {t.followUps.map((f, i) => (
-            <Box key={i} sx={{ mt: 0.75, p: 1.25, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
-              {f.text && (
-                <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
-                  {f.text}
-                </Typography>
-              )}
-              {f.photoUrl && (
-                <Box component="a" href={f.photoUrl} target="_blank" rel="noopener noreferrer" sx={{ display: "inline-block", mt: 0.5 }}>
-                  <Box component="img" src={f.photoUrl} alt="Photo you added" loading="lazy" sx={{ width: 72, height: 72, objectFit: "cover", borderRadius: 2, display: "block" }} />
-                </Box>
-              )}
-              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.25 }}>
-                {fmtDate(f.at, { month: "short", day: "numeric" })}
-              </Typography>
-            </Box>
-          ))}
-        </Box>
-      )}
-      {details && onAction && !["Resolved", "Cancelled"].includes(status) && (
-        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1.5 }}>
-          <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={() => onAction("update", t)} sx={{ minHeight: 40, fontWeight: 700, borderRadius: 2, textTransform: "none" }}>
-            Add an update
-          </Button>
-          {status === "Pending" && (
-            <>
-              <Button size="small" startIcon={<EditOutlinedIcon />} onClick={() => onAction("edit", t)} sx={{ minHeight: 40, fontWeight: 700, textTransform: "none" }}>
-                Edit
-              </Button>
-              <Button size="small" color="error" startIcon={<DeleteOutlinedIcon />} onClick={() => onAction("cancel", t)} sx={{ minHeight: 40, fontWeight: 700, textTransform: "none" }}>
-                Cancel request
-              </Button>
-            </>
-          )}
-        </Box>
-      )}
-    </Paper>
-  );
-}
-
-// "Show N more" under a long list (adds a page at a time instead of everything at once)
-function ShowMore({ shown, total, step, onMore, onLess, noun = "more" }) {
-  if (total <= step && shown >= total) return null;
-  const left = total - shown;
-  return (
-    <Box sx={{ ...row, justifyContent: "center", gap: 0.5, mt: 1 }}>
-      {left > 0 && (
-        <Button size="small" onClick={onMore} endIcon={<ExpandMoreIcon />} sx={{ fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.5, textTransform: "none" }}>
-          Show {Math.min(step, left)} {noun}
-        </Button>
-      )}
-      {shown > step && (
-        <Button size="small" color="inherit" onClick={onLess} sx={{ fontWeight: 700, minHeight: 36, py: 0.5, px: 1.5, borderRadius: 99, textTransform: "none", color: "text.secondary" }}>
-          Show less
-        </Button>
-      )}
-    </Box>
-  );
-}
-
-// Tap-to-filter pills with counts (scroll sideways on phones)
-function FilterPills({ options, value, onChange }) {
-  return (
-    <Box sx={{ display: "flex", gap: 0.75, overflowX: "auto", mx: { xs: -2, sm: 0 }, px: { xs: 2, sm: 0 }, mb: 2, scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
-      {options.map((o) => {
-        const on = value === o.id;
-        return (
-          <Box
-            key={o.id}
-            component="button"
-            type="button"
-            onClick={() => onChange(o.id)}
-            aria-pressed={on}
-            sx={{
-              ...row,
-              gap: 0.75,
-              flexShrink: 0,
-              height: 38,
-              px: 1.5,
-              borderRadius: 99,
-              font: "inherit",
-              fontSize: 13.5,
-              fontWeight: 700,
-              cursor: "pointer",
-              border: "1px solid",
-              borderColor: on ? "text.primary" : "divider",
-              bgcolor: on ? "text.primary" : "background.default",
-              color: on ? "background.default" : "text.secondary",
-            }}
-          >
-            {o.label}
-            <Box component="span" sx={{ opacity: 0.65, fontWeight: 600 }}>{o.count}</Box>
-          </Box>
-        );
-      })}
-    </Box>
-  );
-}
-
-// One year of payments: a header with the year's total that opens to its rows
-function PaymentYear({ year, list, defaultOpen, onPick }) {
-  const [open, setOpen] = useState(defaultOpen);
-  const [shown, setShown] = useState(PAGE_SIZE);
-  const paid = list.filter((p) => ["paid", "partial"].includes(String(p.status || "").toLowerCase())).reduce((s, p) => s + (Number(p.amount) || 0), 0);
-  return (
-    <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 3, overflow: "hidden" }}>
-      <Box
-        component="button"
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        sx={{ ...row, width: "100%", gap: 1.25, px: 1.75, py: 1.25, border: 0, font: "inherit", color: "inherit", textAlign: "left", cursor: "pointer", bgcolor: (t) => alpha(t.palette.background.paper, open ? 0.45 : 0.25) }}
-      >
-        <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, flex: 1 }}>{year}</Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-          {list.length} {list.length === 1 ? "payment" : "payments"}
-          {paid > 0 ? ` · ${peso(paid)} paid` : ""}
-        </Typography>
-        <ExpandMoreIcon sx={{ color: "text.secondary", transform: open ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
-      </Box>
-      {open && (
-        <Box sx={{ p: 1.25, display: "flex", flexDirection: "column", gap: 1 }}>
-          {list.slice(0, shown).map((p) => (
-            <PaymentRow key={p.id} p={p} onClick={() => onPick(p)} />
-          ))}
-          <ShowMore shown={Math.min(shown, list.length)} total={list.length} step={PAGE_SIZE} onMore={() => setShown((n) => n + PAGE_SIZE)} onLess={() => setShown(PAGE_SIZE)} />
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-function AnnouncementItem({ n, onRead }) {
-  const tone = NOTE_TONE[n.type] || "info";
-  const [open, setOpen] = useState(false);
-  const long = String(n.message || "").length > 110 || String(n.message || "").split("\n").length > 3;
-  return (
-    <Box
-      component="button"
-      type="button"
-      onClick={() => {
-        setOpen((v) => !v);
-        if (n.isRead === false && onRead) onRead([n]);
-      }}
-      aria-expanded={open}
-      sx={{
-        display: "block",
-        width: "100%",
-        textAlign: "left",
-        font: "inherit",
-        color: "inherit",
-        cursor: "pointer",
-        p: 1.5,
-        borderRadius: 2.5,
-        border: "1px solid",
-        borderColor: "divider",
-        borderLeft: "4px solid",
-        borderLeftColor: (t) => t.palette[tone].main,
-        bgcolor: (t) => alpha(t.palette.background.paper, 0.35),
-      }}
-    >
-      <Box sx={{ ...row, justifyContent: "space-between", gap: 1 }}>
-        <Typography variant="subtitle2" sx={{ fontWeight: 800, overflowWrap: "anywhere" }}>
-          {n.isRead === false && <Box component="span" sx={{ display: "inline-block", width: 8, height: 8, borderRadius: "50%", bgcolor: "primary.main", mr: 0.75, verticalAlign: "middle" }} />}
-          {n.title}
-        </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-          {fmtDate(n.createdAt, { month: "short", day: "numeric" })}
-        </Typography>
-      </Box>
-      <Typography
-        variant="body2"
-        color="text.secondary"
-        sx={{
-          mt: 0.25,
-          overflowWrap: "anywhere",
-          whiteSpace: "pre-wrap",
-          ...(open ? {} : { display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }),
-        }}
-      >
-        {n.message}
-      </Typography>
-      {long && (
-        <Typography variant="caption" sx={{ color: "primary.main", fontWeight: 800, mt: 0.5, display: "block" }}>
-          {open ? "Show less" : "Read more"}
-        </Typography>
-      )}
-    </Box>
-  );
-}
-
-/* ---------------------------------------------------------------------------
-   Phone helpers
---------------------------------------------------------------------------- */
-// Changes identity only when the calendar day changes, so a tab that stays open
-// for days (common on phones) rolls over to the new month by itself.
-function useToday() {
-  const [dayKey, setDayKey] = useState(() => new Date().toDateString());
-  useEffect(() => {
-    let timer;
-    const refresh = () => setDayKey(new Date().toDateString());
-    const schedule = () => {
-      const now = new Date();
-      const next = new Date(now);
-      next.setHours(24, 0, 5, 0);
-      timer = setTimeout(() => {
-        refresh();
-        schedule();
-      }, next - now);
-    };
-    const onVisible = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
-    schedule();
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, []);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => new Date(), [dayKey]);
-}
-
-// Things written while offline wait here (on this phone) and are sent once the connection is back
-const outboxKey = (uid) => `kk_outbox_${uid}`;
-const readOutbox = (uid) => {
-  try {
-    const list = JSON.parse(window.localStorage.getItem(outboxKey(uid)) || "[]");
-    return Array.isArray(list) ? list : [];
-  } catch {
-    return [];
-  }
-};
-const writeOutbox = (uid, list) => {
-  try {
-    window.localStorage.setItem(outboxKey(uid), JSON.stringify(list));
-  } catch {
-    /* storage unavailable: the item just isn't kept */
-  }
-};
-
-function useOnline() {
-  const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
-  useEffect(() => {
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
-    window.addEventListener("online", on);
-    window.addEventListener("offline", off);
-    return () => {
-      window.removeEventListener("online", on);
-      window.removeEventListener("offline", off);
-    };
-  }, []);
-  return online;
-}
-
-const MAX_PHOTO_MB = 8;
-
-// Camera / gallery picker with a thumbnail. Validation errors go to onError.
-function PhotoPicker({ file, onChange, onError, label = "Add a photo", hint, disabled }) {
-  const inputRef = useRef(null);
-  const previewRef = useRef(null);
-
-  // The thumbnail's object URL is set on the <img> directly and freed when the photo changes
-  useEffect(() => {
-    if (!file || !previewRef.current) return undefined;
-    const url = URL.createObjectURL(file);
-    previewRef.current.src = url;
-    return () => URL.revokeObjectURL(url);
-  }, [file]);
-
-  const handlePick = (e) => {
-    const picked = e.target.files?.[0];
-    e.target.value = ""; // allow picking the same photo again
-    if (!picked) return;
-    if (!picked.type.startsWith("image/")) {
-      onError?.("Please choose a photo (JPG or PNG).");
-      return;
-    }
-    if (picked.size > MAX_PHOTO_MB * 1024 * 1024) {
-      onError?.(`That photo is too large. The limit is ${MAX_PHOTO_MB} MB.`);
-      return;
-    }
-    onError?.("");
-    onChange(picked);
-  };
-
-  return (
-    <Box>
-      <input ref={inputRef} type="file" accept="image/*" hidden onChange={handlePick} />
-      {file ? (
-        <Box sx={{ ...row, gap: 1.5, p: 1, borderRadius: 2.5, border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
-          <Box component="img" ref={previewRef} alt="Selected photo" sx={{ width: 64, height: 64, borderRadius: 2, objectFit: "cover", flexShrink: 0 }} />
-          <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="body2" noWrap sx={{ fontWeight: 700 }}>
-              {file.name}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {(file.size / 1024 / 1024).toFixed(1)} MB
-            </Typography>
-          </Box>
-          <IconButton aria-label="Remove photo" onClick={() => onChange(null)} disabled={disabled}>
-            <CloseIcon />
-          </IconButton>
-        </Box>
-      ) : (
-        <Button
-          fullWidth
-          variant="outlined"
-          startIcon={<PhotoCameraOutlinedIcon />}
-          onClick={() => inputRef.current?.click()}
-          disabled={disabled}
-          sx={{ minHeight: 52, borderStyle: "dashed", borderRadius: 2.5, fontWeight: 700, textTransform: "none", justifyContent: "flex-start", px: 2 }}
-        >
-          <Box sx={{ textAlign: "left" }}>
-            <Box component="span" sx={{ display: "block" }}>
-              {label}
-            </Box>
-            {hint && (
-              <Typography component="span" variant="caption" color="text.secondary" sx={{ display: "block", fontWeight: 500 }}>
-                {hint}
-              </Typography>
-            )}
-          </Box>
-        </Button>
-      )}
-    </Box>
-  );
-}
-
-// Big thumb-sized shortcut used on the overview
-function QuickAction({ icon, label, onClick, href, disabled, badge }) {
-  return (
-    <Box
-      component={href ? "a" : "button"}
-      type={href ? undefined : "button"}
-      href={href}
-      onClick={onClick}
-      disabled={href ? undefined : disabled}
-      aria-disabled={disabled || undefined}
-      sx={{
-        ...cardSx,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        gap: 0.75,
-        minHeight: 84,
-        px: 0.5,
-        py: 1.25,
-        font: "inherit",
-        color: disabled ? "text.disabled" : "text.primary",
-        textDecoration: "none",
-        cursor: disabled ? "default" : "pointer",
-        opacity: disabled ? 0.55 : 1,
-        pointerEvents: disabled && href ? "none" : undefined,
-        position: "relative",
-        "&:active": disabled ? undefined : { transform: "scale(0.97)" },
-        "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
-      }}
-    >
-      <Box sx={{ width: 38, height: 38, borderRadius: "50%", ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.1)", color: "primary.main" }}>{icon}</Box>
-      <Typography variant="caption" sx={{ fontWeight: 700, lineHeight: 1.15, textAlign: "center" }}>
-        {label}
-      </Typography>
-      {badge > 0 && (
-        <Box sx={{ position: "absolute", top: 6, right: 10, minWidth: 18, height: 18, px: 0.5, borderRadius: 9, bgcolor: "primary.main", color: "#fff", fontSize: 11, fontWeight: 800, ...row, justifyContent: "center" }}>
-          {badge > 9 ? "9+" : badge}
-        </Box>
-      )}
-    </Box>
-  );
-}
-
-// "Needs your attention" row
-function AttentionBanner({ tone = "warning", icon, title, body, actionLabel, onAction, secondaryLabel, onSecondary }) {
-  const Icon = icon || (tone === "error" ? ErrorOutlinedIcon : tone === "info" ? InfoOutlinedIcon : WarningAmberOutlinedIcon);
-  return (
-    <Box
-      sx={{
-        ...row,
-        alignItems: "flex-start",
-        gap: 1.25,
-        p: 1.5,
-        borderRadius: 3,
-        border: "1px solid",
-        borderColor: (t) => alpha(t.palette[tone].main, 0.45),
-        bgcolor: (t) => alpha(t.palette[tone].main, 0.07),
-      }}
-    >
-      <Box sx={{ color: `${tone}.main`, display: "flex", pt: 0.25 }}>
-        <Icon />
-      </Box>
-      <Box sx={{ minWidth: 0, flex: 1 }}>
-        <Typography sx={{ fontWeight: 800, lineHeight: 1.25 }}>{title}</Typography>
-        {body && (
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, overflowWrap: "anywhere" }}>
-            {body}
-          </Typography>
-        )}
-        {(actionLabel || secondaryLabel) && (
-          <Box sx={{ display: "flex", gap: 1, mt: 1, flexWrap: "wrap" }}>
-            {actionLabel && (
-              <Button size="small" variant="contained" color={tone} onClick={onAction} sx={{ fontWeight: 700, borderRadius: 2, minHeight: 38, textTransform: "none" }}>
-                {actionLabel}
-              </Button>
-            )}
-            {secondaryLabel && (
-              <Button size="small" onClick={onSecondary} sx={{ fontWeight: 700, borderRadius: 2, minHeight: 38, textTransform: "none", color: "text.secondary" }}>
-                {secondaryLabel}
-              </Button>
-            )}
-          </Box>
-        )}
-      </Box>
-    </Box>
-  );
-}
-
-// If one tab throws, the rest of the app keeps working
-class TabErrorBoundary extends React.Component {
-  constructor(props) {
-    super(props);
-    this.state = { hasError: false };
-  }
-  static getDerivedStateFromError() {
-    return { hasError: true };
-  }
-  componentDidCatch(error) {
-    console.error("Tenant dashboard error:", error);
-  }
-  componentDidUpdate(prev) {
-    if (this.state.hasError && prev.resetKey !== this.props.resetKey) this.setState({ hasError: false });
-  }
-  render() {
-    if (this.state.hasError) {
-      return (
-        <Paper elevation={0} sx={cardSx}>
-          <EmptyState
-            icon={<ErrorOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />}
-            title="Something went wrong"
-            body="This section couldn't be shown. Your information is safe."
-            action={
-              <Button variant="contained" startIcon={<RefreshOutlinedIcon />} onClick={() => window.location.reload()} sx={{ mt: 2, fontWeight: 700, borderRadius: 2.5, minHeight: 46 }}>
-                Reload
-              </Button>
-            }
-          />
-        </Paper>
-      );
-    }
-    return this.props.children;
-  }
-}
-
-// Save the owner's QR image to the phone (a phone can't scan its own screen).
-// Resolves false when the browser won't let us, so the caller can explain what to do instead.
-async function saveImage(url, filename) {
-  try {
-    const res = await fetch(url, { mode: "cors" });
-    if (!res.ok) return false;
-    const blob = await res.blob();
-    const objectUrl = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = objectUrl;
-    link.download = filename;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    setTimeout(() => URL.revokeObjectURL(objectUrl), 4000);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/* ---------------------------------------------------------------------------
-   Curfew + messaging
---------------------------------------------------------------------------- */
-// "10:00 PM" -> minutes after midnight (null if it can't be read)
-function parseClock(label) {
-  const m = String(label || "").trim().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/i);
-  if (!m) return null;
-  let h = Number(m[1]);
-  const min = Number(m[2]);
-  const ap = (m[3] || "").toUpperCase();
-  if (ap === "PM" && h < 12) h += 12;
-  if (ap === "AM" && h === 12) h = 0;
-  if (h > 23 || min > 59) return null;
-  return h * 60 + min;
-}
-
-// Ticks every 30s while enabled (used for the curfew countdown)
-function useClock(enabled) {
-  const [now, setNow] = useState(() => new Date());
-  useEffect(() => {
-    if (!enabled) return undefined;
-    const tick = () => setNow(new Date());
-    const id = setInterval(tick, 30000);
-    document.addEventListener("visibilitychange", tick);
-    return () => {
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", tick);
-    };
-  }, [enabled]);
-  return now;
-}
-
-/* ---------------------------------------------------------------------------
-   Page
---------------------------------------------------------------------------- */
 export default function TenantDashboard({ activeTab = "overview", onNavigateTab }) {
   const navigate = useNavigate();
   const theme = useTheme();
@@ -1146,9 +136,25 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const [payMonths, setPayMonths] = useState([]); // period labels being paid in this submission
   const [submittedPayment, setSubmittedPayment] = useState(null);
   const [receipt, setReceipt] = useState(null);
+  // Extra fees the owner added (electricity, Wi-Fi...), on top of rent
+  const [charges, setCharges] = useState([]);
 
   // ---- billing period / due date
   const currentPeriod = useMemo(() => today.toLocaleDateString("en-US", { month: "long", year: "numeric" }), [today]);
+
+  // What one month costs: rent + that month's fees, less what was received
+  const billFor = useCallback(
+    (label) =>
+      monthBill(
+        Number(tenantInfo.monthlyRent) || 0,
+        charges.filter((c) => chargeAppliesTo(c, label)),
+        payments.filter((p) => String(p.periodMonth || "").trim().toLowerCase() === String(label).toLowerCase())
+      ),
+    [charges, payments, tenantInfo.monthlyRent]
+  );
+  const currentBill = billFor(currentPeriod);
+  // Rent marked paid, but fees added for the month are still open
+  const feesOutstanding = currentBill.hasPaid && currentBill.balance > 0;
 
   const dueDate = useMemo(() => {
     const day = Math.min(Math.max(Number(tenantInfo.rentDueDay || 5), 1), 28);
@@ -1171,7 +177,15 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   }, [dueDate, today]);
 
   // Unpaid and past the due date reads as "Overdue"
-  const rentStatus = currentPeriodPayment?.status || (daysToDue < 0 ? "Overdue" : "Unpaid");
+  const rentStatus = currentBill.settled
+    ? "Paid"
+    : currentBill.pending
+      ? "Pending"
+      : feesOutstanding
+        ? "Partial"
+        : currentPeriodPayment?.status || (daysToDue < 0 ? "Overdue" : "Unpaid");
+  // Still to pay this month (the full bill when nothing was paid yet)
+  const dueNow = currentBill.balance > 0 ? currentBill.balance : currentBill.total;
   const statusKey = String(rentStatus).toLowerCase();
   const isPaid = statusKey === "paid";
   const isAwaitingVerification = ["pending", "pending verification"].includes(statusKey);
@@ -1179,14 +193,14 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const rentMissing = !(Number(tenantInfo.monthlyRent) > 0);
 
   const dueText = isPaid
-    ? "Paid for this month"
+    ? t("Paid for this month")
     : isAwaitingVerification
-      ? "Waiting for owner to verify"
+      ? t("Waiting for owner to verify")
       : daysToDue < 0
-        ? `Overdue by ${Math.abs(daysToDue)} ${Math.abs(daysToDue) === 1 ? "day" : "days"}`
+        ? t("Overdue by {days}", { days: Math.abs(daysToDue) === 1 ? t("{n} day", { n: Math.abs(daysToDue) }) : t("{n} days", { n: Math.abs(daysToDue) }) })
         : daysToDue === 0
-          ? "Due today"
-          : `Due in ${daysToDue} ${daysToDue === 1 ? "day" : "days"}`;
+          ? t("Due today")
+          : t("Due in {days}", { days: daysToDue === 1 ? t("{n} day", { n: daysToDue }) : t("{n} days", { n: daysToDue }) });
 
   // ---- lease progress
   const lease = useMemo(() => {
@@ -1212,9 +226,11 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     const statusFor = (label) => {
       const list = payments.filter((p) => String(p.periodMonth || "").trim().toLowerCase() === label.toLowerCase());
       const s = (p) => String(p.status || "").toLowerCase();
-      if (list.some((p) => s(p) === "paid")) return "paid";
+      const bill = billFor(label);
+      if (bill.settled) return "paid";
       if (list.some((p) => ["pending", "pending verification"].includes(s(p)))) return "pending";
-      if (list.some((p) => s(p) === "partial")) return "partial";
+      // Rent paid but fees still open counts as part-paid
+      if (bill.received > 0 || list.some((p) => s(p) === "paid" || s(p) === "partial")) return bill.balance > 0 ? "partial" : "paid";
       return "open";
     };
     const out = [];
@@ -1222,10 +238,10 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       const first = new Date(today.getFullYear(), today.getMonth() + i, 1);
       if (leaseEnd && first.getTime() > leaseEnd) break;
       const label = periodLabel(first);
-      out.push({ label, short: shortPeriod(label), current: i === 0, status: statusFor(label) });
+      out.push({ label, short: shortPeriod(label), current: i === 0, status: statusFor(label), due: billFor(label).balance });
     }
     return out;
-  }, [payments, today, lease]);
+  }, [payments, today, lease, billFor]);
   const openMonths = payableMonths.filter((m) => m.status === "open" || m.status === "partial");
   // Already paid (or sent) for months after this one
   const aheadMonths = payableMonths.filter((m) => !m.current && (m.status === "paid" || m.status === "pending"));
@@ -1238,61 +254,79 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     let cancelled = false;
     let unsubs = [];
 
-    const loadProfile = async (user) => {
-      try {
-        const userDoc = await getDoc(doc(db, "users", user.uid));
-        if (cancelled) return;
+    // The tenant's details, live: their profile (users), the owner's tenant record
+    // (tenants) and their property. Anything the owner or caretaker changes (rent,
+    // lease, room, status, house rules, curfew, payment accounts) shows right away.
+    const loadProfile = (user) => {
+      const latest = { user: undefined, tenant: undefined, prop: undefined, propId: null };
+      let unsubProp = null;
 
-        if (!userDoc.exists()) {
+      const build = () => {
+        if (cancelled) return;
+        // Wait for the first answer from both records
+        if (latest.user === undefined || latest.tenant === undefined) return;
+        if (!latest.user && !latest.tenant) {
           setLoadError("We couldn't find your tenant profile. Please contact your landlord.");
+          setLoading(false);
           return;
         }
+        // Same rule as the owner's and caretaker's screens: the owner's tenant record wins
+        // where both have a value (the owner saves both together anyway)
+        const data = { ...(latest.user || {}), ...(latest.tenant || {}) };
+        const propertyId = data.propertyId || data.assignedPropertyId || "";
 
-        const data = userDoc.data();
-        const propertyId = data.propertyId || data.assignedPropertyId;
+        // Moved to another property (or first load): follow the new one
+        if (propertyId !== latest.propId) {
+          if (unsubProp) unsubProp();
+          unsubProp = null;
+          latest.propId = propertyId;
+          latest.prop = propertyId ? undefined : null;
+          if (propertyId) {
+            unsubProp = onSnapshot(
+              doc(db, "properties", propertyId),
+              (snap) => {
+                latest.prop = snap.exists() ? { id: snap.id, ...snap.data() } : null;
+                build();
+              },
+              (err) => {
+                console.error("Error fetching property doc:", err);
+                latest.prop = null;
+                build();
+              }
+            );
+            return;
+          }
+        }
+        if (latest.prop === undefined) return;
 
         let propertyName = "Not Assigned";
         let propertyAddress = "";
         let assignedRoom = null;
         let propExtras = {};
-
-        if (propertyId) {
-          try {
-            const propDoc = await getDoc(doc(db, "properties", propertyId));
-            if (propDoc.exists()) {
-              const propData = propDoc.data();
-              propertyName = propData.propertyName || propData.name || propData.title || "Facility Name Unavailable";
-
-              // Address is stored as an object (street, barangay, ...); older records may use a string
-              const addr = propData.address;
-              propertyAddress =
-                typeof addr === "string"
-                  ? addr
-                  : [addr?.street, addr?.barangay, addr?.cityMunicipality, addr?.province].filter(Boolean).join(", ") || propData.fullAddress || "";
-
-              propExtras = {
-                coverPhotoUrl: getPropertyCoverPhotoUrl({ id: propDoc.id, ...propData }) || propData.coverPhotoUrl || "",
-                // New records: curfew { enabled, startTime }. Older wizard records: curfewEnabled / curfewTime.
-                curfewTime: propData.curfew?.enabled ? propData.curfew.startTime || "" : propData.curfewEnabled ? propData.curfewTime || "" : "",
-                rules: Array.isArray(propData.rules) ? propData.rules.filter(Boolean) : typeof propData.rules === "string" ? propData.rules.split("\n").map((r) => r.trim()).filter(Boolean) : [],
-                ruleFiles: Array.isArray(propData.ruleFiles) ? propData.ruleFiles.filter((f) => f?.url) : [],
-                amenities: Array.isArray(propData.amenities) ? propData.amenities.filter(Boolean) : [],
-                emergencyPhone: propData.emergencyPhone || "",
-                paymentMethods: readPayMethods(propData.paymentMethods),
-                paymentNote: String(propData.paymentNote || ""),
-              };
-
-              // The tenant's room (users.roomId is the room's name/id, e.g. "A2")
-              const rooms = Array.isArray(propData.rooms) ? propData.rooms : [];
-              assignedRoom = rooms.find((room) => room.roomName === data.roomId || room.id === data.roomId) || null;
-            }
-          } catch (propErr) {
-            console.error("Error fetching property doc:", propErr);
-          }
+        const propData = latest.prop;
+        if (propData) {
+          propertyName = propData.propertyName || propData.name || propData.title || "Facility Name Unavailable";
+          // Address is stored as an object (street, barangay, ...); older records may use a string
+          const addr = propData.address;
+          propertyAddress =
+            typeof addr === "string"
+              ? addr
+              : [addr?.street, addr?.barangay, addr?.cityMunicipality, addr?.province].filter(Boolean).join(", ") || propData.fullAddress || "";
+          propExtras = {
+            coverPhotoUrl: getPropertyCoverPhotoUrl(propData) || propData.coverPhotoUrl || "",
+            // New records: curfew { enabled, startTime }. Older wizard records: curfewEnabled / curfewTime.
+            curfewTime: propData.curfew?.enabled ? propData.curfew.startTime || "" : propData.curfewEnabled ? propData.curfewTime || "" : "",
+            rules: Array.isArray(propData.rules) ? propData.rules.filter(Boolean) : typeof propData.rules === "string" ? propData.rules.split(/\r?\n/).map((r) => r.trim()).filter(Boolean) : [],
+            ruleFiles: Array.isArray(propData.ruleFiles) ? propData.ruleFiles.filter((f) => f?.url) : [],
+            amenities: Array.isArray(propData.amenities) ? propData.amenities.filter(Boolean) : [],
+            emergencyPhone: propData.emergencyPhone || "",
+            paymentMethods: readPayMethods(propData.paymentMethods),
+            paymentNote: String(propData.paymentNote || ""),
+          };
+          // The tenant's room (roomId is the room's name/id, e.g. "A2")
+          const rooms = Array.isArray(propData.rooms) ? propData.rooms : [];
+          assignedRoom = rooms.find((room) => room.roomName === data.roomId || room.id === data.roomId) || null;
         }
-
-        if (cancelled) return;
-        const ownerUid = data.ownerUid || data.landlordUid || data.invitedBy || "";
 
         setTenantInfo({
           name: data.name || data.fullName || "Tenant",
@@ -1307,7 +341,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           paymentMethods: [],
           paymentNote: "",
           ...propExtras,
-          roomNumber: assignedRoom?.roomName || data.roomNumber || data.roomId || "N/A",
+          roomNumber: assignedRoom?.roomName || data.roomId || data.roomNumber || "N/A",
           bedId: data.bedId || "N/A",
           // Preserve the tenant's agreed rent; use the room rate only for legacy records without one.
           monthlyRent: Number(data.monthlyRent ?? data.rentAmount ?? data.roomMonthlyRate ?? data.monthlyRate ?? data.rent ?? assignedRoom?.monthlyRatePerBed ?? 0) || 0,
@@ -1315,23 +349,34 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           leaseStartDate: data.leaseStartDate || data.leaseStart || data.startDate || data.moveInDate || "Not specified",
           leaseEndDate: data.leaseEndDate || data.leaseEnd || data.endDate || data.moveOutDate || "",
           leaseMonths: LEASE_MONTHS[data.leaseDuration] || null,
-          leaseDuration: formatLeaseDuration(data.leaseDuration),
-          contact: data.phone || data.contact || "None provided",
-          ownerUid,
-          propertyId: propertyId || "",
+          // From the dates when there are both (a saved label can be out of date), else the label
+          leaseDuration:
+            leaseLengthText(data.leaseStartDate || data.leaseStart || data.startDate || data.moveInDate, data.leaseEndDate || data.leaseEnd || data.endDate || data.moveOutDate) ||
+            formatLeaseDuration(data.leaseDuration),
+          contact: data.phone || data.contactNumber || data.contact || "None provided",
+          ownerUid: data.ownerUid || data.landlordUid || data.invitedBy || "",
+          propertyId,
           rentDueDay: Number(data.rentDueDay || data.dueDay || 5),
         });
+        setLoadError("");
+        setLoading(false);
+      };
 
-        if (!cancelled) {
-          setOutbox(readOutbox(user.uid));
-          setLoading(false);
-        }
-      } catch (err) {
-        console.error("Error fetching tenant profile:", err);
-        if (!cancelled) setLoadError("We couldn't load your account. Check your connection and try again.");
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      const listen = (path, key) =>
+        onSnapshot(
+          doc(db, path, user.uid),
+          (snap) => {
+            latest[key] = snap.exists() ? snap.data() : null;
+            build();
+          },
+          (err) => {
+            console.error(`Error fetching tenant ${key} record:`, err);
+            latest[key] = null;
+            build();
+          }
+        );
+      unsubs.push(listen("users", "user"), listen("tenants", "tenant"), () => unsubProp && unsubProp());
+      setOutbox(readOutbox(user.uid));
     };
 
     const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
@@ -1371,6 +416,15 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
             setPayments(docs);
           },
           onListenError("payments")
+        )
+      );
+
+      unsubs.push(
+        onSnapshot(
+          query(collection(db, "charges"), where("tenantId", "==", user.uid)),
+          (snapshot) => setCharges(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isActiveCharge)),
+          // Fees are extra: not being able to read them must not break the page
+          (error) => console.warn("Fees unavailable:", error?.code || error)
         )
       );
 
@@ -1633,7 +687,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     setPayStep(0);
     setSelectedPaymentMethod(tenantInfo.paymentMethods?.[0]?.key || "");
     setPaymentForm({
-      amount: String(tenantInfo.monthlyRent || ""),
+      amount: String(billFor(first).balance || tenantInfo.monthlyRent || ""),
       referenceNumber: "",
       paymentDate: getTodayInputValue(),
       remarks: "",
@@ -1641,17 +695,20 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     setOpenPaymentModal(true);
   };
 
-  // Months in calendar order; several months = a fixed amount of one month's rent each
+  // Months in calendar order; several months = a fixed amount: what each month still owes (rent + fees)
   const sortedPayMonths = openMonths.map((m) => m.label).filter((l) => payMonths.includes(l));
   const multiMonth = sortedPayMonths.length > 1;
   const monthlyRentNum = Number(tenantInfo.monthlyRent) || 0;
-  const totalDue = monthlyRentNum * Math.max(sortedPayMonths.length, 1);
+  const monthDue = (label) => billFor(label).balance || monthlyRentNum;
+  const totalDue = Math.round((sortedPayMonths.length ? sortedPayMonths : [currentPeriod]).reduce((s, l) => s + monthDue(l), 0) * 100) / 100;
+  const payBill = billFor(sortedPayMonths[0] || currentPeriod);
   const togglePayMonth = (label) => {
     const next = payMonths.includes(label) ? payMonths.filter((l) => l !== label) : [...payMonths, label];
     const list = next.length ? next : payMonths; // always keep one month
     setPayMonths(list);
-    // Paying for one month keeps the amount editable; several months fix it to rent x months
-    setPaymentForm((f) => ({ ...f, amount: String(monthlyRentNum * Math.max(list.length, 1) || f.amount) }));
+    // Paying for one month keeps the amount editable; several months fix it to what those months owe
+    const sum = Math.round(list.reduce((s, l) => s + monthDue(l), 0) * 100) / 100;
+    setPaymentForm((f) => ({ ...f, amount: String(sum || f.amount) }));
   };
   const amountNum = multiMonth ? totalDue : Number(paymentForm.amount);
   const paymentErrors = {
@@ -1672,7 +729,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       setPaymentError("Your account is not linked to an owner yet. Please contact the property owner.");
       return;
     }
-    if (multiMonth && !(monthlyRentNum > 0)) {
+    if (multiMonth && !(totalDue > 0)) {
       setPaymentError("Your monthly rent isn't set yet, so you can only pay one month at a time. Ask your landlord to set it.");
       return;
     }
@@ -1689,9 +746,11 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       propertyId: tenantInfo.propertyId,
       propertyName: tenantInfo.propertyName,
       roomNumber: tenantInfo.roomNumber,
-      amount: months.length > 1 ? monthlyRentNum : amountNum,
+      amount: months.length > 1 ? monthDue(periodMonth) : amountNum,
       paymentMethod: payMethodKey,
       periodMonth,
+      // What the month was billed at (rent + fees), for the owner's review and the receipt
+      bill: billSnapshot(monthlyRentNum, charges.filter((c) => chargeAppliesTo(c, periodMonth))),
       // IMPORTANT: a tenant can never mark a payment as Paid.
       status: "Pending",
       verificationStatus: "Pending",
@@ -1758,6 +817,37 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
   const goNextStep = () => setPayStep(1);
 
+  // The rent receipt as a picture on the phone (Photos / Downloads), see utils/receiptImage.js
+  const [savingReceipt, setSavingReceipt] = useState(false);
+  const saveReceipt = async (p) => {
+    if (savingReceipt) return;
+    setSavingReceipt(true);
+    try {
+      const result = await saveReceiptImage({
+        receiptNo: p.receiptNo,
+        issuer: p.receiptIssuer,
+        tenant: p.tenantName || tenantInfo.name,
+        property: p.propertyName || tenantInfo.propertyName,
+        room: p.roomNumber || tenantInfo.roomNumber,
+        period: p.periodMonth,
+        dateText: fmtDate(p.paymentDate) || "—",
+        method: p.paymentMethod,
+        reference: p.referenceNumber,
+        amountText: peso(p.amount),
+        remarks: p.remarks,
+        bill: p.bill,
+        partial: String(p.status || "").toLowerCase() === "partial",
+      });
+      if (result === "downloaded") notify("Receipt saved. Find it in your Downloads or Photos.");
+      else if (result === "shared") notify("Receipt ready. Choose Save Image to keep it in your Photos.");
+    } catch (err) {
+      console.error("Couldn't save the receipt:", err);
+      notify("Couldn't save the receipt. Please try again.", "error");
+    } finally {
+      setSavingReceipt(false);
+    }
+  };
+
   const copyText = async (text, label = "Copied.") => {
     try {
       await navigator.clipboard.writeText(text);
@@ -1770,7 +860,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const sharePayment = async (p) => {
     const text = `Rent payment · ${p.periodMonth || ""}\nAmount: ${peso(p.amount)}\nMethod: ${p.paymentMethod || "—"}\nReference: ${p.referenceNumber || "—"}\nStatus: ${p.status || "Pending"}`;
     try {
-      if (navigator.share) await navigator.share({ title: "Payment details", text });
+      if (navigator.share) await navigator.share({ title: t("Payment details"), text });
       else await copyText(text, "Payment details copied.");
     } catch {
       /* the person closed the share sheet */
@@ -1854,11 +944,11 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       <Paper elevation={0} sx={cardSx}>
         <EmptyState
           icon={<ErrorOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />}
-          title="We couldn't open your dashboard"
+          title={t("We couldn't open your dashboard")}
           body={loadError}
           action={
             <Button variant="contained" startIcon={<RefreshOutlinedIcon />} onClick={retryLoad} sx={{ mt: 2, fontWeight: 700, borderRadius: 2.5, minHeight: 46 }}>
-              Try again
+              {t("Try again")}
             </Button>
           }
         />
@@ -1886,24 +976,33 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   // Things the tenant should look at first
   const attention = [];
   if (statusTone === "error") {
-    attention.push({ key: "account", tone: "error", title: `Your account is ${String(tenantInfo.status).toLowerCase()}`, body: "Please contact your landlord to sort this out." });
+    attention.push({ key: "account", tone: "error", title: t("Your account is {status}", { status: t(String(tenantInfo.status)).toLowerCase() }), body: t("Please contact your landlord to sort this out.") });
   }
   if (tenantInfo.propertyName === "Not Assigned") {
-    attention.push({ key: "unassigned", tone: "warning", title: "No room assigned yet", body: "Your landlord hasn't linked you to a room. Rent and lease details appear once they do." });
+    attention.push({ key: "unassigned", tone: "warning", title: t("No room assigned yet"), body: t("Your landlord hasn't linked you to a room. Rent and lease details appear once they do.") });
   }
   if (statusKey === "rejected") {
     attention.push({
       key: "rejected",
       tone: "error",
-      title: "Your payment couldn't be verified",
-      body: currentPeriodPayment?.rejectionReason || "Check the reference number and submit it again.",
-      actionLabel: "Submit again",
+      title: t("Your payment couldn't be verified"),
+      body: currentPeriodPayment?.rejectionReason || t("Check the reference number and submit it again."),
+      actionLabel: t("Submit again"),
       onAction: openPayRentModal,
     });
   } else if (statusKey === "overdue") {
-    attention.push({ key: "overdue", tone: "error", title: "Your rent is overdue", body: `${peso(tenantInfo.monthlyRent)} for ${currentPeriod} · ${dueText.toLowerCase()}`, actionLabel: "Pay now", onAction: openPayRentModal });
+    attention.push({ key: "overdue", tone: "error", title: t("Your rent is overdue"), body: t("{amount} for {period} · {due}", { amount: peso(dueNow), period: currentPeriod, due: dueText.toLowerCase() }), actionLabel: t("Pay now"), onAction: openPayRentModal });
+  } else if (feesOutstanding && canPay) {
+    attention.push({
+      key: "fees",
+      tone: daysToDue < 0 ? "error" : "warning",
+      title: t("{amount} in fees still due", { amount: peso(currentBill.balance) }),
+      body: t("Added to {period}: {fees}. Your rent itself is paid.", { period: currentPeriod, fees: currentBill.fees.map((c) => c.label).join(", ") }),
+      actionLabel: t("Pay fees"),
+      onAction: openPayRentModal,
+    });
   } else if (canPay && daysToDue >= 0 && daysToDue <= 3) {
-    attention.push({ key: "soon", tone: "warning", title: daysToDue === 0 ? "Rent is due today" : `Rent is due in ${daysToDue} ${daysToDue === 1 ? "day" : "days"}`, body: `${peso(tenantInfo.monthlyRent)} for ${currentPeriod}`, actionLabel: "Pay now", onAction: openPayRentModal });
+    attention.push({ key: "soon", tone: "warning", title: daysToDue === 0 ? t("Rent is due today") : t("Rent is due in {days}", { days: daysToDue === 1 ? t("{n} day", { n: daysToDue }) : t("{n} days", { n: daysToDue }) }), body: t("{amount} for {period}", { amount: peso(dueNow), period: currentPeriod }), actionLabel: t("Pay now"), onAction: openPayRentModal });
   }
   // Lease: tell the tenant a month ahead, and again once it has ended
   if (lease && !lease.open) {
@@ -1912,16 +1011,16 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         key: "lease",
         tone: "error",
         icon: CalendarMonthOutlinedIcon,
-        title: "Your lease has ended",
-        body: `It ended on ${fmtDate(lease.endMs)}. Please talk to your landlord about renewing or moving out.`,
+        title: t("Your lease has ended"),
+        body: t("It ended on {date}. Please talk to your landlord about renewing or moving out.", { date: fmtDate(lease.endMs) }),
       });
     } else if (lease.daysLeft <= 30) {
       attention.push({
         key: "lease",
         tone: "warning",
         icon: CalendarMonthOutlinedIcon,
-        title: lease.daysLeft === 0 ? "Your lease ends today" : `Your lease ends in ${lease.daysLeft} ${lease.daysLeft === 1 ? "day" : "days"}`,
-        body: `Ends on ${fmtDate(lease.endMs)}. Talk to your landlord if you'd like to renew.`,
+        title: lease.daysLeft === 0 ? t("Your lease ends today") : t("Your lease ends in {days}", { days: lease.daysLeft === 1 ? t("{n} day", { n: lease.daysLeft }) : t("{n} days", { n: lease.daysLeft }) }),
+        body: t("Ends on {date}. Talk to your landlord if you'd like to renew.", { date: fmtDate(lease.endMs) }),
       });
     }
   }
@@ -1930,10 +1029,10 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     const until = (curfewMin - nowMin + 1440) % 1440;
     const since = (nowMin - curfewMin + 1440) % 1440;
     if (since < 180) {
-      attention.push({ key: "curfew", tone: "info", icon: ScheduleIcon, title: "Curfew is in effect", body: `Curfew started at ${tenantInfo.curfewTime}. Please check the house rules if you're out.` });
+      attention.push({ key: "curfew", tone: "info", icon: ScheduleIcon, title: t("Curfew is in effect"), body: t("Curfew started at {time}. Please check the house rules if you're out.", { time: tenantInfo.curfewTime }) });
     } else if (until <= 120) {
       const label = until >= 60 ? `${Math.floor(until / 60)} h ${until % 60} min` : `${until} min`;
-      attention.push({ key: "curfew", tone: "warning", icon: ScheduleIcon, title: `Curfew in ${label}`, body: `Be back at ${tenantInfo.propertyName} by ${tenantInfo.curfewTime}.` });
+      attention.push({ key: "curfew", tone: "warning", icon: ScheduleIcon, title: t("Curfew in {time}", { time: label }), body: t("Be back at {place} by {time}.", { place: tenantInfo.propertyName, time: tenantInfo.curfewTime }) });
     }
   }
   if (!rulesAcked && hasHouseRules) {
@@ -1941,14 +1040,14 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       key: "rules",
       tone: "info",
       icon: PolicyOutlinedIcon,
-      title: "Please read your house rules",
-      body: tenantInfo.curfewTime ? `Includes the curfew (${tenantInfo.curfewTime}) set for ${tenantInfo.propertyName}.` : `Set by the owner of ${tenantInfo.propertyName}.`,
-      actionLabel: "Read rules",
+      title: t("Please read your house rules"),
+      body: tenantInfo.curfewTime ? t("Includes the curfew ({time}) set for {place}.", { time: tenantInfo.curfewTime, place: tenantInfo.propertyName }) : t("Set by the owner of {place}.", { place: tenantInfo.propertyName }),
+      actionLabel: t("Read rules"),
       onAction: () => {
         ackRules();
         goTab("profile");
       },
-      secondaryLabel: "Got it",
+      secondaryLabel: t("Got it"),
       onSecondary: ackRules,
     });
   }
@@ -1962,751 +1061,118 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   };
 
   const overview = (
-    <>
-      {/* Hero: the property's cover photo gives the tenant a sense of home */}
-      <Box
-        sx={{
-          position: "relative",
-          overflow: "hidden",
-          bgcolor: "#202020",
-          color: "#fff",
-          borderRadius: 4,
-          p: { xs: 2, sm: 4 },
-          mb: { xs: 2, sm: 3 },
-          display: "grid",
-          gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "1.2fr 0.8fr" },
-          gap: { xs: 2.5, md: 4 },
-          alignItems: "end",
-          minHeight: hasCover ? { xs: 300, sm: 280 } : undefined,
-          ...rise(0),
-        }}
-      >
-        {hasCover ? (
-          <>
-            <Box
-              component="img"
-              src={tenantInfo.coverPhotoUrl}
-              alt=""
-              onError={() => setCoverFailed(true)}
-              sx={{ position: "absolute", inset: 0, width: "100%", height: "100%", objectFit: "cover" }}
-            />
-            <Box sx={{ position: "absolute", inset: 0, background: "linear-gradient(180deg, rgba(20,20,20,0.35) 0%, rgba(20,20,20,0.88) 70%)" }} />
-          </>
-        ) : (
-          <>
-            <Box
-              sx={{
-                position: "absolute",
-                top: -140,
-                right: -100,
-                width: 380,
-                height: 380,
-                borderRadius: "50%",
-                background: "radial-gradient(circle, rgba(255, 69, 0, 0.22), transparent 70%)",
-                pointerEvents: "none",
-              }}
-            />
-            <Box sx={{ position: "absolute", top: 20, right: 20, width: 150, opacity: 0.7, display: { xs: "none", sm: "block" }, pointerEvents: "none" }}>
-              <LeaseWindows progress={0.5} />
-            </Box>
-          </>
-        )}
-
-        <Box sx={{ position: "relative", minWidth: 0, alignSelf: "end" }}>
-          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mb: 1.5 }}>
-            <Chip
-              size="small"
-              label={`${tenantInfo.status} tenant`}
-              sx={{
-                fontWeight: 700,
-                bgcolor: statusTone === "success" ? "rgba(76, 175, 80, 0.28)" : statusTone === "warning" ? "rgba(255, 167, 38, 0.28)" : "rgba(244, 67, 54, 0.28)",
-                color: statusTone === "success" ? "#c8e6c9" : statusTone === "warning" ? "#ffe0b2" : "#ffcdd2",
-              }}
-            />
-            {tenantInfo.curfewTime && (
-              <Chip
-                size="small"
-                icon={<ScheduleIcon />}
-                label={`Curfew ${tenantInfo.curfewTime}`}
-                sx={{ fontWeight: 700, bgcolor: "rgba(255,255,255,0.16)", color: "#fff", "& .MuiChip-icon": { color: "inherit" } }}
-              />
-            )}
-          </Box>
-          <Typography
-            component="h1"
-            sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, color: "#fff", fontSize: { xs: "1.45rem", sm: "2.1rem" }, lineHeight: 1.15, overflowWrap: "anywhere" }}
-          >
-            {greeting()}, {firstName(tenantInfo.name)}
-          </Typography>
-          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.8)", mt: 0.75 }}>
-            {tenantInfo.propertyName} · Room {tenantInfo.roomNumber}
-            {tenantInfo.bedId && tenantInfo.bedId !== "N/A" ? ` · Bed ${tenantInfo.bedId}` : ""}
-          </Typography>
-        </Box>
-
-        {/* Rent card */}
-        <Box
-          sx={{
-            position: "relative",
-            p: { xs: 1.75, sm: 2.25 },
-            borderRadius: 3,
-            bgcolor: "rgba(255,255,255,0.1)",
-            border: "1px solid rgba(255,255,255,0.18)",
-            backdropFilter: "blur(10px)",
-            WebkitBackdropFilter: "blur(10px)",
-          }}
-        >
-          <Box sx={{ ...row, justifyContent: "space-between", mb: 0.5 }}>
-            <Typography variant="caption" sx={{ color: "rgba(255,255,255,0.8)", fontWeight: 700 }}>
-              {currentPeriod.toUpperCase()} RENT
-            </Typography>
-            <Chip
-              size="small"
-              label={rentStatus}
-              sx={{
-                fontWeight: 700,
-                bgcolor: isPaid ? "rgba(76,175,80,0.3)" : paymentTone(rentStatus) === "error" ? "rgba(244,67,54,0.3)" : "rgba(255,167,38,0.3)",
-                color: isPaid ? "#c8e6c9" : paymentTone(rentStatus) === "error" ? "#ffcdd2" : "#ffe0b2",
-              }}
-            />
-          </Box>
-          <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, fontSize: { xs: "1.8rem", sm: "2rem" }, lineHeight: 1.2 }}>{peso(tenantInfo.monthlyRent)}</Typography>
-          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.8)", mb: 1.75 }}>
-            {dueText}
-            {canPay ? ` · ${dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
-          </Typography>
-          {aheadMonths.length > 0 && (
-            <Typography variant="caption" sx={{ display: "block", color: "#c8e6c9", fontWeight: 700, mt: -1, mb: 1.5 }}>
-              Also covered: {aheadMonths.map((m) => `${m.short}${m.status === "pending" ? " (sent)" : ""}`).join(", ")}
-            </Typography>
-          )}
-          {canPay ? (
-            <Button variant="contained" fullWidth size="large" startIcon={<PaymentIcon />} onClick={() => openPayRentModal()} sx={{ fontWeight: 800, borderRadius: 2.5, minHeight: 48 }}>
-              Pay rent
-            </Button>
-          ) : (
-            canPayAhead ? (
-              <Button fullWidth size="large" variant="outlined" startIcon={<PaymentIcon />} onClick={() => openPayRentModal()} sx={{ ...heroBtnSx, minHeight: 48 }}>
-                Pay next month early
-              </Button>
-            ) : (
-              <Button fullWidth size="large" variant="outlined" onClick={() => goTab("payments")} sx={{ ...heroBtnSx, minHeight: 48 }}>
-                View payments
-              </Button>
-            )
-          )}
-        </Box>
-      </Box>
-
-      {/* Needs attention: the most urgent first, the rest one tap away */}
-      {attention.length > 0 && (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mb: { xs: 2, sm: 3 } }}>
-          {(attentionOpen ? attention : attention.slice(0, ATTENTION_PREVIEW)).map(({ key, ...a }) => (
-            <AttentionBanner key={key} {...a} />
-          ))}
-          {attention.length > ATTENTION_PREVIEW && (
-            <Button
-              onClick={() => setAttentionOpen((v) => !v)}
-              aria-expanded={attentionOpen}
-              color="inherit"
-              endIcon={<ExpandMoreIcon sx={{ transform: attentionOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />}
-              sx={{ alignSelf: "flex-start", fontWeight: 700, minHeight: 40, textTransform: "none", color: "text.secondary" }}
-            >
-              {attentionOpen ? "Show fewer" : `${attention.length - ATTENTION_PREVIEW} more ${attention.length - ATTENTION_PREVIEW === 1 ? "thing" : "things"} to check`}
-            </Button>
-          )}
-        </Box>
-      )}
-
-      {/* Quick actions */}
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: { xs: 0.75, sm: 1.5 }, mb: { xs: 2, sm: 3 }, ...rise(1) }}>
-        <QuickAction
-          icon={<PaymentIcon fontSize="small" />}
-          label={canPay ? "Pay rent" : canPayAhead ? "Pay ahead" : "Payments"}
-          onClick={canPay || canPayAhead ? () => openPayRentModal() : () => goTab("payments")}
-        />
-        <QuickAction icon={<BuildOutlinedIcon fontSize="small" />} label="Report issue" onClick={openRepair} badge={activeTickets.length} />
-        <QuickAction icon={<PolicyOutlinedIcon fontSize="small" />} label="House rules" onClick={() => goTab("profile")} />
-      </Box>
-
-      {/* Panels: what's happening now */}
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 2, md: 3 }, alignItems: "stretch" }}>
-        <Panel
-          title={unreadCount > 0 ? `Announcements · ${unreadCount} new` : "Announcements"}
-          icon={<CampaignOutlinedIcon fontSize="small" />}
-          sx={rise(2)}
-          action={
-            announcements.some((n) => n.isRead === false) && (
-              <Button size="small" startIcon={<DoneAllIcon fontSize="small" />} onClick={() => markRead(announcements)} sx={{ fontWeight: 700, minHeight: 40, flexShrink: 0 }}>
-                Mark all read
-              </Button>
-            )
-          }
-        >
-          {announcements.length === 0 ? (
-            <Box sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", py: 3, gap: 1 }}>
-              <Box sx={{ width: 52, height: 52, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: "rgba(255, 69, 0, 0.10)", color: "primary.main" }}>
-                <CampaignOutlinedIcon />
-              </Box>
-              <Typography sx={{ fontWeight: 800 }}>No announcements yet</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 280 }}>
-                Updates from your landlord, like water interruptions or house meetings, show up here.
-              </Typography>
-            </Box>
-          ) : (
-            <>
-              {unreadCount > 0 && announcements.length > ANNOUNCE_PREVIEW && (
-                <FilterPills
-                  value={announcementFilter}
-                  onChange={(v) => {
-                    setAnnouncementFilter(v);
-                    setAnnouncementsShown(ANNOUNCE_PREVIEW);
-                  }}
-                  options={[
-                    { id: "all", label: "All", count: announcements.length },
-                    { id: "unread", label: "Unread", count: unreadCount },
-                  ]}
-                />
-              )}
-              <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
-                {visibleAnnouncements.slice(0, announcementsShown).map((n) => (
-                  <AnnouncementItem key={n.id} n={n} onRead={markRead} />
-                ))}
-                {visibleAnnouncements.length === 0 && (
-                  <Typography variant="body2" color="text.secondary">You're all caught up.</Typography>
-                )}
-              </Box>
-              <ShowMore
-                shown={Math.min(announcementsShown, visibleAnnouncements.length)}
-                total={visibleAnnouncements.length}
-                step={ANNOUNCE_PREVIEW}
-                onMore={() => setAnnouncementsShown((n) => n + PAGE_SIZE)}
-                onLess={() => setAnnouncementsShown(ANNOUNCE_PREVIEW)}
-              />
-            </>
-          )}
-        </Panel>
-
-        <Panel
-          title={activeTickets.length > 0 ? `Open requests · ${activeTickets.length}` : "Open requests"}
-          icon={<BuildOutlinedIcon fontSize="small" />}
-          sx={rise(3)}
-          action={
-            rankedTickets.length > 0 && (
-              <Button size="small" endIcon={<ArrowForwardIcon />} onClick={() => goTab("maintenance")} sx={{ fontWeight: 700, minHeight: 40, flexShrink: 0 }}>
-                {activeTickets.length > 2 ? `All ${activeTickets.length}` : "View all"}
-              </Button>
-            )
-          }
-        >
-          {activeTickets.length === 0 ? (
-            <Box sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", py: 3, gap: 1 }}>
-              <Box sx={{ width: 52, height: 52, borderRadius: "50%", display: "grid", placeItems: "center", bgcolor: (t) => alpha(t.palette.success.main, 0.12), color: "success.main" }}>
-                <CheckCircleOutlinedIcon />
-              </Box>
-              <Typography sx={{ fontWeight: 800 }}>Nothing needs fixing</Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ maxWidth: 280 }}>
-                If something breaks in your room, report it and your landlord sees it right away.
-              </Typography>
-              <Button size="small" variant="outlined" startIcon={<AddIcon />} onClick={openRepair} sx={{ mt: 0.5, fontWeight: 700, borderRadius: 99, minHeight: 36, py: 0.5, px: 1.75, textTransform: "none" }}>
-                Report an issue
-              </Button>
-            </Box>
-          ) : (
-            <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
-              {activeTickets.slice(0, 2).map((t) => (
-                <TicketCard key={t.id} t={t} compact />
-              ))}
-            </Box>
-          )}
-        </Panel>
-      </Box>
-    </>
+    <TenantOverviewTab
+      activeTickets={activeTickets}
+      aheadMonths={aheadMonths}
+      announcementFilter={announcementFilter}
+      announcements={announcements}
+      announcementsShown={announcementsShown}
+      attention={attention}
+      attentionOpen={attentionOpen}
+      canPay={canPay}
+      canPayAhead={canPayAhead}
+      currentBill={currentBill}
+      currentPeriod={currentPeriod}
+      dueDate={dueDate}
+      dueText={dueText}
+      feesOutstanding={feesOutstanding}
+      goTab={goTab}
+      hasCover={hasCover}
+      heroBtnSx={heroBtnSx}
+      isPaid={isPaid}
+      markRead={markRead}
+      openPayRentModal={openPayRentModal}
+      openRepair={openRepair}
+      rankedTickets={rankedTickets}
+      rentStatus={rentStatus}
+      setAnnouncementFilter={setAnnouncementFilter}
+      setAnnouncementsShown={setAnnouncementsShown}
+      setAttentionOpen={setAttentionOpen}
+      setCoverFailed={setCoverFailed}
+      statusTone={statusTone}
+      tenantInfo={tenantInfo}
+      unreadCount={unreadCount}
+      visibleAnnouncements={visibleAnnouncements}
+    />
   );
 
   const currentStep = !currentPeriodPayment ? -1 : isPaid ? 2 : statusKey === "rejected" ? 2 : 1;
 
   const paymentsTab = (
-    <>
-      <Box sx={{ ...row, justifyContent: "space-between", gap: 2, mb: { xs: 2, sm: 2.5 } }}>
-        <Typography variant="body2" color="text.secondary">
-          Pay your rent and submit it for owner verification.
-        </Typography>
-        {!isPhone && (
-          <Button variant="contained" startIcon={<PaymentIcon />} onClick={() => openPayRentModal()} disabled={!canPay && !canPayAhead} sx={{ fontWeight: 700, borderRadius: 2.5, px: 2.5, flexShrink: 0 }}>
-            {canPay ? "Pay rent" : canPayAhead ? "Pay ahead" : isPaid ? "Paid" : "Awaiting verification"}
-          </Button>
-        )}
-      </Box>
-
-      {rentMissing && (
-        <Alert severity="warning" sx={{ mb: 2, borderRadius: 2 }}>
-          Your monthly rent isn't set yet, so the amount may need to be typed in. Ask your landlord to confirm it.
-        </Alert>
-      )}
-
-      <Paper elevation={0} sx={{ ...cardSx, overflow: "hidden", display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, mb: { xs: 2, sm: 2.5 }, ...rise(0) }}>
-        {[
-          { label: "Billing period", value: currentPeriod },
-          { label: "Amount due", value: peso(tenantInfo.monthlyRent) },
-          { label: "Due date", value: dueDateLabel, sub: dueText },
-          { label: "Status", value: rentStatus, tone: paymentTone(rentStatus) },
-        ].map((item, i) => (
-          <Box
-            key={item.label}
-            sx={{
-              px: { xs: 1.75, sm: 2.5 },
-              py: { xs: 1.25, sm: 1.75 },
-              minWidth: 0,
-              borderTop: { xs: i > 1 ? "1px solid" : "none", md: "none" },
-              borderLeft: { xs: i % 2 === 1 ? "1px solid" : "none", md: i === 0 ? "none" : "1px solid" },
-              borderColor: "divider",
-            }}
-          >
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }} noWrap component="div">
-              {item.label}
-            </Typography>
-            {item.tone ? (
-              <Box sx={{ mt: 0.5 }}>
-                <Pill label={item.value} tone={item.tone} />
-              </Box>
-            ) : (
-              <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: { xs: "1.05rem", sm: "1.25rem" }, lineHeight: 1.3 }}>{item.value}</Typography>
-            )}
-            {item.sub && (
-              <Typography variant="caption" color="text.secondary" noWrap component="div">
-                {item.sub}
-              </Typography>
-            )}
-          </Box>
-        ))}
-      </Paper>
-
-      {/* Where is this month's payment? */}
-      {currentPeriodPayment ? (
-        <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 2.5 }, mb: { xs: 2, sm: 2.5 }, ...rise(1) }}>
-          <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 2 }}>
-            <Typography sx={{ fontWeight: 800 }}>Your {currentPeriod} payment</Typography>
-            <Typography variant="body2" color="text.secondary">
-              {peso(currentPeriodPayment.amount)} · {currentPeriodPayment.paymentMethod}
-            </Typography>
-          </Box>
-          <Box sx={{ px: { xs: 0, sm: 4 } }}>
-            <StepTrack
-              steps={["Submitted", "Under review", statusKey === "rejected" ? "Rejected" : "Paid"]}
-              current={currentStep}
-              complete={isPaid}
-              failed={statusKey === "rejected"}
-            />
-          </Box>
-          {statusKey === "rejected" && (
-            <Alert severity="error" sx={{ mt: 2, borderRadius: 2 }}>
-              The owner couldn't verify this payment
-              {currentPeriodPayment.rejectionReason ? `: ${currentPeriodPayment.rejectionReason}` : "."} Check the details and submit it again.
-            </Alert>
-          )}
-          {isAwaitingVerification && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
-              The owner has been notified and will verify your payment soon.
-            </Typography>
-          )}
-        </Paper>
-      ) : (
-        <Paper
-          elevation={0}
-          sx={{
-            ...cardSx,
-            p: { xs: 2, sm: 2.5 },
-            mb: { xs: 2, sm: 2.5 },
-            borderColor: (t) => alpha(t.palette[daysToDue < 0 ? "error" : "warning"].main, 0.45),
-            bgcolor: (t) => alpha(t.palette[daysToDue < 0 ? "error" : "warning"].main, 0.06),
-            display: "flex",
-            flexDirection: { xs: "column", sm: "row" },
-            alignItems: { xs: "stretch", sm: "center" },
-            gap: 2,
-            ...rise(1),
-          }}
-        >
-          <Box sx={{ flex: 1 }}>
-            <Typography sx={{ fontWeight: 800 }}>{daysToDue < 0 ? "Your rent is overdue" : "Rent not paid yet"}</Typography>
-            <Typography variant="body2" color="text.secondary">
-              {peso(tenantInfo.monthlyRent)} for {currentPeriod} · {dueText.toLowerCase()}
-            </Typography>
-          </Box>
-          {isPhone && (
-            <Button variant="contained" startIcon={<PaymentIcon />} onClick={openPayRentModal} sx={{ fontWeight: 700, borderRadius: 2.5 }}>
-              Pay now
-            </Button>
-          )}
-        </Paper>
-      )}
-
-      {/* Coming months: what's covered, and paying ahead */}
-      {payableMonths.length > 1 && (
-        <Panel
-          title="Coming months"
-          icon={<CalendarMonthOutlinedIcon fontSize="small" />}
-          sx={{ mb: { xs: 2, sm: 2.5 }, ...rise(2) }}
-          action={
-            openMonths.some((m) => !m.current) && (
-              <Button size="small" variant="outlined" startIcon={<PaymentIcon />} onClick={() => openPayRentModal(openMonths.filter((m) => !m.current || canPay).slice(0, 2).map((m) => m.label))} sx={{ fontWeight: 700, borderRadius: 2.5, minHeight: 40, flexShrink: 0 }}>
-                Pay ahead
-              </Button>
-            )
-          }
-        >
-          <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(3, minmax(0, 1fr))", sm: "repeat(6, minmax(0, 1fr))" }, gap: 0.75 }}>
-            {payableMonths.map((m) => {
-              const tone = m.status === "paid" ? "success" : m.status === "pending" ? "warning" : m.current && !canPay ? "warning" : null;
-              return (
-                <Box key={m.label} sx={{ p: 1.25, borderRadius: 2, textAlign: "center", border: "1px solid", borderColor: tone ? (t) => alpha(t.palette[tone].main, 0.4) : "divider", bgcolor: tone ? (t) => alpha(t.palette[tone].main, 0.07) : "transparent" }}>
-                  <Typography sx={{ fontWeight: 800, fontSize: 14 }}>{m.short}</Typography>
-                  <Typography variant="caption" sx={{ fontWeight: 700, color: tone ? `${tone}.dark` : "text.secondary" }}>
-                    {m.status === "paid" ? "Paid" : m.status === "pending" ? "Being checked" : m.status === "partial" ? "Part paid" : m.current ? "Due" : "Not yet"}
-                  </Typography>
-                </Box>
-              );
-            })}
-          </Box>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1.25 }}>
-            You can pay up to {ADVANCE_MONTHS} months ahead{lease && !lease.open ? ", until your lease ends" : ""}. Each month is checked by your owner.
-          </Typography>
-        </Panel>
-      )}
-
-      <Panel
-        title="Payment history"
-        icon={<HistoryIcon fontSize="small" />}
-        sx={rise(2)}
-        action={paidThisYear > 0 && <Pill label={`${peso(paidThisYear)} paid in ${new Date().getFullYear()}`} tone="success" />}
-      >
-        {payments.length > 0 && (
-          <FilterPills
-            value={paymentFilter}
-            onChange={setPaymentFilter}
-            options={[
-              { id: "all", label: "All", count: paymentCounts.all },
-              { id: "paid", label: "Paid", count: paymentCounts.paid },
-              { id: "pending", label: "Pending", count: paymentCounts.pending },
-              ...(paymentCounts.rejected > 0 ? [{ id: "rejected", label: "Rejected", count: paymentCounts.rejected }] : []),
-            ]}
-          />
-        )}
-        {payments.length === 0 ? (
-          <EmptyState icon={<ReceiptLongOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="No payments yet" body="Your submitted payments will show up here." />
-        ) : filteredPayments.length === 0 ? (
-          <EmptyState icon={<CheckCircleOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="Nothing here" body="No payments match this filter." />
-        ) : (
-          <Box sx={{ display: "flex", flexDirection: "column", gap: 1.25 }}>
-            {/* Latest year open, older years folded up */}
-            {paymentsByYear.map(([year, list], i) => (
-              <PaymentYear key={`${paymentFilter}-${year}`} year={year} list={list} defaultOpen={i === 0} onPick={setReceipt} />
-            ))}
-          </Box>
-        )}
-      </Panel>
-    </>
+    <TenantPaymentsTab
+      canPay={canPay}
+      canPayAhead={canPayAhead}
+      currentBill={currentBill}
+      currentPeriod={currentPeriod}
+      currentPeriodPayment={currentPeriodPayment}
+      currentStep={currentStep}
+      daysToDue={daysToDue}
+      dueDateLabel={dueDateLabel}
+      dueNow={dueNow}
+      dueText={dueText}
+      filteredPayments={filteredPayments}
+      isAwaitingVerification={isAwaitingVerification}
+      isPaid={isPaid}
+      isPhone={isPhone}
+      lease={lease}
+      openMonths={openMonths}
+      openPayRentModal={openPayRentModal}
+      paidThisYear={paidThisYear}
+      payableMonths={payableMonths}
+      paymentCounts={paymentCounts}
+      paymentFilter={paymentFilter}
+      payments={payments}
+      paymentsByYear={paymentsByYear}
+      rentMissing={rentMissing}
+      rentStatus={rentStatus}
+      setPaymentFilter={setPaymentFilter}
+      setReceipt={setReceipt}
+      statusKey={statusKey}
+    />
   );
 
   const profileTab = (
-    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "minmax(0, 1fr) minmax(0, 1.4fr)" }, gap: { xs: 2, md: 3 }, alignItems: "start" }}>
-      <Box sx={{ display: "flex", flexDirection: "column", gap: { xs: 2, md: 3 }, minWidth: 0 }}>
-        <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2.5, sm: 3 }, textAlign: "center", ...rise(0) }}>
-          <Avatar sx={{ width: 76, height: 76, mx: "auto", mb: 1.5, fontSize: "1.6rem", fontWeight: 800, bgcolor: "rgba(255, 69, 0, 0.12)", color: "primary.main" }}>
-            {initials(tenantInfo.name)}
-          </Avatar>
-          <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: "1.3rem", mb: 1.5, overflowWrap: "anywhere" }}>{tenantInfo.name}</Typography>
-          <Box sx={{ display: "flex", justifyContent: "center", flexWrap: "wrap", gap: 0.75 }}>
-            <Pill label={tenantInfo.status} tone={statusTone} />
-            <Pill label={`Room ${tenantInfo.roomNumber}`} icon={<HomeWorkOutlinedIcon />} />
-          </Box>
-        </Paper>
-
-        <Panel title="Room & lease" icon={<CalendarMonthOutlinedIcon fontSize="small" />} sx={rise(1)}>
-          {lease && (
-            <Box sx={{ mb: 1.5 }}>
-              {lease.open ? (
-                <Typography variant="body2" color="text.secondary">
-                  Your lease is open-ended. You've been here since <strong>{fmtDate(lease.startMs)}</strong>.
-                </Typography>
-              ) : (
-                <>
-                  <Box sx={{ ...row, justifyContent: "space-between", mb: 0.75 }}>
-                    <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                      {Math.round(lease.progress * 100)}% complete
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {lease.ended ? "Ended" : `${lease.daysLeft} days left`}
-                    </Typography>
-                  </Box>
-                  <LinearProgress variant="determinate" value={lease.progress * 100} sx={{ height: 8, borderRadius: 4, bgcolor: (t) => alpha(t.palette.text.primary, 0.08) }} />
-                  <Box sx={{ ...row, justifyContent: "space-between", mt: 1 }}>
-                    <Typography variant="caption" color="text.secondary">
-                      {fmtDate(lease.startMs)}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {fmtDate(lease.endMs)}
-                    </Typography>
-                  </Box>
-                </>
-              )}
-            </Box>
-          )}
-          <Facts
-            items={[
-              { label: "Room", value: `Room ${tenantInfo.roomNumber}` },
-              { label: "Bed", value: tenantInfo.bedId },
-              { label: "Lease start", value: formatLeaseStart(tenantInfo.leaseStartDate) },
-              { label: "Lease length", value: tenantInfo.leaseDuration },
-              { label: "My phone", value: tenantInfo.contact },
-            ]}
-          />
-        </Panel>
-      </Box>
-
-      <Box sx={{ display: "flex", flexDirection: "column", gap: { xs: 2, md: 3 }, minWidth: 0 }}>
-        <Panel title="My place" icon={<PlaceOutlinedIcon fontSize="small" />} sx={rise(2)}>
-          {hasCover && (
-            <Box component="img" src={tenantInfo.coverPhotoUrl} alt="" sx={{ display: "block", width: "100%", height: 140, objectFit: "cover", borderRadius: 2, mb: 1.5 }} />
-          )}
-          <Typography sx={{ fontWeight: 800 }}>{tenantInfo.propertyName}</Typography>
-          {tenantInfo.propertyAddress && (
-            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25 }}>
-              {tenantInfo.propertyAddress}
-            </Typography>
-          )}
-          {tenantInfo.amenities.length > 0 && (
-            <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1.5 }}>
-              {tenantInfo.amenities.map((a) => (
-                <Pill key={a} label={a} />
-              ))}
-            </Box>
-          )}
-          {tenantInfo.emergencyPhone && (
-            <Button
-              component="a"
-              href={`tel:${tenantInfo.emergencyPhone}`}
-              variant="outlined"
-              color="error"
-              fullWidth
-              startIcon={<PhoneOutlinedIcon />}
-              sx={{ mt: 2, fontWeight: 700, borderRadius: 2.5, minHeight: 46 }}
-            >
-              Emergency: {tenantInfo.emergencyPhone}
-            </Button>
-          )}
-        </Panel>
-
-        <Panel title="House rules & curfew" icon={<PolicyOutlinedIcon fontSize="small" />} sx={rise(3)}>
-          {!hasHouseRules ? (
-            <Typography variant="body2" color="text.secondary">
-              Your landlord hasn't posted any house rules yet.
-            </Typography>
-          ) : (
-            <>
-              {tenantInfo.curfewTime && (
-                <Box sx={{ ...row, gap: 1.25, p: 1.5, mb: 1.5, borderRadius: 2.5, bgcolor: (t) => alpha(t.palette.primary.main, 0.08) }}>
-                  <ScheduleIcon color="primary" />
-                  <Box>
-                    <Typography sx={{ fontWeight: 800 }}>Curfew at {tenantInfo.curfewTime}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Please be back before then.
-                    </Typography>
-                  </Box>
-                </Box>
-              )}
-              {tenantInfo.curfewTime && (
-                <Box sx={{ mb: 2 }}>
-                  <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
-                    YOUR CURFEW RECORD · LAST 30 NIGHTS
-                  </Typography>
-                  {recentCurfew.length === 0 ? (
-                    <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                      Nothing recorded yet.
-                    </Typography>
-                  ) : (
-                    <>
-                      <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 0.75 }}>
-                        <Pill label={`${recentCurfew.filter((r) => r.status === "present").length} on time`} tone="success" />
-                        {recentCurfew.some((r) => r.status === "late") && <Pill label={`${recentCurfew.filter((r) => r.status === "late").length} late`} tone="warning" />}
-                        {recentCurfew.some((r) => r.status === "out") && <Pill label={`${recentCurfew.filter((r) => r.status === "out").length} out past curfew`} tone="error" />}
-                      </Box>
-                      {recentCurfew.filter((r) => r.status !== "present").slice(0, 6).map((r) => {
-                        const [yy, mm, dd] = String(r.date).split("-").map(Number);
-                        return (
-                          <Box key={r.id} sx={{ ...row, justifyContent: "space-between", gap: 1, mt: 0.75, py: 0.5 }}>
-                            <Typography variant="body2" sx={{ fontWeight: 600 }}>
-                              {new Date(yy, mm - 1, dd).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })}
-                            </Typography>
-                            <Pill label={r.status === "out" ? "Out past curfew" : "Late"} tone={r.status === "out" ? "error" : "warning"} />
-                          </Box>
-                        );
-                      })}
-                    </>
-                  )}
-                </Box>
-              )}
-              {tenantInfo.rules.length > 0 && (
-                <>
-                  <Box component="ol" sx={{ m: 0, pl: 2.5, display: "flex", flexDirection: "column", gap: 0.9 }}>
-                    {(rulesOpen ? tenantInfo.rules : tenantInfo.rules.slice(0, RULES_PREVIEW)).map((r, i) => (
-                      <Typography component="li" variant="body2" key={`${i}-${r}`} sx={{ overflowWrap: "anywhere" }}>
-                        {r}
-                      </Typography>
-                    ))}
-                  </Box>
-                  {tenantInfo.rules.length > RULES_PREVIEW && (
-                    <Button
-                      size="small"
-                      onClick={() => setRulesOpen((v) => !v)}
-                      aria-expanded={rulesOpen}
-                      endIcon={<ExpandMoreIcon sx={{ transform: rulesOpen ? "rotate(180deg)" : "none", transition: "transform .2s" }} />}
-                      sx={{ mt: 1, minHeight: 40, fontWeight: 700, textTransform: "none" }}
-                    >
-                      {rulesOpen ? "Show fewer rules" : `Show all ${tenantInfo.rules.length} rules`}
-                    </Button>
-                  )}
-                </>
-              )}
-              {tenantInfo.ruleFiles.length > 0 && (
-                <Box sx={{ display: "flex", flexDirection: "column", gap: 0.75, mt: tenantInfo.rules.length > 0 ? 2 : 0 }}>
-                  {tenantInfo.ruleFiles.map((f, i) => (
-                    <Button
-                      key={`${i}-${f.url}`}
-                      onClick={() => setPreviewFile(f)}
-                      variant="outlined"
-                      startIcon={<DescriptionOutlinedIcon />}
-                      sx={{ justifyContent: "flex-start", fontWeight: 700, borderRadius: 2.5, minHeight: 44, textTransform: "none" }}
-                    >
-                      {f.name || "House rules document"}
-                    </Button>
-                  ))}
-                </Box>
-              )}
-              {!rulesAcked && (
-                <Button fullWidth variant="contained" onClick={ackRules} sx={{ mt: 2, fontWeight: 700, borderRadius: 2.5, minHeight: 46 }}>
-                  I've read the rules
-                </Button>
-              )}
-            </>
-          )}
-        </Panel>
-        <FilePreviewDialog file={previewFile} onClose={() => setPreviewFile(null)} />
-      </Box>
-    </Box>
+    <TenantProfileTab
+      ackRules={ackRules}
+      hasCover={hasCover}
+      hasHouseRules={hasHouseRules}
+      lease={lease}
+      previewFile={previewFile}
+      recentCurfew={recentCurfew}
+      rulesAcked={rulesAcked}
+      rulesOpen={rulesOpen}
+      setPreviewFile={setPreviewFile}
+      setRulesOpen={setRulesOpen}
+      statusTone={statusTone}
+      tenantInfo={tenantInfo}
+    />
   );
 
   const maintenanceTab = (
-    <>
-      <Box sx={{ ...row, justifyContent: "space-between", gap: 2, mb: { xs: 2, sm: 2.5 } }}>
-        <Typography variant="body2" color="text.secondary">
-          Report an issue in your room or unit and track its progress.
-        </Typography>
-        {!isPhone && (
-          <Button variant="contained" startIcon={<AddIcon />} onClick={openRepair} sx={{ fontWeight: 700, borderRadius: 2.5, px: 2.5, flexShrink: 0 }}>
-            New request
-          </Button>
-        )}
-      </Box>
-
-      {rankedTickets.length === 0 ? (
-        <Paper elevation={0} sx={{ ...cardSx, borderStyle: "dashed" }}>
-          <EmptyState
-            icon={<BuildOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />}
-            title="No maintenance requests"
-            body={`Something broken or needs fixing? Tap "New request" and your landlord will see it right away.`}
-          />
-        </Paper>
-      ) : (
-        <>
-          {activeTickets.length === 0 ? (
-            <Paper elevation={0} sx={{ ...cardSx }}>
-              <EmptyState icon={<CheckCircleOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />} title="All sorted" body="No open requests right now." />
-            </Paper>
-          ) : (
-            <>
-              {activeTickets.length > 3 && (
-                <FilterPills
-                  value={ticketFilter}
-                  onChange={(v) => {
-                    setTicketFilter(v);
-                    setTicketsShown(PAGE_SIZE);
-                  }}
-                  options={[
-                    { id: "all", label: "All open", count: activeTickets.length },
-                    { id: "Pending", label: "Waiting", count: activeTickets.filter((t) => (t.status || "Pending") === "Pending").length },
-                    { id: "In Progress", label: "Being fixed", count: activeTickets.filter((t) => t.status === "In Progress").length },
-                  ]}
-                />
-              )}
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.25, sm: 1.5 }, alignItems: "start" }}>
-                {shownTickets.slice(0, ticketsShown).map((t, i) => (
-                  <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0 }}>
-                    {/* A few requests: open in full. Many: short rows that open on tap */}
-                    <TicketCard t={t} onAction={openTicketDlg} collapsible={activeTickets.length > 2} defaultOpen={activeTickets.length <= 2} />
-                  </Box>
-                ))}
-              </Box>
-              {shownTickets.length === 0 && (
-                <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>No requests here.</Typography>
-              )}
-              <ShowMore
-                shown={Math.min(ticketsShown, shownTickets.length)}
-                total={shownTickets.length}
-                step={PAGE_SIZE}
-                noun="more requests"
-                onMore={() => setTicketsShown((n) => n + PAGE_SIZE)}
-                onLess={() => setTicketsShown(PAGE_SIZE)}
-              />
-            </>
-          )}
-
-          {/* Resolved requests live in the archive, out of the way */}
-          {resolvedTickets.length > 0 && (
-            <Box sx={{ mt: { xs: 2.5, sm: 3 } }}>
-              <Button
-                fullWidth
-                onClick={() => setArchiveOpen((o) => !o)}
-                aria-expanded={archiveOpen}
-                startIcon={<HistoryIcon fontSize="small" />}
-                sx={{ ...cardSx, justifyContent: "space-between", px: 2, minHeight: 52, fontWeight: 700, color: "text.primary", textTransform: "none" }}
-                endIcon={<ArrowForwardIcon fontSize="small" sx={{ transform: archiveOpen ? "rotate(90deg)" : "none", transition: "transform .2s" }} />}
-              >
-                <Box component="span" sx={{ flex: 1, textAlign: "left", ml: 0.5 }}>
-                  Archive · {resolvedTickets.length} closed
-                </Box>
-              </Button>
-              {archiveOpen && (
-                <>
-                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.25, sm: 1.5 }, mt: 1.5, alignItems: "start" }}>
-                    {resolvedTickets.slice(0, archiveShown).map((t) => (
-                      <Box key={t.id} sx={{ minWidth: 0, opacity: 0.85 }}>
-                        <TicketCard t={t} collapsible defaultOpen={false} />
-                      </Box>
-                    ))}
-                  </Box>
-                  <ShowMore
-                    shown={Math.min(archiveShown, resolvedTickets.length)}
-                    total={resolvedTickets.length}
-                    step={PAGE_SIZE}
-                    noun="more"
-                    onMore={() => setArchiveShown((n) => n + PAGE_SIZE)}
-                    onLess={() => setArchiveShown(PAGE_SIZE)}
-                  />
-                </>
-              )}
-            </Box>
-          )}
-        </>
-      )}
-    </>
+    <TenantMaintenanceTab
+      activeTickets={activeTickets}
+      archiveOpen={archiveOpen}
+      archiveShown={archiveShown}
+      isPhone={isPhone}
+      openRepair={openRepair}
+      openTicketDlg={openTicketDlg}
+      rankedTickets={rankedTickets}
+      resolvedTickets={resolvedTickets}
+      setArchiveOpen={setArchiveOpen}
+      setArchiveShown={setArchiveShown}
+      setTicketFilter={setTicketFilter}
+      setTicketsShown={setTicketsShown}
+      shownTickets={shownTickets}
+      ticketFilter={ticketFilter}
+      ticketsShown={ticketsShown}
+    />
   );
 
   const fabAction =
     isPhone && activeTab === "payments" && (canPay || canPayAhead)
-      ? { label: canPay ? "Pay rent" : "Pay ahead", icon: <PaymentIcon sx={{ mr: 0.75 }} />, onClick: () => openPayRentModal() }
+      ? { label: canPay ? t("Pay rent") : t("Pay ahead"), icon: <PaymentIcon sx={{ mr: 0.75 }} />, onClick: () => openPayRentModal() }
       : isPhone && activeTab === "maintenance"
-        ? { label: "New request", icon: <AddIcon sx={{ mr: 0.75 }} />, onClick: openRepair }
+        ? { label: t("New request"), icon: <AddIcon sx={{ mr: 0.75 }} />, onClick: openRepair }
         : null;
 
   const closePayment = () => {
@@ -2720,7 +1186,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
       {!online && (
         <Alert severity="warning" icon={<WifiOffOutlinedIcon />} sx={{ mb: 2, borderRadius: 2 }}>
-          You're offline. You can still look around. New requests and payments are saved on your phone and sent when you're back online.
+          {t("You're offline. You can still look around. New requests and payments are saved on your phone and sent when you're back online.")}
         </Alert>
       )}
       {outbox.length > 0 && (
@@ -2731,12 +1197,12 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           action={
             online ? (
               <Button color="inherit" size="small" onClick={flushOutbox} sx={{ fontWeight: 700 }}>
-                Send now
+                {t("Send now")}
               </Button>
             ) : undefined
           }
         >
-          {outbox.length === 1 ? "1 item is waiting to be sent." : `${outbox.length} items are waiting to be sent.`} {online ? "" : "It goes out automatically when you're back online."}
+          {outbox.length === 1 ? t("1 item is waiting to be sent.") : `${outbox.length} items are waiting to be sent.`} {online ? "" : t("It goes out automatically when you're back online.")}
         </Alert>
       )}
       {online && listenError && (
@@ -2745,11 +1211,11 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           sx={{ mb: 2, borderRadius: 2 }}
           action={
             <Button color="inherit" size="small" onClick={retryLoad} sx={{ fontWeight: 700 }}>
-              Retry
+              {t("Retry")}
             </Button>
           }
         >
-          Some of your information couldn't be loaded.
+          {t("Some of your information couldn't be loaded.")}
         </Alert>
       )}
 
@@ -2790,9 +1256,9 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         <DialogTitle sx={{ pb: 1.25 }}>
           <Box sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
             <Typography sx={{ fontWeight: 800, fontSize: "1.1rem" }}>
-              {payStep === 2 ? "Payment submitted" : `Pay rent · ${periodsText(sortedPayMonths.length ? sortedPayMonths : [currentPeriod])}`}
+              {payStep === 2 ? t("Payment submitted") : `Pay rent · ${periodsText(sortedPayMonths.length ? sortedPayMonths : [currentPeriod])}`}
             </Typography>
-            <IconButton edge="end" aria-label="Close" onClick={closePayment} disabled={paymentSubmitting}>
+            <IconButton edge="end" aria-label={t("Close")} onClick={closePayment} disabled={paymentSubmitting}>
               <CloseIcon />
             </IconButton>
           </Box>
@@ -2800,7 +1266,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
             <Box sx={{ mt: 1.25 }}>
               <LinearProgress variant="determinate" value={payStep === 0 ? 50 : 100} sx={{ height: 5, borderRadius: 3, bgcolor: (t) => alpha(t.palette.text.primary, 0.08) }} />
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mt: 0.5 }}>
-                Step {payStep + 1} of 2 · {payStep === 0 ? "Send your payment" : "Confirm the details"}
+                {t("Step")}{" "}{payStep + 1}{" "}{t("of 2 ·")}{" "}{payStep === 0 ? t("Send your payment") : t("Confirm the details")}
               </Typography>
             </Box>
           )}
@@ -2815,10 +1281,10 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 <Box>
                   <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 0.75 }}>
                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                      Paying for
+                      {t("Paying for")}
                     </Typography>
                     <Typography variant="caption" color="text.secondary">
-                      Tap more months to pay ahead
+                      {t("Tap more months to pay ahead")}
                     </Typography>
                   </Box>
                   <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 0.75 }}>
@@ -2853,7 +1319,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                             {m.short}
                           </Box>
                           <Box sx={{ fontSize: 11.5, color: m.status === "paid" ? "success.dark" : m.status === "pending" ? "warning.dark" : "text.secondary", fontWeight: 600 }}>
-                            {m.status === "paid" ? "Paid" : m.status === "pending" ? "Sent" : m.status === "partial" ? "Part paid" : m.current ? "This month" : "Ahead"}
+                            {m.status === "paid" ? t("Paid") : m.status === "pending" ? t("Sent") : m.status === "partial" ? t("Part paid") : m.current ? t("This month") : t("Ahead")}
                           </Box>
                         </Box>
                       );
@@ -2861,7 +1327,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                   </Box>
                   {rentMissing && (
                     <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
-                      Paying several months at once needs your monthly rent set. Ask your landlord.
+                      {t("Paying several months at once needs your monthly rent set. Ask your landlord.")}
                     </Typography>
                   )}
                 </Box>
@@ -2869,15 +1335,20 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
               <Box sx={{ p: 2, borderRadius: 2.5, bgcolor: "rgba(255, 69, 0, 0.08)" }}>
                 <Typography variant="body2" color="text.secondary">
-                  Amount to send
+                  {t("Amount to send")}
                 </Typography>
                 <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, fontSize: "1.9rem", color: "primary.main", lineHeight: 1.2 }}>
-                  {peso(multiMonth ? totalDue : tenantInfo.monthlyRent)}
+                  {peso(multiMonth ? totalDue : payBill.balance || monthlyRentNum)}
                 </Typography>
                 {multiMonth && (
                   <Typography variant="caption" color="text.secondary">
-                    {peso(monthlyRentNum)} × {sortedPayMonths.length} months · send it as one payment
+                    {sortedPayMonths.length}{" "}{t("months · send it as one payment")}
                   </Typography>
+                )}
+                {!multiMonth && payBill.fees.length > 0 && (
+                  <Box sx={{ mt: 1 }}>
+                    <BillBreakdown bill={payBill} />
+                  </Box>
                 )}
               </Box>
 
@@ -2889,13 +1360,13 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
               {payMethods.length === 0 ? (
                 <Alert severity="info" sx={{ borderRadius: 2 }}>
-                  Your landlord hasn't added online payment details yet. Please ask them how to pay. They can record a cash payment for you.
+                  {t("Your landlord hasn't added online payment details yet. Please ask them how to pay. They can record a cash payment for you.")}
                 </Alert>
               ) : (
                 <>
                   <Box>
                     <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                      Payment method
+                      {t("Payment method")}
                     </Typography>
                     <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 0.75 }}>
                       {payMethods.map((m) => (
@@ -2917,7 +1388,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                       <Box sx={{ ...row, justifyContent: "center", gap: 1, mb: 1 }}>
                         <QrCode2Icon color="primary" />
                         <Typography sx={{ fontWeight: 800 }}>
-                          {activePayMethod.kind === "wallet" ? `Scan with ${activePayMethod.label}` : "Scan with any bank or e-wallet app"}
+                          {activePayMethod.kind === "wallet" ? `Scan with ${activePayMethod.label}` : t("Scan with any bank or e-wallet app")}
                         </Typography>
                       </Box>
 
@@ -2929,7 +1400,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                               href={activePayMethod.qrUrl}
                               target="_blank"
                               rel="noopener noreferrer"
-                              aria-label="Open QR code full size"
+                              aria-label={t("Open QR code full size")}
                               sx={{ display: "block", width: "100%", maxWidth: 240 }}
                             >
                               <Box component="img" src={activePayMethod.qrUrl} alt={`${activePayMethod.label} QR code`} sx={{ display: "block", width: "100%", height: "auto", bgcolor: "#fff", borderRadius: 2, border: "1px solid", borderColor: "divider" }} />
@@ -2943,10 +1414,10 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                                 onClick={async () => ((await saveImage(activePayMethod.qrUrl, `${activePayMethod.key}-payment-qr.png`)) ? notify("QR saved to your photos/downloads.") : notify("Couldn't save it here. Tap the QR to open it, then press and hold to save.", "warning"))}
                                 sx={{ fontWeight: 700, mb: 0.5, minHeight: 40 }}
                               >
-                                Save QR to my phone
+                                {t("Save QR to my phone")}
                               </Button>
                               <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1.25 }}>
-                                Paying from this phone? Save the QR, then in your {activePayMethod.kind === "wallet" ? activePayMethod.label : "bank or e-wallet"} app choose <strong>Pay QR → Upload from gallery</strong>.
+                                {t("Paying from this phone? Save the QR, then in your")}{" "}{activePayMethod.kind === "wallet" ? activePayMethod.label : t("bank or e-wallet")}{" "}{t("app choose")}{" "}<strong>{t("Pay QR → Upload from gallery")}</strong>.
                               </Typography>
                             </Box>
                           )}
@@ -2961,14 +1432,14 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                           <Typography variant="body2" color="text.secondary">
                             {prettyMobile(activePayMethod.accountNumber)}
                           </Typography>
-                          <IconButton size="small" aria-label="Copy number" onClick={() => copyText(activePayMethod.accountNumber, "Number copied.")}>
+                          <IconButton size="small" aria-label={t("Copy number")} onClick={() => copyText(activePayMethod.accountNumber, "Number copied.")}>
                             <ContentCopyIcon sx={{ fontSize: 16 }} />
                           </IconButton>
                         </Box>
                       )}
                       {activePayMethod.kind === "wallet" && !activePayMethod.qrUrl && (
                         <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
-                          Send to this number in your {activePayMethod.label} app.
+                          {t("Send to this number in your")}{" "}{activePayMethod.label}{" "}{t("app.")}
                         </Typography>
                       )}
                     </Box>
@@ -2978,7 +1449,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
               {payMethods.length > 0 && (
                 <Typography variant="body2" color="text.secondary">
-                  Send the payment first, then tap <strong>I've paid</strong> to enter your reference number.
+                  {t("Send the payment first, then tap")}{" "}<strong>{t("I've paid")}</strong>{" "}{t("to enter your reference number.")}
                 </Typography>
               )}
             </Box>
@@ -2995,7 +1466,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
               <Box sx={{ ...row, justifyContent: "space-between", p: 1.5, borderRadius: 2.5, bgcolor: (t) => alpha(t.palette.text.primary, 0.05) }}>
                 <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
-                  Paid via
+                  {t("Paid via")}
                 </Typography>
                 <Pill label={payMethodKey} />
               </Box>
@@ -3003,16 +1474,16 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
               {multiMonth && (
                 <Box sx={{ p: 1.5, borderRadius: 2.5, bgcolor: (t) => alpha(t.palette.primary.main, 0.06) }}>
                   <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                    {sortedPayMonths.length} months: {sortedPayMonths.map(shortPeriod).join(", ")}
+                    {sortedPayMonths.length}{" "}{t("months:")}{" "}{sortedPayMonths.map(shortPeriod).join(", ")}
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Your owner verifies each month. Each one is marked Paid when they do.
+                    {t("Your owner verifies each month. Each one is marked Paid when they do.")}
                   </Typography>
                 </Box>
               )}
 
               <TextField
-                label={multiMonth ? "Total amount sent" : "Payment amount"}
+                label={multiMonth ? t("Total amount sent") : t("Payment amount")}
                 type="number"
                 fullWidth
                 size="small"
@@ -3023,14 +1494,14 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 error={!!showPayErr("amount")}
                 helperText={
                   multiMonth
-                    ? `${peso(monthlyRentNum)} for each of ${sortedPayMonths.length} months. To send a different amount, pay one month at a time.`
-                    : showPayErr("amount") || (amountNum > 0 && tenantInfo.monthlyRent > 0 && amountNum !== tenantInfo.monthlyRent ? `This is different from your monthly rent of ${peso(tenantInfo.monthlyRent)}. Your owner will review it.` : "")
+                    ? `What ${sortedPayMonths.length} months still owe, added up. To send a different amount, pay one month at a time.`
+                    : showPayErr("amount") || (amountNum > 0 && monthDue(sortedPayMonths[0] || currentPeriod) > 0 && amountNum !== monthDue(sortedPayMonths[0] || currentPeriod) ? `This is different from the ${peso(monthDue(sortedPayMonths[0] || currentPeriod))} due. Your owner will review it.` : "")
                 }
                 slotProps={{ input: { startAdornment: <Typography sx={{ mr: 1 }}>₱</Typography> }, htmlInput: { min: 0, inputMode: "decimal" } }}
               />
 
               <TextField
-                label="Payment reference number"
+                label={t("Payment reference number")}
                 fullWidth
                 size="small"
                 value={paymentForm.referenceNumber}
@@ -3038,11 +1509,11 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 onBlur={() => setPaymentTouched((t) => ({ ...t, referenceNumber: true }))}
                 error={!!showPayErr("referenceNumber")}
                 helperText={showPayErr("referenceNumber") || "Found on your payment receipt or confirmation message."}
-                placeholder="Enter the reference number from your payment"
+                placeholder={t("Enter the reference number from your payment")}
               />
 
               <TextField
-                label="Payment date"
+                label={t("Payment date")}
                 type="date"
                 fullWidth
                 size="small"
@@ -3055,27 +1526,27 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
               />
 
               <TextField
-                label="Remarks (optional)"
+                label={t("Remarks (optional)")}
                 multiline
                 minRows={2}
                 fullWidth
                 value={paymentForm.remarks}
                 onChange={(e) => setPaymentForm({ ...paymentForm, remarks: e.target.value.slice(0, 300) })}
-                placeholder="Add any additional payment details"
+                placeholder={t("Add any additional payment details")}
                 helperText={`${paymentForm.remarks.length}/300`}
               />
 
               <Box>
                 <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.75 }}>
-                  Proof of payment (optional)
+                  {t("Proof of payment (optional)")}
                 </Typography>
                 <PhotoPicker
                   file={proofFile}
                   onChange={setProofFile}
                   onError={setProofError}
                   disabled={paymentSubmitting}
-                  label="Attach a screenshot of your receipt"
-                  hint="Helps your owner verify faster"
+                  label={t("Attach a screenshot of your receipt")}
+                  hint={t("Helps your owner verify faster")}
                 />
                 {proofError && (
                   <Typography variant="caption" color="error" sx={{ display: "block", mt: 0.5 }}>
@@ -3086,12 +1557,12 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
               {!online && (
                 <Alert severity="warning" icon={<WifiOffOutlinedIcon />} sx={{ borderRadius: 2 }}>
-                  You're offline. Submitting saves it on your phone, and it's sent automatically once you're back online.
+                  {t("You're offline. Submitting saves it on your phone, and it's sent automatically once you're back online.")}
                 </Alert>
               )}
 
               <Alert severity="warning" sx={{ borderRadius: 2 }}>
-                Your payment will be recorded as <strong>Pending</strong>. The owner must verify it before it becomes <strong>Paid</strong>.
+                {t("Your payment will be recorded as")}{" "}<strong>{t("Pending")}</strong>{t(". The owner must verify it before it becomes")}{" "}<strong>{t("Paid")}</strong>.
               </Alert>
             </Box>
           )}
@@ -3104,20 +1575,20 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                   <path d="M5 12.5l4.5 4.5L19 7.5" strokeDasharray="30" style={{ animation: "kkCheck .5s ease-out .2s both" }} />
                 </svg>
               </Box>
-              <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, fontSize: "1.4rem" }}>{submittedPayment.queued ? "Saved on your phone" : "Payment sent!"}</Typography>
+              <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, fontSize: "1.4rem" }}>{submittedPayment.queued ? t("Saved on your phone") : t("Payment sent!")}</Typography>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
                 {submittedPayment.queued
-                  ? "You're offline. We'll send it automatically once you're back online. A proof screenshot can't be kept offline, so show it to your landlord if asked."
-                  : "Your owner will verify it soon. We'll notify you once it's marked Paid."}
+                  ? t("You're offline. We'll send it automatically once you're back online. A proof screenshot can't be kept offline, so show it to your landlord if asked.")
+                  : t("Your owner will verify it soon. We'll notify you once it's marked Paid.")}
               </Typography>
               <Box sx={{ textAlign: "left", p: 2, borderRadius: 3, border: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
                 <Facts
                   items={[
-                    { label: "Amount", value: peso(submittedPayment.amount), color: "success.main" },
-                    { label: "Period", value: submittedPayment.periodMonth },
-                    { label: "Method", value: submittedPayment.paymentMethod },
-                    { label: "Reference", value: submittedPayment.referenceNumber },
-                    { label: "Status", value: "Pending verification" },
+                    { label: t("Amount"), value: peso(submittedPayment.amount), color: "success.main" },
+                    { label: t("Period"), value: submittedPayment.periodMonth },
+                    { label: t("Method"), value: submittedPayment.paymentMethod },
+                    { label: t("Reference"), value: submittedPayment.referenceNumber },
+                    { label: t("Status"), value: "Pending verification" },
                   ]}
                 />
               </Box>
@@ -3129,17 +1600,17 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           {payStep === 0 && (
             <>
               <Button onClick={closePayment} sx={{ fontWeight: 700 }}>
-                Cancel
+                {t("Cancel")}
               </Button>
               <Button variant="contained" endIcon={<ArrowForwardIcon />} onClick={goNextStep} disabled={payMethods.length === 0} sx={{ fontWeight: 700, borderRadius: 2.5, px: 3 }}>
-                I've paid
+                {t("I've paid")}
               </Button>
             </>
           )}
           {payStep === 1 && (
             <>
               <Button startIcon={<ArrowBackIcon />} onClick={() => setPayStep(0)} disabled={paymentSubmitting} sx={{ fontWeight: 700 }}>
-                Back
+                {t("Back")}
               </Button>
               <Button
                 variant="contained"
@@ -3148,7 +1619,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 startIcon={paymentSubmitting ? <CircularProgress size={18} color="inherit" /> : <PaymentIcon />}
                 sx={{ fontWeight: 700, borderRadius: 2.5, px: 3 }}
               >
-                {paymentSubmitting ? "Submitting..." : !online ? "Save and send later" : multiMonth ? `Submit ${sortedPayMonths.length} months` : "Submit payment"}
+                {paymentSubmitting ? t("Submitting...") : !online ? t("Save and send later") : multiMonth ? `Submit ${sortedPayMonths.length} months` : t("Submit payment")}
               </Button>
             </>
           )}
@@ -3161,10 +1632,10 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 }}
                 sx={{ fontWeight: 700 }}
               >
-                View payments
+                {t("View payments")}
               </Button>
               <Button variant="contained" onClick={() => setOpenPaymentModal(false)} sx={{ fontWeight: 700, borderRadius: 2.5, px: 3 }}>
-                Done
+                {t("Done")}
               </Button>
             </>
           )}
@@ -3180,8 +1651,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         slotProps={{ paper: { sx: { borderRadius: 3, bgcolor: "background.default", m: 2, width: "calc(100% - 32px)", maxHeight: "calc(100% - 32px)" } } }}
       >
         <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
-          {ticketDlg.mode === "cancel" ? "Cancel this request?" : ticketDlg.mode === "edit" ? "Edit request" : "Add an update"}
-          <IconButton edge="end" aria-label="Close" onClick={closeTicketDlg} disabled={ticketDlg.busy}>
+          {ticketDlg.mode === "cancel" ? t("Cancel this request?") : ticketDlg.mode === "edit" ? t("Edit request") : t("Add an update")}
+          <IconButton edge="end" aria-label={t("Close")} onClick={closeTicketDlg} disabled={ticketDlg.busy}>
             <CloseIcon />
           </IconButton>
         </DialogTitle>
@@ -3193,22 +1664,22 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           )}
           {ticketDlg.mode === "cancel" && (
             <Typography variant="body2" color="text.secondary">
-              "{ticketDlg.ticket?.title}" will be removed and your landlord won't see it any more. You can only cancel a request that hasn't been started.
+              "{ticketDlg.ticket?.title}{t("\" will be removed and your landlord won't see it any more. You can only cancel a request that hasn't been started.")}
             </Typography>
           )}
           {ticketDlg.mode === "edit" && (
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
-              <TextField fullWidth required label="Title" value={ticketDlg.title} onChange={(e) => setTicketDlg((d) => ({ ...d, title: e.target.value, error: "" }))} slotProps={{ htmlInput: { maxLength: 100 } }} />
-              <TextField fullWidth multiline minRows={3} label="Details" value={ticketDlg.description} onChange={(e) => setTicketDlg((d) => ({ ...d, description: e.target.value }))} slotProps={{ htmlInput: { maxLength: 600 } }} />
+              <TextField fullWidth required label={t("Title")} value={ticketDlg.title} onChange={(e) => setTicketDlg((d) => ({ ...d, title: e.target.value, error: "" }))} slotProps={{ htmlInput: { maxLength: 100 } }} />
+              <TextField fullWidth multiline minRows={3} label={t("Details")} value={ticketDlg.description} onChange={(e) => setTicketDlg((d) => ({ ...d, description: e.target.value }))} slotProps={{ htmlInput: { maxLength: 600 } }} />
             </Box>
           )}
           {ticketDlg.mode === "update" && (
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
               <Typography variant="body2" color="text.secondary">
-                Something changed, or you have more to tell about "{ticketDlg.ticket?.title}"? Your landlord is notified.
+                {t("Something changed, or you have more to tell about \"")}{ticketDlg.ticket?.title}{t("\"? Your landlord is notified.")}
               </Typography>
-              <TextField fullWidth multiline minRows={3} label="Your message" value={ticketDlg.text} onChange={(e) => setTicketDlg((d) => ({ ...d, text: e.target.value, error: "" }))} slotProps={{ htmlInput: { maxLength: 400 } }} />
-              <PhotoPicker file={ticketDlg.photo} onChange={(f) => setTicketDlg((d) => ({ ...d, photo: f, error: "" }))} onError={(m) => setTicketDlg((d) => ({ ...d, photoError: m }))} disabled={ticketDlg.busy} label="Take or choose a photo" hint="Optional" />
+              <TextField fullWidth multiline minRows={3} label={t("Your message")} value={ticketDlg.text} onChange={(e) => setTicketDlg((d) => ({ ...d, text: e.target.value, error: "" }))} slotProps={{ htmlInput: { maxLength: 400 } }} />
+              <PhotoPicker file={ticketDlg.photo} onChange={(f) => setTicketDlg((d) => ({ ...d, photo: f, error: "" }))} onError={(m) => setTicketDlg((d) => ({ ...d, photoError: m }))} disabled={ticketDlg.busy} label={t("Take or choose a photo")} hint={t("Optional")} />
               {ticketDlg.photoError && (
                 <Typography variant="caption" color="error">
                   {ticketDlg.photoError}
@@ -3219,7 +1690,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1, "& .MuiButton-root": { minHeight: 46 } }}>
           <Button onClick={closeTicketDlg} disabled={ticketDlg.busy} sx={{ fontWeight: 700, textTransform: "none" }}>
-            {ticketDlg.mode === "cancel" ? "Keep it" : "Close"}
+            {ticketDlg.mode === "cancel" ? t("Keep it") : t("Close")}
           </Button>
           <Button
             variant="contained"
@@ -3228,7 +1699,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
             disabled={ticketDlg.busy || !online}
             sx={{ fontWeight: 800, borderRadius: 2.5, px: 3, textTransform: "none" }}
           >
-            {ticketDlg.busy ? "Please wait..." : ticketDlg.mode === "cancel" ? "Cancel request" : ticketDlg.mode === "edit" ? "Save changes" : "Send update"}
+            {ticketDlg.busy ? t("Please wait...") : ticketDlg.mode === "cancel" ? t("Cancel request") : ticketDlg.mode === "edit" ? t("Save changes") : t("Send update")}
           </Button>
         </DialogActions>
       </Dialog>
@@ -3245,71 +1716,53 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         {receipt && (
           <>
             <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
-              Payment details
-              <IconButton edge="end" aria-label="Close" onClick={() => setReceipt(null)}>
+              {t("Payment details")}
+              <IconButton edge="end" aria-label={t("Close")} onClick={() => setReceipt(null)}>
                 <CloseIcon />
               </IconButton>
             </DialogTitle>
             <DialogContent dividers sx={{ px: { xs: 2, sm: 3 } }}>
               <Box sx={{ textAlign: "center", mb: 2 }}>
                 <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 900, fontSize: "2rem" }}>{peso(receipt.amount)}</Typography>
-                <Pill label={receipt.status || "Pending"} tone={paymentTone(receipt.status)} />
+                <Pill label={t(receipt.status || "Pending")} tone={paymentTone(receipt.status)} />
               </Box>
               <Facts
                 items={[
-                  { label: "Period", value: receipt.periodMonth || "—" },
-                  ...(receipt.receiptNo ? [{ label: "Receipt no.", value: receipt.receiptNo }] : []),
-                  { label: "Method", value: receipt.paymentMethod || "—" },
-                  { label: "Reference", value: receipt.referenceNumber || "—" },
-                  { label: "Payment date", value: fmtDate(receipt.paymentDate) || "—" },
-                  { label: "Submitted", value: fmtDate(receipt.createdAt) || "—" },
-                  ...(receipt.remarks ? [{ label: "Remarks", value: receipt.remarks }] : []),
-                  ...(receipt.rejectionReason ? [{ label: "Owner note", value: receipt.rejectionReason, color: "error.main" }] : []),
+                  { label: t("Period"), value: receipt.periodMonth || "—" },
+                  ...(receipt.receiptNo ? [{ label: t("Receipt no."), value: receipt.receiptNo }] : []),
+                  { label: t("Method"), value: receipt.paymentMethod || "—" },
+                  { label: t("Reference"), value: receipt.referenceNumber || "—" },
+                  { label: t("Payment date"), value: fmtDate(receipt.paymentDate) || "—" },
+                  { label: t("Submitted"), value: fmtDate(receipt.createdAt) || "—" },
+                  ...(receipt.remarks ? [{ label: t("Remarks"), value: receipt.remarks }] : []),
+                  ...(receipt.rejectionReason ? [{ label: t("Owner note"), value: receipt.rejectionReason, color: "error.main" }] : []),
                 ]}
               />
               {receipt.proofUrl && (
                 <Box component="a" href={receipt.proofUrl} target="_blank" rel="noopener noreferrer" sx={{ display: "block", mt: 2 }}>
                   <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.5 }}>
-                    Your proof of payment
+                    {t("Your proof of payment")}
                   </Typography>
-                  <Box component="img" src={receipt.proofUrl} alt="Proof of payment" loading="lazy" sx={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider" }} />
+                  <Box component="img" src={receipt.proofUrl} alt={t("Proof of payment")} loading="lazy" sx={{ width: "100%", maxHeight: 220, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider" }} />
                 </Box>
               )}
             </DialogContent>
             <DialogActions sx={{ px: { xs: 2, sm: 3 }, pt: 1.5, pb: { xs: "calc(12px + env(safe-area-inset-bottom, 0px))", sm: 2 }, "& .MuiButton-root": { minHeight: 46 } }}>
               {receipt.referenceNumber && (
                 <Button startIcon={<ContentCopyIcon />} onClick={() => copyText(receipt.referenceNumber, "Reference copied.")} sx={{ fontWeight: 700 }}>
-                  Copy reference
+                  {t("Copy reference")}
                 </Button>
               )}
               {receipt.receiptNo && ["paid", "partial"].includes(String(receipt.status || "").toLowerCase()) && (
-                <Button
-                  startIcon={<ReceiptLongOutlinedIcon />}
-                  onClick={() =>
-                    printReceiptDoc({
-                      receiptNo: receipt.receiptNo,
-                      issuer: receipt.receiptIssuer,
-                      tenant: receipt.tenantName || tenantInfo.name,
-                      property: receipt.propertyName,
-                      room: receipt.roomNumber,
-                      period: receipt.periodMonth,
-                      dateText: fmtDate(receipt.paymentDate) || "—",
-                      method: receipt.paymentMethod,
-                      amountText: peso(receipt.amount),
-                      remarks: receipt.remarks,
-                      partial: String(receipt.status || "").toLowerCase() === "partial",
-                    })
-                  }
-                  sx={{ fontWeight: 700 }}
-                >
-                  Official receipt
+                <Button variant="outlined" startIcon={savingReceipt ? <CircularProgress size={16} /> : <DownloadOutlinedIcon />} disabled={savingReceipt} onClick={() => saveReceipt(receipt)} sx={{ fontWeight: 700, borderRadius: 2.5 }}>
+                  {t("Save receipt")}
                 </Button>
               )}
               <Button startIcon={<IosShareOutlinedIcon />} onClick={() => sharePayment(receipt)} sx={{ fontWeight: 700 }}>
-                Share
+                {t("Share")}
               </Button>
               <Button variant="contained" onClick={() => setReceipt(null)} sx={{ fontWeight: 700, borderRadius: 2.5 }}>
-                Close
+                {t("Close")}
               </Button>
             </DialogActions>
           </>
@@ -3326,8 +1779,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         PaperProps={{ sx: { borderRadius: isPhone ? 0 : 3, bgcolor: "background.default" } }}
       >
         <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
-          New maintenance request
-          <IconButton edge="end" aria-label="Close" onClick={() => setOpenRepairModal(false)} disabled={repairSubmitting}>
+          {t("New maintenance request")}
+          <IconButton edge="end" aria-label={t("Close")} onClick={() => setOpenRepairModal(false)} disabled={repairSubmitting}>
             <CloseIcon />
           </IconButton>
         </DialogTitle>
@@ -3336,7 +1789,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           <Box sx={{ display: "flex", flexDirection: "column", gap: 2.25, pt: 0.5 }}>
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700 }}>
-                What kind of issue is it?
+                {t("What kind of issue is it?")}
               </Typography>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 1, mt: 0.75 }}>
                 {CATEGORY_OPTIONS.map((opt) => {
@@ -3378,18 +1831,18 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
             </Box>
 
             <TextField
-              label="Issue summary"
-              placeholder="e.g. Water leak, light bulb replacement"
+              label={t("Issue summary")}
+              placeholder={t("e.g. Water leak, light bulb replacement")}
               fullWidth
               size="small"
               value={repairForm.title}
               onChange={(e) => setRepairForm({ ...repairForm, title: e.target.value.slice(0, 80) })}
               error={repairTouched && !repairForm.title.trim()}
-              helperText={repairTouched && !repairForm.title.trim() ? "Add a short summary." : `${repairForm.title.length}/80`}
+              helperText={repairTouched && !repairForm.title.trim() ? t("Add a short summary.") : `${repairForm.title.length}/80`}
             />
 
             <TextField
-              label="Detailed description"
+              label={t("Detailed description")}
               multiline
               minRows={3}
               fullWidth
@@ -3400,9 +1853,9 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
             <Box>
               <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.75 }}>
-                Photo (optional)
+                {t("Photo (optional)")}
               </Typography>
-              <PhotoPicker file={repairPhoto} onChange={setRepairPhoto} onError={setRepairPhotoError} disabled={repairSubmitting} label="Take or choose a photo" hint="A picture helps your landlord prepare" />
+              <PhotoPicker file={repairPhoto} onChange={setRepairPhoto} onError={setRepairPhotoError} disabled={repairSubmitting} label={t("Take or choose a photo")} hint={t("A picture helps your landlord prepare")} />
               {repairPhotoError && (
                 <Typography variant="caption" color="error" sx={{ display: "block", mt: 0.5 }}>
                   {repairPhotoError}
@@ -3412,7 +1865,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
             {!online && (
               <Alert severity="warning" icon={<WifiOffOutlinedIcon />} sx={{ borderRadius: 2 }}>
-                You're offline. Connect to the internet to send this request.
+                {t("You're offline. Connect to the internet to send this request.")}
               </Alert>
             )}
           </Box>
@@ -3420,7 +1873,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
         <DialogActions sx={{ px: { xs: 2, sm: 3 }, pt: 1.5, pb: { xs: "calc(12px + env(safe-area-inset-bottom, 0px))", sm: 2 }, gap: 1, "& .MuiButton-root": { minHeight: 46 } }}>
           <Button onClick={() => setOpenRepairModal(false)} disabled={repairSubmitting} sx={{ fontWeight: 700 }}>
-            Cancel
+            {t("Cancel")}
           </Button>
           <Button
             variant="contained"
@@ -3429,7 +1882,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
             startIcon={repairSubmitting ? <CircularProgress size={18} color="inherit" /> : null}
             sx={{ fontWeight: 700, borderRadius: 2.5, px: 3 }}
           >
-            {repairSubmitting ? "Sending..." : "Submit request"}
+            {repairSubmitting ? t("Sending...") : t("Submit request")}
           </Button>
         </DialogActions>
       </Dialog>

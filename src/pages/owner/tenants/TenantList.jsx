@@ -47,6 +47,9 @@ import { auth, db } from "../../../config/firebase";
 import { normalizePayment } from "../../../utils/normalizePayment";
 import { MONTHS, DAY_MS, normalizeStatus, STATUS_TONE, rentStatusOf, leaseFlagOf } from "../../../utils/tenantRent";
 import { withoutRemoved } from "../../../utils/accountState";
+import { isActiveCharge } from "../../../utils/charges";
+// Translation is "tr" here: this file also uses "t" for tenants and the theme
+import { t as tr } from "../../../i18n";
 
 const HEAD = '"Inter", sans-serif';
 const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
@@ -105,12 +108,12 @@ function Pill({ label, tone }) {
 
 // "Needs attention" quick filters
 const ATTENTION = [
-  { key: "overdue", label: "Overdue rent", icon: <ErrorOutlineRoundedIcon />, tone: "error" },
-  { key: "review", label: "Payment to review", icon: <ReceiptLongOutlinedIcon />, tone: "info" },
-  { key: "lease", label: "Lease ending", icon: <EventBusyOutlinedIcon />, tone: "warning" },
-  { key: "pending", label: "Pending onboarding", icon: <HourglassEmptyRoundedIcon />, tone: "warning" },
-  { key: "noRoom", label: "No room", icon: <MeetingRoomOutlinedIcon />, tone: "warning" },
-  { key: "curfew", label: "Out past curfew", icon: <NightsStayOutlinedIcon />, tone: "error" },
+  { key: "overdue", label: tr("Overdue rent"), icon: <ErrorOutlineRoundedIcon />, tone: "error" },
+  { key: "review", label: tr("Payment to review"), icon: <ReceiptLongOutlinedIcon />, tone: "info" },
+  { key: "lease", label: tr("Lease ending"), icon: <EventBusyOutlinedIcon />, tone: "warning" },
+  { key: "pending", label: tr("Pending onboarding"), icon: <HourglassEmptyRoundedIcon />, tone: "warning" },
+  { key: "noRoom", label: tr("No room"), icon: <MeetingRoomOutlinedIcon />, tone: "warning" },
+  { key: "curfew", label: tr("Out past curfew"), icon: <NightsStayOutlinedIcon />, tone: "error" },
 ];
 
 // Laptop column layout, shared by the header row and every tenant row
@@ -238,6 +241,17 @@ export default function TenantList() {
     return () => unsubscribe();
   }, [today]);
 
+  // Extra fees (electricity, Wi-Fi...) count toward this month's rent status
+  const [charges, setCharges] = useState([]);
+  useEffect(() => {
+    if (!auth.currentUser) return undefined;
+    return onSnapshot(
+      query(collection(db, "charges"), where("ownerUid", "==", auth.currentUser.uid)),
+      (snapshot) => setCharges(snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isActiveCharge)),
+      (error) => console.warn("Fees unavailable:", error?.code || error)
+    );
+  }, []);
+
   // =========================================================
   // DERIVED: one enriched row per tenant
   // =========================================================
@@ -268,7 +282,7 @@ export default function TenantList() {
       const status = normalizeStatus(t.status);
       const property = propertyById.get(t.propertyId) || null;
       const tenantPayments = [...(paymentsByTenant.get(t.uid) || []), ...(t.uid !== t.id ? paymentsByTenant.get(t.id) || [] : [])];
-      const rent = rentStatusOf(t, tenantPayments, today);
+      const rent = rentStatusOf(t, tenantPayments, today, charges);
       const lease = leaseFlagOf(t, today);
 
       // out / late on the property's latest curfew check (tonight or last night)
@@ -299,7 +313,7 @@ export default function TenantList() {
         flags,
       };
     });
-  }, [tenants, payments, logs, propertyById, today]);
+  }, [tenants, payments, charges, logs, propertyById, today]);
 
   const attentionCounts = useMemo(() => {
     const counts = {};
@@ -321,10 +335,10 @@ export default function TenantList() {
   const unpaidCount = payable.length - paidCount;
   const collectedPct = payable.length ? Math.round((paidCount / payable.length) * 100) : 0;
   const headerTiles = [
-    { label: "Current tenants", icon: <PeopleOutlineIcon />, value: currentRows.length, suffix: rows.length > currentRows.length ? `+${rows.length - currentRows.length} former` : "" },
+    { label: tr("Current tenants"), icon: <PeopleOutlineIcon />, value: currentRows.length, suffix: rows.length > currentRows.length ? `+${rows.length - currentRows.length} former` : "" },
     { label: `Paid for ${MONTHS[today.getMonth()]}`, icon: <PaymentsOutlinedIcon />, value: paidCount, suffix: `/ ${payable.length}` },
-    { label: "Still unpaid", icon: <PendingActionsOutlinedIcon />, value: unpaidCount, accent: unpaidCount > 0 },
-    { label: "Rent collected", icon: <PieChartOutlineRoundedIcon />, value: `${collectedPct}%`, squares: true, pct: collectedPct },
+    { label: tr("Still unpaid"), icon: <PendingActionsOutlinedIcon />, value: unpaidCount, accent: unpaidCount > 0 },
+    { label: tr("Rent collected"), icon: <PieChartOutlineRoundedIcon />, value: `${collectedPct}%`, squares: true, pct: collectedPct },
   ];
 
   // =========================================================
@@ -402,10 +416,10 @@ export default function TenantList() {
     const place = (
       <>
         <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
-          {r.propertyName || <Box component="span" sx={{ color: "warning.dark" }}>Not linked to a property</Box>}
+          {r.propertyName || <Box component="span" sx={{ color: "warning.dark" }}>{tr("Not linked to a property")}</Box>}
         </Typography>
         <Typography variant="caption" noWrap component="div" sx={{ color: roomText ? "text.secondary" : "warning.dark", fontWeight: roomText ? 400 : 700 }}>
-          {roomText || "No room"}
+          {roomText || tr("No room")}
         </Typography>
       </>
     );
@@ -416,7 +430,6 @@ export default function TenantList() {
         component="button"
         type="button"
         onClick={() => navigate(`/owner/tenants/${t.id}`)}
-        aria-label={`Open ${r.name}`}
         sx={{
           display: "grid",
           gridTemplateColumns: { xs: "minmax(0, 1fr) auto", md: COLUMNS },
@@ -503,10 +516,10 @@ export default function TenantList() {
         "& > *": { fontWeight: 700, color: "text.secondary", fontSize: "0.72rem", letterSpacing: ".06em", textTransform: "uppercase" },
       }}
     >
-      <Box>Tenant</Box>
-      <Box>Property · room</Box>
-      <Box>Rent · {MONTHS[today.getMonth()]}</Box>
-      <Box sx={{ textAlign: "right", pr: 3.5 }}>Status</Box>
+      <Box>{tr("Tenant")}</Box>
+      <Box>{tr("Property · room")}</Box>
+      <Box>{tr("Rent ·")}{" "}{MONTHS[today.getMonth()]}</Box>
+      <Box sx={{ textAlign: "right", pr: 3.5 }}>{tr("Status")}</Box>
     </Box>
   );
 
@@ -519,7 +532,7 @@ export default function TenantList() {
 
         <Box sx={{ position: "relative", display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: { xs: "stretch", sm: "center" }, justifyContent: "space-between", gap: { xs: 1.5, sm: 2 }, mb: { xs: 2, sm: 2.5 } }}>
           <Typography color="text.secondary" sx={{ minWidth: 0, fontSize: { xs: 14, sm: 15 } }}>
-            View and manage tenants across your properties
+            {tr("View and manage tenants across your properties")}
           </Typography>
           <Button
             variant="contained"
@@ -527,7 +540,7 @@ export default function TenantList() {
             onClick={() => navigate("/owner/tenants/register")}
             sx={{ flexShrink: 0, fontWeight: 700, borderRadius: R.sm, minHeight: 44, boxShadow: "0 10px 22px -14px rgba(255,69,0,.9)" }}
           >
-            Register tenant
+            {tr("Register tenant")}
           </Button>
         </Box>
 
@@ -563,13 +576,13 @@ export default function TenantList() {
       {!loading && rows.length > 0 && (
         <Box sx={{ ...row, flexWrap: "wrap", gap: 1, mb: { xs: 2, sm: 2.5 } }}>
           <Typography variant="caption" sx={{ fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", color: "text.secondary", mr: 0.5 }}>
-            Needs attention
+            {tr("Needs attention")}
           </Typography>
           {attentionShown.length === 0 ? (
             <Box sx={{ ...row, gap: 0.75, color: "success.dark" }}>
               <CheckCircleOutlineIcon sx={{ fontSize: 18 }} />
               <Typography variant="body2" sx={{ fontWeight: 700 }}>
-                Nothing right now
+                {tr("Nothing right now")}
               </Typography>
             </Box>
           ) : (
@@ -636,13 +649,13 @@ export default function TenantList() {
             <SearchIcon sx={{ color: "text.secondary" }} />
             <InputBase
               fullWidth
-              placeholder="Search name, phone, email or room"
+              placeholder={tr("Search name, phone, email or room")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               inputProps={{ "aria-label": "Search tenants" }}
             />
             {searchQuery && (
-              <IconButton size="small" aria-label="Clear search" onClick={() => setSearchQuery("")}>
+              <IconButton size="small" aria-label={tr("Clear search")} onClick={() => setSearchQuery("")}>
                 <CloseIcon fontSize="small" />
               </IconButton>
             )}
@@ -650,28 +663,28 @@ export default function TenantList() {
 
           {(properties.length > 1 || hasUnlinked) && (
             <TextField select size="small" value={propertyFilter} onChange={(e) => setPropertyFilter(e.target.value)} sx={{ ...fieldSx, minWidth: { md: 190 } }} slotProps={{ htmlInput: { "aria-label": "Property" } }}>
-              <MenuItem value="all">All properties</MenuItem>
+              <MenuItem value="all">{tr("All properties")}</MenuItem>
               {[...properties]
                 .sort((a, b) => String(a.propertyName || "").localeCompare(String(b.propertyName || "")))
                 .map((p) => (
-                  <MenuItem key={p.id} value={p.id}>{p.propertyName || p.name || "Unnamed Property"}</MenuItem>
+                  <MenuItem key={p.id} value={p.id}>{p.propertyName || p.name || tr("Unnamed Property")}</MenuItem>
                 ))}
-              {hasUnlinked && <MenuItem value="unlinked">Not linked to a property</MenuItem>}
+              {hasUnlinked && <MenuItem value="unlinked">{tr("Not linked to a property")}</MenuItem>}
             </TextField>
           )}
 
           <TextField select size="small" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} sx={{ ...fieldSx, minWidth: { md: 150 } }} slotProps={{ htmlInput: { "aria-label": "Status" } }}>
             {STATUS_FILTERS.map((s) => (
               <MenuItem key={s} value={s}>
-                {s === "All" ? "All statuses" : s} ({statusCount(s)})
+                {s === "All" ? tr("All statuses") : s} ({statusCount(s)})
               </MenuItem>
             ))}
           </TextField>
 
           <TextField select size="small" value={sortBy} onChange={(e) => setSortBy(e.target.value)} sx={{ ...fieldSx, minWidth: { md: 170 }, gridColumn: { xs: properties.length > 1 || hasUnlinked ? "1 / -1" : "auto", md: "auto" } }} slotProps={{ htmlInput: { "aria-label": "Sort by" } }}>
-            <MenuItem value="name">Sort: Name</MenuItem>
-            <MenuItem value="rent">Sort: Rent status</MenuItem>
-            <MenuItem value="property">Sort: Property & room</MenuItem>
+            <MenuItem value="name">{tr("Sort: Name")}</MenuItem>
+            <MenuItem value="rent">{tr("Sort: Rent status")}</MenuItem>
+            <MenuItem value="property">{tr("Sort: Property & room")}</MenuItem>
           </TextField>
         </Box>
       )}
@@ -688,12 +701,12 @@ export default function TenantList() {
           <Box sx={{ width: 64, height: 64, borderRadius: R.md, mx: "auto", mb: 2, display: "grid", placeItems: "center", bgcolor: "rgba(255, 69, 0, 0.10)" }}>
             <PeopleOutlineIcon sx={{ fontSize: 32, color: "primary.main" }} />
           </Box>
-          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 0.5 }}>No tenants enrolled yet</Typography>
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 0.5 }}>{tr("No tenants enrolled yet")}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-            Register your first tenant to assign them a room and track payments.
+            {tr("Register your first tenant to assign them a room and track payments.")}
           </Typography>
           <Button variant="contained" startIcon={<PersonAddOutlinedIcon />} onClick={() => navigate("/owner/tenants/register")} sx={{ fontWeight: 700, borderRadius: R.sm }}>
-            Register tenant
+            {tr("Register tenant")}
           </Button>
         </Paper>
       ) : (
@@ -701,10 +714,10 @@ export default function TenantList() {
           {isFiltering && (
             <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 1.25 }}>
               <Typography variant="body2" color="text.secondary">
-                Showing {visible.length} of {rows.length} tenants
+                {tr("Showing")}{" "}{visible.length}{" "}{tr("of")}{" "}{rows.length}{" "}{tr("tenants")}
               </Typography>
               <Button size="small" onClick={clearFilters} sx={{ fontWeight: 700 }}>
-                Clear filters
+                {tr("Clear filters")}
               </Button>
             </Box>
           )}
@@ -712,9 +725,9 @@ export default function TenantList() {
           <Paper elevation={0} sx={{ ...panelSx, overflow: "hidden" }}>
             {visible.length === 0 ? (
               <Box sx={{ py: 5, px: 2, textAlign: "center" }}>
-                <Typography sx={{ fontWeight: 700 }}>No tenants match</Typography>
+                <Typography sx={{ fontWeight: 700 }}>{tr("No tenants match")}</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  Try a different search or filter.
+                  {tr("Try a different search or filter.")}
                 </Typography>
               </Box>
             ) : (
@@ -737,10 +750,10 @@ export default function TenantList() {
                 onClick={() => setPage({ key: filterKey, count: shownCount + PAGE_SIZE })}
                 sx={{ fontWeight: 700, borderRadius: R.sm, minWidth: 200 }}
               >
-                Show {Math.min(remaining, PAGE_SIZE)} more
+                {tr("Show")}{" "}{Math.min(remaining, PAGE_SIZE)}{" "}{tr("more")}
               </Button>
               <Typography variant="caption" color="text.secondary">
-                Showing {shown.length} of {visible.length}
+                {tr("Showing")}{" "}{shown.length}{" "}{tr("of")}{" "}{visible.length}
               </Typography>
             </Box>
           )}

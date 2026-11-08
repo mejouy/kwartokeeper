@@ -22,6 +22,7 @@ import SecurityOutlinedIcon from "@mui/icons-material/SecurityOutlined";
 import KeyOutlinedIcon from "@mui/icons-material/KeyOutlined";
 import LockResetOutlinedIcon from "@mui/icons-material/LockResetOutlined";
 import LoginOutlinedIcon from "@mui/icons-material/LoginOutlined";
+import { t } from "../../../i18n";
 
 const HEAD = '"Inter", sans-serif';
 const MONO = '"Roboto Mono", ui-monospace, Menlo, Consolas, monospace';
@@ -106,12 +107,12 @@ export default function CaretakerInvited() {
           <Box sx={{ width: 56, height: 56, borderRadius: R.md, mx: "auto", mb: 1.5, display: "grid", placeItems: "center", bgcolor: "rgba(255,69,0,.1)", color: "primary.main" }}>
             <KeyOutlinedIcon sx={{ fontSize: 28 }} />
           </Box>
-          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.15rem" }}>Nothing to show here</Typography>
+          <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1.15rem" }}>{t("Nothing to show here")}</Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, mb: 2.5 }}>
-            For security, a caretaker's temporary password is only shown once, right after the account is created. If it was lost, you can invite them again with a different email.
+            {t("For security, a caretaker's temporary password is only shown once, right after the account is created. If it was lost, you can invite them again with a different email.")}
           </Typography>
           <Button variant="contained" disableElevation onClick={() => navigate("/owner/caretakers")} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 44 }}>
-            Back to caretakers
+            {t("Back to caretakers")}
           </Button>
         </Box>
       </Box>
@@ -152,7 +153,7 @@ export default function CaretakerInvited() {
   const handleShare = async () => {
     if (navigator.share) {
       try {
-        await navigator.share({ title: "Caretaker login", text: shareText });
+        await navigator.share({ title: t("Caretaker login"), text: shareText });
         setHandedOff(true);
         return;
       } catch (err) {
@@ -171,9 +172,9 @@ export default function CaretakerInvited() {
   };
 
   const steps = [
-    { icon: ShareOutlinedIcon, title: "Send them the login", body: "Share it below, or tell them in person." },
-    { icon: LoginOutlinedIcon, title: "They sign in", body: `On a phone or computer at ${window.location.host}/login` },
-    { icon: LockResetOutlinedIcon, title: "They choose their own password", body: "The app asks them right after their first sign-in, so the temporary one stops working." },
+    { icon: ShareOutlinedIcon, title: t("Send them the login"), body: t("Share it below, or tell them in person.") },
+    { icon: LoginOutlinedIcon, title: t("They sign in"), body: `On a phone or computer at ${window.location.host}/login` },
+    { icon: LockResetOutlinedIcon, title: t("They choose their own password"), body: t("The app asks them right after their first sign-in, so the temporary one stops working.") },
   ];
 
   return (
@@ -187,12 +188,12 @@ export default function CaretakerInvited() {
           </Box>
           <Box sx={{ minWidth: 0, flex: 1 }}>
             <Typography component="h1" sx={{ fontFamily: HEAD, fontWeight: 900, letterSpacing: "-0.02em", fontSize: { xs: "1.3rem", sm: "1.7rem" }, lineHeight: 1.2 }}>
-              {resent ? `New password for ${fullName || "your caretaker"}` : fullName ? `${fullName} is set up` : "Caretaker account created"}
+              {resent ? `New password for ${fullName || "your caretaker"}` : fullName ? `${fullName} is set up` : t("Caretaker account created")}
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
               {resent
-                ? "Their old password stopped working. Send them this one; it's the only time it's shown."
-                : "Send them the login below. This is the only time the password is shown."}
+                ? t("Their old password stopped working. Send them this one; it's the only time it's shown.")
+                : t("Send them the login below. This is the only time the password is shown.")}
             </Typography>
             {(propertyName || typeof permissionCount === "number") && (
               <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1.25 }}>
@@ -203,7 +204,7 @@ export default function CaretakerInvited() {
                 )}
                 {typeof permissionCount === "number" && (
                   <Box component="span" sx={{ ...row, gap: 0.5, px: 1, height: 26, borderRadius: 99, fontSize: 12.5, fontWeight: 700, bgcolor: (t) => alpha(t.palette.text.primary, 0.06), color: "text.secondary", "& svg": { fontSize: 15 } }}>
-                    <SecurityOutlinedIcon /> {permissionCount} of 5 permissions
+                    <SecurityOutlinedIcon /> {permissionCount}{" "}{t("of 5 permissions")}
                   </Box>
                 )}
               </Box>
@@ -214,12 +215,12 @@ export default function CaretakerInvited() {
 
       {smsStatus === "sent" && (
         <Alert severity="success" sx={{ mb: 2, borderRadius: R.md }}>
-          Text sent{phone ? ` to ${phone}` : ""}. Keep the details below in case it doesn't arrive.
+          {t("Text sent")}{phone ? ` to ${phone}` : ""}{t(". Keep the details below in case it doesn't arrive.")}
         </Alert>
       )}
       {smsStatus === "failed" && (
         <Alert severity="warning" sx={{ mb: 2, borderRadius: R.md }}>
-          {smsError || "The text couldn't be sent."} The account was still created, so share the login yourself below.
+          {smsError || t("The text couldn't be sent.")}{" "}{t("The account was still created, so share the login yourself below.")}
         </Alert>
       )}
 
@@ -229,25 +230,25 @@ export default function CaretakerInvited() {
           <Box sx={{ ...panelSx, overflow: "hidden" }}>
             <Box sx={{ ...row, gap: 1, px: { xs: 1.75, sm: 2.25 }, py: 1.25, bgcolor: (t) => alpha(t.palette.background.paper, 0.55), borderBottom: "1px solid", borderColor: "divider" }}>
               <KeyOutlinedIcon sx={{ fontSize: 18, color: "primary.main" }} />
-              <Typography sx={{ fontWeight: 800, fontSize: 14, flex: 1 }}>Their login</Typography>
+              <Typography sx={{ fontWeight: 800, fontSize: 14, flex: 1 }}>{t("Their login")}</Typography>
               {!handedOff && (
                 <Typography variant="caption" sx={{ fontWeight: 700, color: "warning.dark" }}>
-                  Not shared yet
+                  {t("Not shared yet")}
                 </Typography>
               )}
               {handedOff && (
                 <Typography variant="caption" sx={{ ...row, gap: 0.5, fontWeight: 700, color: "success.dark" }}>
-                  <CheckIcon sx={{ fontSize: 15 }} /> Shared
+                  <CheckIcon sx={{ fontSize: 15 }} />{" "}{t("Shared")}
                 </Typography>
               )}
             </Box>
-            <CredentialRow label="Email" value={email} onCopy={() => copy("email", email)} copied={copiedKey === "email"} />
+            <CredentialRow label={t("Email")} value={email} onCopy={() => copy("email", email)} copied={copiedKey === "email"} />
             <Box sx={{ borderTop: "1px dashed", borderColor: "divider", mx: { xs: 1.75, sm: 2.25 } }} />
-            <CredentialRow label="Temporary password" value={tempPassword} secret onCopy={() => copy("pw", tempPassword)} copied={copiedKey === "pw"} />
+            <CredentialRow label={t("Temporary password")} value={tempPassword} secret onCopy={() => copy("pw", tempPassword)} copied={copiedKey === "pw"} />
           </Box>
 
           <Box sx={{ ...panelSx, p: { xs: 1.75, sm: 2.25 } }}>
-            <Typography sx={{ fontWeight: 800, fontSize: 14, mb: 1 }}>Message to send</Typography>
+            <Typography sx={{ fontWeight: 800, fontSize: 14, mb: 1 }}>{t("Message to send")}</Typography>
             <Box
               component="pre"
               sx={{
@@ -267,15 +268,15 @@ export default function CaretakerInvited() {
             </Box>
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: smsHref ? "repeat(3, minmax(0, 1fr))" : "repeat(2, minmax(0, 1fr))" }, gap: 1, mt: 1.5 }}>
               <Button variant="contained" disableElevation startIcon={<ShareOutlinedIcon />} onClick={handleShare} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 46 }}>
-                {copiedKey === "all" ? "Copied" : "Share"}
+                {copiedKey === "all" ? t("Copied") : t("Share")}
               </Button>
               {smsHref && (
                 <Button variant="outlined" startIcon={<SmsOutlinedIcon />} href={smsHref} onClick={() => setHandedOff(true)} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 46 }}>
-                  Text {phone}
+                  {t("Text")}{" "}{phone}
                 </Button>
               )}
               <Button variant="outlined" color="inherit" startIcon={copiedKey === "msg" ? <CheckIcon /> : <ContentCopyOutlinedIcon />} onClick={() => copy("msg", shareText)} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 46, borderColor: "divider" }}>
-                {copiedKey === "msg" ? "Copied" : "Copy message"}
+                {copiedKey === "msg" ? t("Copied") : t("Copy message")}
               </Button>
             </Box>
           </Box>
@@ -284,7 +285,7 @@ export default function CaretakerInvited() {
         {/* ───── What happens next + actions ───── */}
         <Box sx={{ display: "flex", flexDirection: "column", gap: { xs: 2, sm: 2.5 }, minWidth: 0 }}>
           <Box sx={{ ...panelSx, p: { xs: 1.75, sm: 2.25 } }}>
-            <Typography sx={{ fontWeight: 800, fontSize: 14, mb: 1.5 }}>What happens next</Typography>
+            <Typography sx={{ fontWeight: 800, fontSize: 14, mb: 1.5 }}>{t("What happens next")}</Typography>
             <Box component="ol" sx={{ listStyle: "none", m: 0, p: 0 }}>
               {steps.map((s, i) => {
                 const Icon = s.icon;
@@ -315,16 +316,16 @@ export default function CaretakerInvited() {
               })}
             </Box>
             <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 2, pt: 1.5, borderTop: "1px solid", borderColor: "divider" }}>
-              Until they sign in, their card on the Caretakers page shows "Not logged in yet".
+              {t("Until they sign in, their card on the Caretakers page shows \"Not logged in yet\".")}
             </Typography>
           </Box>
 
           <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
             <Button variant="outlined" startIcon={<PersonAddAltOutlinedIcon />} onClick={() => leave("/owner/caretakers/invite")} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 46, bgcolor: "background.default" }}>
-              Invite another caretaker
+              {t("Invite another caretaker")}
             </Button>
             <Button color="inherit" onClick={() => leave("/owner/caretakers")} sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 46 }}>
-              Done, back to caretakers
+              {t("Done, back to caretakers")}
             </Button>
           </Box>
         </Box>

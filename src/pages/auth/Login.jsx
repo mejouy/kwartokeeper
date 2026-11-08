@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   Box, Button, TextField, Typography, Link,
   InputAdornment, IconButton, Alert, CircularProgress,
@@ -19,6 +19,8 @@ import { auth, db } from '../../config/firebase';
 import AuthLayout, { FormHeading } from '../../components/AuthLayout';
 import { fieldSx, primaryButtonSx } from '../../components/authStyles';
 import { SIGNED_OUT_REASON_KEY } from '../../utils/accountState';
+import { t } from "../../i18n";
+import LanguageSwitch from "../../components/LanguageSwitch";
 
 // Lit windows on the brand panel's building (6 rows x 5 columns)
 const LIT_PATTERN = [
@@ -32,7 +34,10 @@ const LIT_PATTERN = [
 
 export default function Login() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
+  const location = useLocation();
+  // e.g. after a caretaker sets their own password: "Sign in with your new password"
+  const notice = location.state?.notice || '';
+  const [email, setEmail] = useState(() => location.state?.email || '');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -211,12 +216,13 @@ export default function Login() {
 
   return (
     <AuthLayout
-      title="Welcome to KwartoKeeper!"
-      subtitle="KwartoKeeper tracks who's in and who's out, in real time, so property owners and caretakers always know their dormitory is safe."
+      title={t("Welcome to KwartoKeeper!")}
+      subtitle={t("KwartoKeeper tracks who's in and who's out, in real time, so property owners and caretakers always know their dormitory is safe.")}
       lit={LIT_PATTERN}
     >
-      <FormHeading title="Log in to your account" subtitle="Enter your credentials to manage or view your space." />
+      <FormHeading title={t("Log in to your account")} subtitle={t("Enter your credentials to manage or view your space.")} />
 
+      {notice && !error && <Alert severity="success" sx={{ mb: 3, borderRadius: '10px' }}>{notice}</Alert>}
       {error && <Alert severity="error" sx={{ mb: 3, borderRadius: '10px' }}>{error}</Alert>}
 
       <Box component="form" onSubmit={handleLogin} noValidate sx={{ display: 'grid', gap: 2.25 }}>
@@ -224,7 +230,7 @@ export default function Login() {
           required
           fullWidth
           id="email"
-          label="Email address"
+          label={t("Email address")}
           name="email"
           type="email"
           value={email}
@@ -248,7 +254,7 @@ export default function Login() {
           required
           fullWidth
           name="password"
-          label="Password"
+          label={t("Password")}
           type={showPassword ? 'text' : 'password'}
           id="password"
           value={password}
@@ -287,7 +293,7 @@ export default function Login() {
                 size="small"
               />
             }
-            label={<Typography variant="body2" color="text.secondary">Remember me</Typography>}
+            label={<Typography variant="body2" color="text.secondary">{t("Remember me")}</Typography>}
           />
           <Link
             component="button"
@@ -298,7 +304,7 @@ export default function Login() {
             onClick={handleOpenResetDialog}
             sx={{ fontWeight: 600 }}
           >
-            Forgot password?
+            {t("Forgot password?")}
           </Link>
         </Box>
 
@@ -311,18 +317,21 @@ export default function Login() {
           endIcon={loading ? null : <ArrowForwardRounded />}
           sx={primaryButtonSx}
         >
-          {loading ? <CircularProgress size={24} color="inherit" /> : 'Log in'}
+          {loading ? <CircularProgress size={24} color="inherit" /> : t("Log in")}
         </Button>
 
         <Typography variant="body2" color="text.secondary" sx={{ textAlign: 'center' }}>
-          Caretaker or tenant? Use the login details your owner sent you.
+          {t("Caretaker or tenant? Use the login details your owner sent you.")}
         </Typography>
+        <Box sx={{ display: 'flex', justifyContent: 'center' }}>
+          <LanguageSwitch />
+        </Box>
 
-        <Divider sx={{ typography: 'body2', color: 'text.secondary', my: 0.5 }}>or</Divider>
+        <Divider sx={{ typography: 'body2', color: 'text.secondary', my: 0.5 }}>{t("or")}</Divider>
 
         <Box sx={{ p: 2.25, borderRadius: '14px', bgcolor: 'background.paper', textAlign: 'center' }}>
           <Typography variant="body2" color="text.primary" sx={{ fontWeight: 600, mb: 1.5 }}>
-            Don't have an owner account?
+            {t("Don't have an owner account?")}
           </Typography>
           <Button
             type="button"
@@ -332,7 +341,7 @@ export default function Login() {
             onClick={() => navigate('/signup')}
             sx={{ py: 1.25, fontWeight: 700, borderRadius: '10px', bgcolor: '#fff', borderWidth: 1.5, '&:hover': { borderWidth: 1.5 } }}
           >
-            Register your property
+            {t("Register your property")}
           </Button>
         </Box>
       </Box>
@@ -346,10 +355,10 @@ export default function Login() {
         slotProps={{ paper: { sx: { borderRadius: '20px', m: 2, width: 'calc(100% - 32px)' } } }}
       >
         <Box component="form" onSubmit={handleSendPasswordReset} noValidate>
-          <DialogTitle sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, pb: 1 }}>Reset Password</DialogTitle>
+          <DialogTitle sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, pb: 1 }}>{t("Reset Password")}</DialogTitle>
           <DialogContent>
             <DialogContentText sx={{ mb: 2 }}>
-              Enter the email address associated with your KwartoKeeper account, and we'll send you a link to reset your password.
+              {t("Enter the email address associated with your KwartoKeeper account, and we'll send you a link to reset your password.")}
             </DialogContentText>
 
             {resetError && <Alert severity="error" sx={{ mb: 2, borderRadius: '10px' }}>{resetError}</Alert>}
@@ -360,7 +369,7 @@ export default function Login() {
                 autoFocus
                 margin="dense"
                 id="resetEmail"
-                label="Email address"
+                label={t("Email address")}
                 type="email"
                 fullWidth
                 variant="outlined"
@@ -383,7 +392,7 @@ export default function Login() {
           </DialogContent>
           <DialogActions sx={{ px: 3, pb: 2.5, gap: 1 }}>
             <Button onClick={handleCloseResetDialog} color="inherit" disabled={resetLoading} sx={{ fontWeight: 600 }}>
-              {resetSuccess ? 'Close' : 'Cancel'}
+              {resetSuccess ? t("Close") : t("Cancel")}
             </Button>
             {!resetSuccess && (
               <Button
@@ -392,7 +401,7 @@ export default function Login() {
                 disabled={resetLoading}
                 sx={{ fontWeight: 700, borderRadius: '10px', boxShadow: 'none' }}
               >
-                {resetLoading ? <CircularProgress size={20} color="inherit" /> : 'Send Reset Link'}
+                {resetLoading ? <CircularProgress size={20} color="inherit" /> : t("Send Reset Link")}
               </Button>
             )}
           </DialogActions>

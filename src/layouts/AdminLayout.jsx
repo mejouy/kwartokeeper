@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Outlet, useNavigate, useLocation } from "react-router-dom";
+import PageBoundary from "../components/PageBoundary";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import SupervisorAccountOutlinedIcon from "@mui/icons-material/SupervisorAccountOutlined";
 import CampaignOutlinedIcon from "@mui/icons-material/CampaignOutlined";
@@ -86,7 +87,9 @@ export default function AdminLayout() {
       sidebarTone="dark"
       onLogout={handleLogout}
     >
-      <Outlet />
+      <PageBoundary>
+        <Outlet />
+      </PageBoundary>
     </AppShell>
   );
 }

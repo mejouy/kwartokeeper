@@ -29,6 +29,8 @@ import { alpha } from "@mui/material/styles";
 import LogoutIcon from "@mui/icons-material/Logout";
 import MenuIcon from "@mui/icons-material/Menu";
 import NotificationFeed from "../components/NotificationFeed";
+import { t } from "../i18n";
+import LanguageSwitch from "../components/LanguageSwitch";
 
 const SHELL_DRAWER_W = 288;
 const BAR_H = { xs: 56, md: 72 }; // same as the owner area
@@ -141,6 +143,7 @@ export default function AppShell({
   notifications = true,
   showBottomNav,
   sidebarTone = "light",
+  languageSwitch = false,
   children,
 }) {
   const S = SIDEBAR[sidebarTone] || SIDEBAR.light;
@@ -167,7 +170,7 @@ export default function AppShell({
     <Box sx={{ display: "flex", flexDirection: "column", height: "100%", bgcolor: S.bg }}>
       {/* Brand header, same height as the top bar so the dividers line up */}
       <Toolbar sx={{ px: 2.5, height: BAR_H, minHeight: BAR_H }}>
-        <Box component="img" src={S.logo} alt="KwartoKeeper" sx={{ display: "block", height: { xs: 34, md: 44 }, maxWidth: "100%", width: "auto", objectFit: "contain" }} />
+        <Box component="img" src={S.logo} alt={t("KwartoKeeper")} sx={{ display: "block", height: { xs: 34, md: 44 }, maxWidth: "100%", width: "auto", objectFit: "contain" }} />
       </Toolbar>
       <Divider sx={{ borderColor: S.border }} />
 
@@ -225,6 +228,7 @@ export default function AppShell({
       {/* Who's signed in + log out */}
       <Divider sx={{ borderColor: S.border }} />
       <Box sx={{ p: 1.5, pb: "calc(12px + env(safe-area-inset-bottom, 0px))" }}>
+        {languageSwitch && <LanguageSwitch sx={{ mb: 1.25, width: "100%", "& > button": { flex: 1 } }} />}
         <Box sx={{ display: "flex", alignItems: "center", gap: 1.25, p: 1, borderRadius: "12px", bgcolor: S.cardBg }}>
           <Avatar sx={{ width: 38, height: 38, bgcolor: "primary.main", color: "#fff", fontFamily: HEAD, fontWeight: 800, fontSize: 14 }}>{initialsOf(name, "K")}</Avatar>
           <Box sx={{ minWidth: 0, flex: 1 }}>
@@ -235,8 +239,8 @@ export default function AppShell({
               {subtitle}
             </Typography>
           </Box>
-          <Tooltip title="Log out">
-            <IconButton aria-label="Log out" onClick={onLogout} sx={{ color: S.logout, flexShrink: 0, "&:hover": { bgcolor: S.logoutHover } }}>
+          <Tooltip title={t("Log out")}>
+            <IconButton aria-label={t("Log out")} onClick={onLogout} sx={{ color: S.logout, flexShrink: 0, "&:hover": { bgcolor: S.logoutHover } }}>
               <LogoutIcon fontSize="small" />
             </IconButton>
           </Tooltip>
@@ -286,9 +290,10 @@ export default function AppShell({
           }}
         >
           <Toolbar sx={{ height: BAR_H, minHeight: BAR_H, gap: 1.5, px: { xs: 2, sm: 3 } }}>
-            <Box component="img" src="/KwartoKeeper-Icon.png" alt="KwartoKeeper" sx={{ display: { xs: "block", md: "none" }, height: 30, width: 30, flexShrink: 0 }} />
+            <Box component="img" src="/KwartoKeeper-Icon.png" alt={t("KwartoKeeper")} sx={{ display: { xs: "block", md: "none" }, height: 30, width: 30, flexShrink: 0 }} />
+            {/* The page's main heading for screen readers (the overview has its own) */}
             {title && (
-              <Typography component="div" noWrap sx={{ minWidth: 0, fontFamily: HEAD, fontWeight: 800, letterSpacing: "-0.01em", fontSize: { xs: "1.1rem", md: "1.3rem" } }}>
+              <Typography component="h1" noWrap sx={{ minWidth: 0, fontFamily: HEAD, fontWeight: 800, letterSpacing: "-0.01em", fontSize: { xs: "1.1rem", md: "1.3rem" } }}>
                 {title}
               </Typography>
             )}
@@ -301,7 +306,7 @@ export default function AppShell({
               {notifications && <NotificationFeed />}
               {/* Phones: profile button (log out lives in here, away from the bell) */}
               <IconButton
-                aria-label="Account menu"
+                aria-label={`${initialsOf(name, "K")}, account menu`}
                 aria-haspopup="menu"
                 onClick={(e) => setMenuAnchor(e.currentTarget)}
                 sx={{ display: { xs: "inline-flex", md: "none" }, p: 0.5 }}
@@ -325,6 +330,12 @@ export default function AppShell({
                   </Typography>
                 </Box>
                 <Divider />
+                {languageSwitch && (
+                  <Box sx={{ px: 1.5, py: 1.25 }}>
+                    <LanguageSwitch sx={{ width: "100%", "& > button": { flex: 1 } }} />
+                  </Box>
+                )}
+                {languageSwitch && <Divider />}
                 <MenuItem
                   onClick={() => {
                     setMenuAnchor(null);
@@ -332,7 +343,7 @@ export default function AppShell({
                   }}
                   sx={{ color: "error.main", fontWeight: 700, gap: 1.25, py: 1.25 }}
                 >
-                  <LogoutIcon fontSize="small" /> Log out
+                  <LogoutIcon fontSize="small" />{" "}{t("Log out")}
                 </MenuItem>
               </Menu>
             </Box>
@@ -400,7 +411,7 @@ export default function AppShell({
                 }
               />
             ))}
-            {needsMenu && <BottomNavigationAction label="Menu" icon={<MenuIcon />} />}
+            {needsMenu && <BottomNavigationAction label={t("Menu")} icon={<MenuIcon />} />}
           </BottomNavigation>
         </Paper>
       )}

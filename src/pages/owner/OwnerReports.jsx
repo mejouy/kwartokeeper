@@ -42,6 +42,7 @@ import { computePriority } from "../../utils/maintenancePrioritization";
 import { occupancyOf } from "../../utils/occupancy";
 import { normalizePayment } from "../../utils/normalizePayment";
 import { normalizeStatus, rentOf } from "../../utils/tenantRent";
+import { chargesFor, feesTotal, isActiveCharge, periodOfDate } from "../../utils/charges";
 import { useAuth } from "../../context/AuthContext";
 import { withoutRemoved } from "../../utils/accountState";
 
@@ -328,7 +329,7 @@ function buildJournal({ payments, range }) {
           date_raw: p.paidOn ? ymd(p.paidOn) : "",
           date: fmtDate(p.paidOn),
           tenant: p.tenantName || "—",
-          particulars: `${p.status === "partial" ? "Partial rent" : "Rent"} for ${p.periodMonth || "—"} · ${p.propertyName || "—"}, Room ${p.roomNumber || "N/A"}`,
+          particulars: `${p.status === "partial" ? "Partial rent" : "Rent"}${p.bill?.fees?.length ? " and fees" : ""} for ${p.periodMonth || "—"} · ${p.propertyName || "—"}, Room ${p.roomNumber || "N/A"}`,
           method: p.paymentMethod || "—",
           amount_raw: num(p.amount),
           amount: peso(p.amount),
@@ -340,7 +341,7 @@ function buildJournal({ payments, range }) {
   };
 }
 
-function buildOccupancy({ properties, tenants }) {
+function buildOccupancy({ properties, tenants, charges = [] }) {
   // Same rule as the dashboard and Properties: Active and Pending tenants hold a bed
   const occ = occupancyOf(properties.map((p) => ({ id: p.id, beds: p.capacity })), tenants);
   const perProperty = properties.map((p) => {
@@ -354,7 +355,11 @@ function buildOccupancy({ properties, tenants }) {
   const vacant = occ.vacant;
   const rate = occ.rate;
   const current = tenants.filter((t) => tenantState(t) !== "inactive");
-  const expected = num(current.filter((t) => tenantState(t) === "active").reduce((t, x) => t + rentOf(x), 0));
+  // Rent plus this month's extra fees (electricity, Wi-Fi...), same as the Payments page
+  const thisMonth = periodOfDate(new Date());
+  const activeTenants = current.filter((t) => tenantState(t) === "active");
+  const fees = num(activeTenants.reduce((t, x) => t + feesTotal(chargesFor(charges, x.id || x.uid, thisMonth)), 0));
+  const expected = num(activeTenants.reduce((t, x) => t + rentOf(x), 0) + fees);
   const nameOf = new Map(properties.map((p) => [p.id, p.name]));
 
   return {
@@ -365,7 +370,7 @@ function buildOccupancy({ properties, tenants }) {
       { label: "Occupancy rate", value: `${rate}%`, raw: rate, hint: `${active} of ${beds} beds` },
       { label: "Occupied", value: String(active), raw: active, hint: pending ? `incl. ${pending} still moving in` : undefined },
       { label: "Vacant", value: String(vacant), raw: vacant },
-      { label: "Monthly rent expected", value: peso(expected), raw: expected, hint: "from active tenants" },
+      { label: "Monthly rent expected", value: peso(expected), raw: expected, hint: fees > 0 ? `from active tenants, incl. ${peso(fees)} fees this month` : "from active tenants" },
     ],
     sections: [
       {
@@ -399,7 +404,7 @@ function buildOccupancy({ properties, tenants }) {
           .map((t) => ({
             name: tenantName(t),
             property: nameOf.get(propOf(t)) || t.propertyName || "—",
-            room: t.roomNumber || t.roomId || t.room || "—",
+            room: t.roomId || t.roomNumber || t.room || "—",
             status: cap(tenantState(t)),
             rent_raw: rentOf(t) || "",
             rent: rentOf(t) ? peso(rentOf(t)) : "—",
@@ -616,7 +621,7 @@ const wrapSingle = (part, title, signoff = false) => ({ title, signoff, parts: [
 // DATA
 // ------------------------------------------------------------
 
-const EMPTY_DATA = { owner: {}, properties: [], tenants: [], payments: [], tickets: [], logs: [] };
+const EMPTY_DATA = { owner: {}, properties: [], tenants: [], payments: [], tickets: [], logs: [], charges: [] };
 
 async function fetchReportData(uid) {
   let bad = 0;
@@ -643,12 +648,13 @@ async function fetchReportData(uid) {
     .map((p) => ({ id: p.id, name: p.propertyName || p.name || "Unnamed property", capacity: propertyCapacity(p) }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const [t1, u1, ownerPayments, ownerTickets, logs1, ...perProperty] = await Promise.all([
+  const [t1, u1, ownerPayments, ownerTickets, logs1, ownerCharges, ...perProperty] = await Promise.all([
     safe(query(collection(db, "tenants"), where("ownerUid", "==", uid))),
     safe(query(collection(db, "users"), where("ownerUid", "==", uid))),
     safe(query(collection(db, "payments"), where("ownerUid", "==", uid))),
     safe(query(collection(db, "maintenance_tickets"), where("ownerUid", "==", uid))),
     safe(query(collection(db, "occupancy_logs"), where("ownerUid", "==", uid))),
+    safe(query(collection(db, "charges"), where("ownerUid", "==", uid))),
     // Per-property reads recover legacy records that lack ownerUid.
     ...properties.flatMap((p) => [
       safe(query(collection(db, "tenants"), where("propertyId", "==", p.id))),
@@ -713,7 +719,7 @@ async function fetchReportData(uid) {
     };
   });
 
-  return { data: { owner, properties, tenants, payments, tickets, logs: [...logMap.values()] }, failed: bad };
+  return { data: { owner, properties, tenants, payments, tickets, logs: [...logMap.values()], charges: ownerCharges.filter(isActiveCharge) }, failed: bad };
 }
 
 // ------------------------------------------------------------
@@ -1475,6 +1481,7 @@ export default function OwnerReports() {
       tickets: data.tickets.filter(inProperty),
       logs: data.logs.filter(inProperty),
       tenants: data.tenants.filter(inProperty),
+      charges: (data.charges || []).filter(inProperty),
       properties: activePropertyId === "all" ? data.properties : data.properties.filter((p) => p.id === activePropertyId),
     };
 

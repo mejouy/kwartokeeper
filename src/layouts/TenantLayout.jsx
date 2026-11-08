@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Outlet, useLocation, useNavigate } from "react-router-dom";
+import PageBoundary from "../components/PageBoundary";
 import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import AccountCircleOutlinedIcon from "@mui/icons-material/AccountCircleOutlined";
 import PaymentsOutlinedIcon from "@mui/icons-material/PaymentsOutlined";
@@ -8,14 +9,16 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../config/firebase";
 import { checkLeaseEndsOnTenantAppOpen } from "../utils/leaseEndNotifications";
+import { checkRentOnTenantAppOpen } from "../utils/rentReminders";
 import AppShell from "./AppShell";
+import { t } from "../i18n";
 
 // Phone order = how often tenants need them: home, pay, repairs, profile
 const NAV_ITEMS = [
-  { id: "overview", text: "Overview", short: "Home", icon: <DashboardOutlinedIcon /> },
-  { id: "payments", text: "Payments", short: "Payments", icon: <PaymentsOutlinedIcon /> },
-  { id: "maintenance", text: "Repairs", short: "Repairs", icon: <BuildOutlinedIcon /> },
-  { id: "profile", text: "My room & rules", short: "Profile", icon: <AccountCircleOutlinedIcon /> },
+  { id: "overview", text: t("Overview"), short: t("Home"), icon: <DashboardOutlinedIcon /> },
+  { id: "payments", text: t("Payments"), short: t("Payments"), icon: <PaymentsOutlinedIcon /> },
+  { id: "maintenance", text: t("Repairs"), short: t("Repairs"), icon: <BuildOutlinedIcon /> },
+  { id: "profile", text: t("My room & rules"), short: t("Profile"), icon: <AccountCircleOutlinedIcon /> },
 ];
 
 // The open tab lives in the URL hash (/tenant#payments). Reloading keeps the
@@ -32,13 +35,14 @@ export default function TenantLayout({ children }) {
   const activeNavItem = NAV_ITEMS.find((item) => item.id === activeTab) || NAV_ITEMS[0];
   const [profile, setProfile] = useState({ name: "", subtitle: "" });
 
-  // Who's signed in (for the profile card) + the lease-end reminder check on app open
+  // Who's signed in (for the profile card) + the lease-end and rent reminder checks on app open
   useEffect(() => {
     let active = true;
     let tenantUid = "";
     const check = () => {
       if (!active || !tenantUid || document.visibilityState !== "visible") return;
       checkLeaseEndsOnTenantAppOpen(tenantUid).catch((error) => console.error("Unable to check tenant lease-end notification:", error));
+      checkRentOnTenantAppOpen(tenantUid).catch((error) => console.warn("Unable to check rent reminders:", error?.code || error));
     };
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       tenantUid = user?.uid || "";
@@ -105,10 +109,11 @@ export default function TenantLayout({ children }) {
       title={activeNavItem.id === "overview" ? "" : activeNavItem.text}
       profile={profile}
       roleLabel="Tenant"
+      languageSwitch
       navLabel="Tenant pages"
       onLogout={handleLogout}
     >
-      {typeof children === "function" ? children(activeTab, setActiveTab) : children || <Outlet context={{ activeTab, setActiveTab }} />}
+      <PageBoundary>{typeof children === "function" ? children(activeTab, setActiveTab) : children || <Outlet context={{ activeTab, setActiveTab }} />}</PageBoundary>
     </AppShell>
   );
 }

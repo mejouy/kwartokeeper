@@ -2,6 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { Button, Container, Typography, Paper } from "@mui/material";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutlineOutlined";
 import HomeIcon from "@mui/icons-material/Home";
+import { t } from "../i18n";
 
 export default function NotFound() {
   const navigate = useNavigate();
@@ -24,10 +25,10 @@ export default function NotFound() {
           404
         </Typography>
         <Typography variant="h6" sx={{ fontWeight: "700" }} gutterBottom>
-          Page Not Found
+          {t("Page Not Found")}
         </Typography>
         <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-          The page you are looking for doesn't exist, has been removed, or you don't have permission to access it.
+          {t("The page you are looking for doesn't exist, has been removed, or you don't have permission to access it.")}
         </Typography>
         <Button
           variant="contained"
@@ -35,7 +36,7 @@ export default function NotFound() {
           onClick={() => navigate("/")}
           sx={{ py: 1.2, px: 3, borderRadius: 2 }}
         >
-          Back to Home
+          {t("Back to Home")}
         </Button>
       </Paper>
     </Container>

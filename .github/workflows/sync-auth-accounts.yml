@@ -1,0 +1,57 @@
+# Hides accounts that were deleted or disabled in Firebase Authentication, so
+# they stop showing in the admin dashboard and everywhere else in the app.
+#
+# Runs scripts/sync-auth-accounts.cjs every 3 hours on GitHub's free runners
+# (no paid Firebase plan needed), and on demand from the Actions tab.
+#
+# One-time setup:
+#   1. Firebase console → Project settings → Service accounts → Generate new private key
+#   2. GitHub repo → Settings → Secrets and variables → Actions → New repository secret
+#        Name:  FIREBASE_SERVICE_ACCOUNT
+#        Value: the whole contents of the downloaded JSON file
+#   3. Delete the downloaded file from your computer (GitHub keeps it encrypted)
+# Scheduled runs only start once this file is on the default branch (main).
+name: Sync deleted accounts
+
+on:
+  schedule:
+    - cron: "17 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sync-auth-accounts
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: functions/package-lock.json
+
+      - name: Install firebase-admin
+        working-directory: functions
+        run: npm ci --omit=dev --ignore-scripts
+
+      - name: Sync accounts
+        env:
+          SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: |
+          if [ -z "$SERVICE_ACCOUNT" ]; then
+            echo "::error::Add the FIREBASE_SERVICE_ACCOUNT secret first (see the notes at the top of this file)."
+            exit 1
+          fi
+          KEY="$RUNNER_TEMP/service-account.json"
+          printf '%s' "$SERVICE_ACCOUNT" > "$KEY"
+          trap 'rm -f "$KEY"' EXIT
+          # --quiet: the log shows counts only, never names or emails
+          node scripts/sync-auth-accounts.cjs --key "$KEY" --apply --quiet

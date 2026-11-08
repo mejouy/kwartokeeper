@@ -17,6 +17,7 @@ import StarBorderOutlinedIcon from '@mui/icons-material/StarBorderOutlined';
 import NightlightOutlinedIcon from '@mui/icons-material/NightlightOutlined';
 import GavelOutlinedIcon from '@mui/icons-material/GavelOutlined';
 import { StepHeader, FormCard, Counter } from './wizardUi';
+import { t } from "../../../i18n";
 
 const fieldSx = { '& .MuiOutlinedInput-root': { borderRadius: '10px' } };
 
@@ -104,11 +105,11 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData, errors = {} }
 
   return (
     <Box>
-      <StepHeader step={2} total={3} title="Rules and amenities" subtitle="How big the building is, what's included, and the house rules tenants agree to." />
+      <StepHeader step={2} total={3} title={t("Rules and amenities")} subtitle={t("How big the building is, what's included, and the house rules tenants agree to.")} />
 
       <Box sx={{ display: 'flex', flexDirection: 'column', gap: { xs: 2, sm: 2.5 } }}>
         {/* ───── Floors ───── */}
-        <FormCard icon={LayersOutlinedIcon} title="How many floors?" description="Only floors with rooms for rent. You'll set up the rooms on each floor next.">
+        <FormCard icon={LayersOutlinedIcon} title={t("How many floors?")} description="Only floors with rooms for rent. You'll set up the rooms on each floor next.">
           <Box data-error={errors.totalFloors ? 'true' : undefined} sx={{ display: 'flex', alignItems: 'center', gap: 2.5, flexWrap: 'wrap' }}>
             <Counter value={floors} onChange={(v) => updateWizardData({ totalFloors: v })} min={1} max={50} label="floors" size="lg" />
             {/* A tiny building that grows with the count */}
@@ -122,7 +123,7 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData, errors = {} }
               ))}
             </Box>
             <Typography variant="body2" color="text.secondary">
-              {floors === 1 ? '1 floor' : `${floors} floors`}{floors > 8 ? ' (showing 8)' : ''}
+              {floors === 1 ? t("1 floor") : `${floors} floors`}{floors > 8 ? t(" (showing 8)") : ''}
             </Typography>
           </Box>
           {errors.totalFloors && (
@@ -135,12 +136,12 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData, errors = {} }
         {/* ───── Amenities ───── */}
         <FormCard
           icon={StarBorderOutlinedIcon}
-          title="What's included?"
+          title={t("What's included?")}
           optional
           description="Tap everything tenants get with their rent."
           action={
             <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 700, whiteSpace: 'nowrap', pt: 0.5 }}>
-              {selected.length} picked
+              {selected.length}{" "}{t("picked")}
             </Typography>
           }
         >
@@ -159,19 +160,19 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData, errors = {} }
             <TextField
               size="small"
               fullWidth
-              placeholder="Something else? e.g. Free drinking water"
+              placeholder={t("Something else? e.g. Free drinking water")}
               value={customAmenity}
               onChange={(e) => setCustomAmenity(e.target.value.slice(0, 40))}
               sx={{ ...fieldSx, maxWidth: 420 }}
             />
             <Button type="submit" variant="outlined" startIcon={<AddIcon />} disabled={!customAmenity.trim()} sx={{ fontWeight: 700, borderRadius: '10px', flexShrink: 0 }}>
-              Add
+              {t("Add")}
             </Button>
           </Box>
         </FormCard>
 
         {/* ───── House rules ───── */}
-        <FormCard icon={GavelOutlinedIcon} title="House rules" optional description="Tenants see these on their dashboard. You can also upload a signed rules document later in Properties.">
+        <FormCard icon={GavelOutlinedIcon} title={t("House rules")} optional description="Tenants see these on their dashboard. You can also upload a signed rules document later in Properties.">
           {/* Curfew */}
           <Box
             data-error={errors.curfewTime ? 'true' : undefined}
@@ -189,9 +190,9 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData, errors = {} }
                 <NightlightOutlinedIcon sx={{ fontSize: 19 }} />
               </Box>
               <Box sx={{ flex: 1, minWidth: 0 }}>
-                <Typography sx={{ fontWeight: 800, fontSize: 14.5 }}>Curfew</Typography>
+                <Typography sx={{ fontWeight: 800, fontSize: 14.5 }}>{t("Curfew")}</Typography>
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', lineHeight: 1.4 }}>
-                  Caretakers check who's in each night, and tenants get a reminder before it starts.
+                  {t("Caretakers check who's in each night, and tenants get a reminder before it starts.")}
                 </Typography>
               </Box>
               <Switch
@@ -203,7 +204,7 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData, errors = {} }
             {curfewOn && (
               <TextField
                 select
-                label="Curfew starts at"
+                label={t("Curfew starts at")}
                 value={curfewTime}
                 onChange={(e) => updateWizardData({ curfewTime: e.target.value })}
                 error={Boolean(errors.curfewTime)}
@@ -223,7 +224,7 @@ export const Step2Policies = ({ wizardData = {}, updateWizardData, errors = {} }
 
           {/* Written rules */}
           <TextField
-            label="Other rules"
+            label={t("Other rules")}
             placeholder={'One rule per line, e.g.\nNo visitors after 9:00 PM\nKeep common areas clean'}
             value={wizardData.rulesText || ''}
             onChange={(e) => setRules(e.target.value.slice(0, 2000))}

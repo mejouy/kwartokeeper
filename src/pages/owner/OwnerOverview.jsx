@@ -45,7 +45,9 @@ import { uploadFileToCloudinary } from "../../utils/cloudinary";
 import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
 import { ownerAccessOf, resubmissionPatch } from "../../utils/ownerAccess";
 import { occupancyOf, holdsBed, isMovingIn } from "../../utils/occupancy";
+import { chargesFor, feesTotal, isActiveCharge, periodOfDate } from "../../utils/charges";
 import { alpha } from "@mui/material/styles";
+import { t } from "../../i18n";
 
 const INK = "#202020";
 const HEAD = '"Inter", sans-serif';
@@ -104,12 +106,12 @@ function FilePickRow({ label, hint, file, onChange }) {
       <Typography variant="subtitle2" sx={{ fontWeight: "700", mb: 0.5 }}>{label}</Typography>
       <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>{hint}</Typography>
       <Box sx={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 1.5 }}>
-        <Button component="label" variant="outlined" startIcon={<UploadFileIcon />} sx={{ minHeight: 44 }}>
-          {file ? "Change file" : "Choose file"}
+        <Button component="label" role={undefined} variant="outlined" startIcon={<UploadFileIcon />} sx={{ minHeight: 44 }}>
+          {file ? t("Change file") : t("Choose file")}
           <input type="file" hidden onChange={(e) => onChange(e.target.files?.[0] || null)} accept="image/*,.pdf" />
         </Button>
         <Typography variant="body2" color={file ? "text.primary" : "text.secondary"} sx={{ minWidth: 0, wordBreak: "break-word" }}>
-          {file ? file.name : "No file selected"}
+          {file ? file.name : t("No file selected")}
         </Typography>
       </Box>
     </Box>
@@ -133,7 +135,7 @@ function OccupancyPanel({ rate, occupied, total }) {
     <Box sx={{ borderRadius: R.lg, bgcolor: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)", p: { xs: 2, sm: 2.5 } }}>
       <Box sx={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 1, mb: 1.75 }}>
         <Typography sx={{ fontFamily: HEAD, fontWeight: 700, fontSize: 12, letterSpacing: ".1em", textTransform: "uppercase", color: "rgba(255,255,255,0.6)" }}>
-          Occupancy
+          {t("Occupancy")}
         </Typography>
         <Typography sx={{ fontFamily: HEAD, fontWeight: 900, fontSize: { xs: "1.6rem", sm: "1.9rem" }, lineHeight: 1, color: "#fff" }}>
           {rate}%
@@ -157,7 +159,7 @@ function OccupancyPanel({ rate, occupied, total }) {
         ))}
       </Box>
       <Typography variant="caption" sx={{ color: "#cadcf6", display: "block", mt: 1.5 }}>
-        {total > 0 ? `${occupied} of ${total} beds occupied` : "Add rooms to start tracking occupancy"}
+        {total > 0 ? `${occupied} of ${total} beds occupied` : t("Add rooms to start tracking occupancy")}
       </Typography>
     </Box>
   );
@@ -272,7 +274,7 @@ function PropertyCard({ property, onClick }) {
           {property.propertyName}
         </Typography>
         <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block", mb: 1.25 }}>
-          {property.propertyType || "Property"}
+          {property.propertyType || t("Property")}
         </Typography>
         <Box sx={{ display: "flex", gap: 1 }}>
           {[`${property.totalRooms} rooms`, `${property.totalBeds} beds`].map((label) => (
@@ -345,12 +347,12 @@ function PropertyCarousel({ properties, onOpen }) {
   return (
     <Box sx={{ position: "relative" }}>
       {showControls && !edges.start && (
-        <IconButton size="small" aria-label="Previous properties" onClick={() => scrollByPage(-1)} sx={arrowSx("left")}>
+        <IconButton size="small" aria-label={t("Previous properties")} onClick={() => scrollByPage(-1)} sx={arrowSx("left")}>
           <ChevronLeftIcon />
         </IconButton>
       )}
       {showControls && !edges.end && (
-        <IconButton size="small" aria-label="Next properties" onClick={() => scrollByPage(1)} sx={arrowSx("right")}>
+        <IconButton size="small" aria-label={t("Next properties")} onClick={() => scrollByPage(1)} sx={arrowSx("right")}>
           <ChevronRightIcon />
         </IconButton>
       )}
@@ -453,16 +455,17 @@ export default function OwnerOverview() {
 
   const propertiesDataRef = useRef({ count: 0, totalBeds: 0, propertyIds: [], list: [] });
   const tenantsDataRef = useRef([]);
+  const chargesDataRef = useRef([]);
 
   useEffect(() => {
-    let unsubOwner, unsubProperties, unsubTenants, unsubUserTenants, unsubCaretakers, unsubPayments, unsubTickets;
+    let unsubOwner, unsubProperties, unsubTenants, unsubUserTenants, unsubCaretakers, unsubPayments, unsubTickets, unsubCharges;
     let tenantPropertyUnsubscribers = [];
     const tenantSources = new Map();
 
     // Stops every listener (used when the user changes and when the page unmounts)
     const cleanup = () => {
-      [unsubOwner, unsubProperties, unsubTenants, unsubUserTenants, unsubCaretakers, unsubPayments, unsubTickets].forEach((u) => u && u());
-      unsubOwner = unsubProperties = unsubTenants = unsubUserTenants = unsubCaretakers = unsubPayments = unsubTickets = undefined;
+      [unsubOwner, unsubProperties, unsubTenants, unsubUserTenants, unsubCaretakers, unsubPayments, unsubTickets, unsubCharges].forEach((u) => u && u());
+      unsubOwner = unsubProperties = unsubTenants = unsubUserTenants = unsubCaretakers = unsubPayments = unsubTickets = unsubCharges = undefined;
       tenantPropertyUnsubscribers.forEach((u) => u());
       tenantPropertyUnsubscribers = [];
       tenantSources.clear();
@@ -520,6 +523,8 @@ export default function OwnerOverview() {
           else {
             active++;
             expected += Number(tenant.monthlyRent ?? tenant.rentAmount ?? tenant.roomMonthlyRate ?? tenant.monthlyRate ?? tenant.rent ?? 0) || 0;
+            // Plus this month's extra fees (electricity, Wi-Fi...), same as the Payments page
+            expected += feesTotal(chargesFor(chargesDataRef.current, tenant.id || tenant.uid, periodOfDate(new Date())));
 
             const left = leaseDaysLeft(tenant);
             if (left !== null && left < 0) leaseEnded.push({ id: tenant.uid || tenant.id, name: tenantLabel(tenant), left });
@@ -668,6 +673,16 @@ export default function OwnerOverview() {
       ];
       unsubPayments = () => paymentUnsubs.forEach((u) => u());
 
+      // Extra fees count toward this month's expected rent
+      unsubCharges = onSnapshot(
+        query(collection(db, "charges"), where("ownerUid", "==", ownerId)),
+        (snapshot) => {
+          chargesDataRef.current = snapshot.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isActiveCharge);
+          recalculateOccupancy(ownerId);
+        },
+        (error) => console.warn("Fees unavailable:", error?.code || error)
+      );
+
       // 5. Listen to Maintenance Tickets
       unsubTickets = onSnapshot(
         query(collection(db, "maintenance_tickets"), where("ownerUid", "==", ownerId)),
@@ -809,11 +824,11 @@ export default function OwnerOverview() {
       <Container maxWidth="sm" disableGutters sx={{ py: { xs: 1, md: 6 } }}>
         <Paper elevation={0} sx={{ ...panelSx, p: { xs: 2.5, md: 5 } }}>
           <Typography variant="h5" component="h1" sx={{ fontWeight: "800", mb: 1, fontFamily: HEAD }}>
-            Verify your account
+            {t("Verify your account")}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 4 }}>
-            Upload your ID and proof of ownership so our admin team can approve your account.
-            {stats.totalProperties === 0 ? " You'll set up your first property right after." : ""}
+            {t("Upload your ID and proof of ownership so our admin team can approve your account.")}
+            {stats.totalProperties === 0 ? t(" You'll set up your first property right after.") : ""}
           </Typography>
 
           {setupError && (
@@ -822,14 +837,14 @@ export default function OwnerOverview() {
 
           <Box component="form" onSubmit={handleVerify} noValidate>
             <FilePickRow
-              label="Government ID"
-              hint="A clear photo or PDF of a valid ID (PhilID, driver's license, etc.)."
+              label={t("Government ID")}
+              hint={t("A clear photo or PDF of a valid ID (PhilID, driver's license, etc.).")}
               file={idFile}
               onChange={setIdFile}
             />
             <FilePickRow
-              label="Proof of ownership"
-              hint="Land title, tax declaration, or a lease or authorization letter if you manage the property for the owner. A business permit also works."
+              label={t("Proof of ownership")}
+              hint={t("Land title, tax declaration, or a lease or authorization letter if you manage the property for the owner. A business permit also works.")}
               file={clearanceFile}
               onChange={setClearanceFile}
             />
@@ -842,7 +857,7 @@ export default function OwnerOverview() {
               disabled={uploading}
               sx={{ py: 1.5, fontWeight: "bold", borderRadius: R.sm }}
             >
-              {uploading ? <CircularProgress size={24} color="inherit" /> : "Submit for approval"}
+              {uploading ? <CircularProgress size={24} color="inherit" /> : t("Submit for approval")}
             </Button>
           </Box>
         </Paper>
@@ -868,10 +883,10 @@ export default function OwnerOverview() {
   // Status pill tuned for the dark hero (the stock MUI chip colors are too
   // dim on #202020).
   const statusTone = isRejected
-    ? { label: "Action Needed", bg: "rgba(244, 67, 54, 0.18)", fg: "#ef9a9a" }
+    ? { label: t("Action Needed"), bg: "rgba(244, 67, 54, 0.18)", fg: "#ef9a9a" }
     : isPending
-    ? { label: "Pending Review", bg: "rgba(255, 167, 38, 0.18)", fg: "#ffcc80" }
-    : { label: "Verified", bg: "rgba(76, 175, 80, 0.18)", fg: "#a5d6a7" };
+    ? { label: t("Pending Review"), bg: "rgba(255, 167, 38, 0.18)", fg: "#ffcc80" }
+    : { label: t("Verified"), bg: "rgba(76, 175, 80, 0.18)", fg: "#a5d6a7" };
 
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
@@ -953,10 +968,10 @@ export default function OwnerOverview() {
   const addPropertyTooltip = addLocked ? "Account pending approval. Adding properties is disabled." : "";
 
   const quickActions = [
-    { label: "Register tenant", icon: <PersonAddAlt1OutlinedIcon />, to: "/owner/tenants/register" },
-    { label: "Invite caretaker", icon: <GroupAddOutlinedIcon />, to: "/owner/caretakers/invite" },
-    { label: "Caretakers", icon: <BadgeOutlinedIcon />, to: "/owner/caretakers" },
-    { label: "Announcement", icon: <CampaignOutlinedIcon />, to: "/owner/announcements" },
+    { label: t("Register tenant"), icon: <PersonAddAlt1OutlinedIcon />, to: "/owner/tenants/register" },
+    { label: t("Invite caretaker"), icon: <GroupAddOutlinedIcon />, to: "/owner/caretakers/invite" },
+    { label: t("Caretakers"), icon: <BadgeOutlinedIcon />, to: "/owner/caretakers" },
+    { label: t("Announcement"), icon: <CampaignOutlinedIcon />, to: "/owner/announcements" },
   ];
 
   const statusColor = (status) => {
@@ -1039,7 +1054,7 @@ export default function OwnerOverview() {
                     "&.Mui-disabled": { bgcolor: "rgba(255,255,255,0.12)", color: "rgba(255,255,255,0.45)" },
                   }}
                 >
-                  Add Property
+                  {t("Add Property")}
                 </Button>
               </span>
             </Tooltip>
@@ -1049,7 +1064,7 @@ export default function OwnerOverview() {
                 startIcon={<ReceiptLongIcon />}
                 sx={{ fontWeight: 700, borderRadius: R.sm, color: "#fff", border: "1px solid rgba(255,255,255,.22)", "&:hover": { bgcolor: "rgba(255,255,255,.08)" } }}
               >
-                Review {paymentsToReview} {paymentsToReview === 1 ? "payment" : "payments"}
+                {t("Review")}{" "}{paymentsToReview} {paymentsToReview === 1 ? "payment" : "payments"}
               </Button>
             )}
           </Box>
@@ -1063,7 +1078,7 @@ export default function OwnerOverview() {
       {/* Pending Account Alert */}
       {isPending && (
         <Alert severity="warning" sx={{ mb: { xs: 2, md: 3 }, borderRadius: R.md }}>
-          <strong>Account pending approval.</strong> Our admin team is reviewing your documents. Until then you can finish setting up your first property; the other owner pages, adding tenants, inviting caretakers and adding more properties open up once you're approved.
+          <strong>{t("Account pending approval.")}</strong>{" "}{t("Our admin team is reviewing your documents. Until then you can finish setting up your first property; the other owner pages, adding tenants, inviting caretakers and adding more properties open up once you're approved.")}
         </Alert>
       )}
 
@@ -1071,17 +1086,17 @@ export default function OwnerOverview() {
       {isRejected && (
         <Paper elevation={0} sx={{ ...panelSx, borderColor: "error.main", p: { xs: 2, sm: 3 }, mb: { xs: 2, md: 3 } }}>
           <Typography variant="h6" sx={{ fontWeight: "700", mb: 0.5, fontFamily: HEAD }}>
-            Resubmit your documents
+            {t("Resubmit your documents")}
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mb: 2.5 }}>
-            {owner?.rejectionReason ? `Reason given: ${owner.rejectionReason}` : "Upload clearer or updated copies and our admin team will review them again."}
+            {owner?.rejectionReason ? `Reason given: ${owner.rejectionReason}` : t("Upload clearer or updated copies and our admin team will review them again.")}
           </Typography>
           {setupError && <Alert severity="error" sx={{ mb: 2 }}>{setupError}</Alert>}
-          {resubmitDone && <Alert severity="success" sx={{ mb: 2 }}>Submitted. You'll see your status update here once it's reviewed.</Alert>}
-          <FilePickRow label="Government ID" hint="A clear photo or PDF of a valid ID." file={idFile} onChange={setIdFile} />
-          <FilePickRow label="Proof of Ownership" hint="Land title, tax declaration, lease / authorization letter, or business permit." file={clearanceFile} onChange={setClearanceFile} />
+          {resubmitDone && <Alert severity="success" sx={{ mb: 2 }}>{t("Submitted. You'll see your status update here once it's reviewed.")}</Alert>}
+          <FilePickRow label={t("Government ID")} hint={t("A clear photo or PDF of a valid ID.")} file={idFile} onChange={setIdFile} />
+          <FilePickRow label={t("Proof of Ownership")} hint={t("Land title, tax declaration, lease / authorization letter, or business permit.")} file={clearanceFile} onChange={setClearanceFile} />
           <Button variant="contained" onClick={handleResubmit} disabled={resubmitting} sx={{ fontWeight: 700, minHeight: 46, borderRadius: R.sm, width: { xs: "100%", sm: "auto" } }}>
-            {resubmitting ? <CircularProgress size={22} color="inherit" /> : "Resubmit for approval"}
+            {resubmitting ? <CircularProgress size={22} color="inherit" /> : t("Resubmit for approval")}
           </Button>
         </Paper>
       )}
@@ -1096,14 +1111,14 @@ export default function OwnerOverview() {
         }}
       >
         <MetricCard
-          title="Properties"
+          title={t("Properties")}
           value={stats.totalProperties}
           subtitle={`${stats.totalBeds} beds in total`}
           icon={<HomeWorkOutlinedIcon fontSize="small" />}
           onClick={linkTo("/owner/properties")}
         />
         <MetricCard
-          title="Tenants"
+          title={t("Tenants")}
           value={stats.activeTenants}
           subtitle={stats.pendingTenants > 0 ? `${stats.pendingTenants} still registering` : `${stats.occupiedBeds} of ${stats.totalBeds} beds filled`}
           subtitleColor={stats.pendingTenants > 0 ? "warning.main" : "text.secondary"}
@@ -1111,7 +1126,7 @@ export default function OwnerOverview() {
           onClick={linkTo("/owner/tenants")}
         />
         <MetricCard
-          title="Collected this month"
+          title={t("Collected this month")}
           value={peso(collectedThisMonth)}
           subtitle={stats.expectedRent > 0 ? `of ${peso(stats.expectedRent)} expected` : "Paid rent this month"}
           icon={<PaymentsOutlinedIcon fontSize="small" />}
@@ -1119,7 +1134,7 @@ export default function OwnerOverview() {
           progress={stats.expectedRent > 0 ? (collectedThisMonth / stats.expectedRent) * 100 : undefined}
         />
         <MetricCard
-          title="Open repairs"
+          title={t("Open repairs")}
           value={repairStats.open}
           subtitle={repairStats.high > 0 ? `${repairStats.high} high priority` : "None urgent"}
           subtitleColor={repairStats.high > 0 ? "error.main" : "text.secondary"}
@@ -1133,7 +1148,7 @@ export default function OwnerOverview() {
         <Paper elevation={0} sx={{ ...panelSx, mb: { xs: 2, md: 3 }, overflow: "hidden" }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: 1, px: { xs: 2, sm: 2.5 }, pt: 2, pb: 1.5 }}>
             <Typography component="h2" sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: { xs: "1.05rem", sm: "1.15rem" } }}>
-              Needs your attention
+              {t("Needs your attention")}
             </Typography>
             <Box sx={{ minWidth: 22, height: 22, px: 0.75, borderRadius: 99, display: "grid", placeItems: "center", bgcolor: "primary.main", color: "#fff", fontSize: 12, fontWeight: 800 }}>
               {attentionItems.length}
@@ -1195,11 +1210,11 @@ export default function OwnerOverview() {
       <Box component="section" sx={{ mb: { xs: 2.5, md: 3.5 } }}>
         <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", mb: 1.5 }}>
           <Typography component="h2" sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: { xs: "1.05rem", sm: "1.15rem" } }}>
-            Your properties
+            {t("Your properties")}
           </Typography>
           {properties.length > 0 && !isPending && (
             <Button size="small" endIcon={<ChevronRightIcon />} onClick={() => navigate("/owner/properties")} sx={{ fontWeight: 700 }}>
-              View all
+              {t("View all")}
             </Button>
           )}
         </Box>
@@ -1208,9 +1223,9 @@ export default function OwnerOverview() {
             <Box sx={{ width: 52, height: 52, mx: "auto", mb: 1.5, borderRadius: R.md, bgcolor: "rgba(255,69,0,.1)", color: "primary.main", display: "grid", placeItems: "center" }}>
               <AddHomeWorkIcon />
             </Box>
-            <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 0.5 }}>No properties yet</Typography>
+            <Typography sx={{ fontFamily: HEAD, fontWeight: 800, mb: 0.5 }}>{t("No properties yet")}</Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              Add your first property to start tracking rooms, beds and tenants.
+              {t("Add your first property to start tracking rooms, beds and tenants.")}
             </Typography>
             <Tooltip title={addPropertyTooltip}>
               <span>
@@ -1221,7 +1236,7 @@ export default function OwnerOverview() {
                   disabled={addLocked}
                   sx={{ fontWeight: 700, borderRadius: R.sm }}
                 >
-                  Add your first property
+                  {t("Add your first property")}
                 </Button>
               </span>
             </Tooltip>
@@ -1243,11 +1258,11 @@ export default function OwnerOverview() {
       >
         {/* Recent payments */}
         <Panel
-          title="Recent rent collections"
+          title={t("Recent rent collections")}
           action={
             !isPending && (
               <Button size="small" endIcon={<ChevronRightIcon />} onClick={() => navigate("/owner/payments")} sx={{ fontWeight: 700, flexShrink: 0 }}>
-                All payments
+                {t("All payments")}
               </Button>
             )
           }
@@ -1255,8 +1270,8 @@ export default function OwnerOverview() {
           {recentPayments.length === 0 ? (
             <Box sx={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center", py: 4, borderRadius: R.md, bgcolor: (t) => alpha(t.palette.background.paper, 0.35) }}>
               <ReceiptLongIcon sx={{ fontSize: 32, color: "text.disabled", mb: 0.5 }} />
-              <Typography variant="body2" sx={{ fontWeight: 700 }}>No payments yet</Typography>
-              <Typography variant="caption" color="text.secondary">Rent your tenants pay will show up here.</Typography>
+              <Typography variant="body2" sx={{ fontWeight: 700 }}>{t("No payments yet")}</Typography>
+              <Typography variant="caption" color="text.secondary">{t("Rent your tenants pay will show up here.")}</Typography>
             </Box>
           ) : (
             // minmax(0, 1fr): without it the grid column grows to fit the longest
@@ -1290,10 +1305,10 @@ export default function OwnerOverview() {
                     </Avatar>
                     <Box sx={{ minWidth: 0, flex: 1 }}>
                       <Typography variant="body2" sx={{ fontWeight: 700 }} noWrap>
-                        {p.tenantName || "Tenant"}
+                        {p.tenantName || t("Tenant")}
                       </Typography>
                       <Typography variant="caption" color="text.secondary" sx={{ display: "block" }} noWrap>
-                        {p.propertyName || "Property"} · Room {p.roomNumber || "—"}
+                        {p.propertyName || t("Property")}{" "}{t("· Room")}{" "}{p.roomNumber || "—"}
                         {date ? ` · ${date.toLocaleDateString("en-US", { month: "short", day: "numeric" })}` : ""}
                       </Typography>
                     </Box>
@@ -1309,12 +1324,12 @@ export default function OwnerOverview() {
         </Panel>
 
         {/* People + quick actions */}
-        <Panel title="Tenants & caretakers">
+        <Panel title={t("Tenants & caretakers")}>
           <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(88px, 1fr))", gap: 1, mb: 2 }}>
             {[
-              { label: "Active tenants", value: stats.activeTenants, color: "success.main", tint: "rgba(46, 125, 50, 0.08)" },
-              { label: "Registering", value: stats.pendingTenants, color: "warning.main", tint: "rgba(237, 108, 2, 0.08)" },
-              { label: "Caretakers", value: stats.totalCaretakers, color: "text.primary", tint: "rgba(202, 220, 246, 0.35)" },
+              { label: t("Active tenants"), value: stats.activeTenants, color: "success.main", tint: "rgba(46, 125, 50, 0.08)" },
+              { label: t("Registering"), value: stats.pendingTenants, color: "warning.main", tint: "rgba(237, 108, 2, 0.08)" },
+              { label: t("Caretakers"), value: stats.totalCaretakers, color: "text.primary", tint: "rgba(202, 220, 246, 0.35)" },
             ].map((s) => (
               <Box key={s.label} sx={{ p: { xs: 1.25, sm: 1.5 }, borderRadius: R.md, bgcolor: s.tint, minWidth: 0 }}>
                 <Typography sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: { xs: "1.35rem", sm: "1.5rem" }, lineHeight: 1.1, color: s.color }}>{s.value}</Typography>
@@ -1326,7 +1341,7 @@ export default function OwnerOverview() {
           </Box>
 
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, letterSpacing: ".08em", textTransform: "uppercase", display: "block", mb: 1 }}>
-            Quick actions
+            {t("Quick actions")}
           </Typography>
           <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 1 }}>
             {quickActions.map((a) => (
