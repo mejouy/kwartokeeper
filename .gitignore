@@ -26,3 +26,4 @@ dist-ssr
 android/app/google-services.json
 
 functions/serviceAccountKey.json
+.vercel
