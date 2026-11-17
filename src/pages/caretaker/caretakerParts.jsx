@@ -14,8 +14,11 @@ import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
 import NotificationsActiveOutlinedIcon from "@mui/icons-material/NotificationsActiveOutlined";
+import SwapVertOutlinedIcon from "@mui/icons-material/SwapVertOutlined";
 import { deleteField, Timestamp } from "firebase/firestore";
 import { auth } from "../../config/firebase";
+import { RepairOutcome } from "../../components/RepairWorkflow";
+import { proofFindings } from "../../utils/paymentProof";
 // Translation is "tr" here: this file also uses "t" for tenants and the theme
 import { t as tr } from "../../i18n";
 
@@ -721,7 +724,7 @@ export function TenantCard({ t, rentState, showRent, onClick }) {
   );
 }
 
-export function RequestCard({ t, busy, onStatus, compact }) {
+export function RequestCard({ t, busy, onStatus, onPriority, compact }) {
   const tier = t.priority?.tier || "Low";
   const status = t.status || "Pending";
   const [allUpdates, setAllUpdates] = useState(false);
@@ -784,6 +787,15 @@ export function RequestCard({ t, busy, onStatus, compact }) {
             </Box>
           ))}
         </Box>
+      )}
+
+      {/* Priority changes, a reopened request, how it was fixed, the tenant's answer */}
+      <RepairOutcome ticket={t} compact={compact} />
+
+      {onPriority && !compact && !["Resolved", "Cancelled"].includes(status) && (
+        <Button size="small" startIcon={<SwapVertOutlinedIcon />} disabled={busy} onClick={() => onPriority(t)} sx={{ mt: 1, ml: -0.75, minHeight: 36, fontWeight: 700, textTransform: "none" }}>
+          {tr("Change priority")}
+        </Button>
       )}
 
       {onStatus ? (
@@ -891,6 +903,15 @@ export function PayRow({ p }) {
             )}
           </Typography>
         )}
+        {/* What the app checked when the tenant sent it (only while it waits for review) */}
+        {kind === "pending" &&
+          proofFindings(p.proofCheck)
+            .filter((f) => f.tone !== "info")
+            .map((f) => (
+              <Typography key={f.text} variant="caption" sx={{ display: "block", fontWeight: 700, color: f.tone === "success" ? "success.dark" : f.tone === "error" ? "error.main" : "warning.dark" }}>
+                {tr(f.text)}
+              </Typography>
+            ))}
       </Box>
       <Box sx={{ textAlign: "right", flexShrink: 0 }}>
         <Typography sx={{ fontWeight: 800 }}>{peso(p.amount)}</Typography>

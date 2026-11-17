@@ -42,6 +42,7 @@ import { useAuth } from "../../../context/AuthContext";
 import { createCaretakerAccount } from "../../../services/caretakerService";
 import { generateTempPassword } from "../../../utils/generateTempPassword";
 import { findDuplicatePerson } from "../../../utils/duplicates";
+import { modeOf, takenProperties, useAssignmentMode, validateAssignment } from "../../../utils/caretakerAssignment";
 import { t } from "../../../i18n";
 
 // ---------------------------------------------------------------------------
@@ -348,11 +349,18 @@ export default function InviteCaretaker() {
 
   const [form, setForm] = useState({
     assignedPropertyId: "",
+    // Several properties, when the owner's caretaker rule allows it
+    assignedPropertyIds: [],
     fullName: "",
     email: "",
     mobilePhone: "",
   });
   const [fieldErrors, setFieldErrors] = useState({});
+
+  // The owner's caretaker rule (Caretakers page) and who already looks after what
+  const assignmentMode = useAssignmentMode(currentUser?.uid);
+  const rule = modeOf(assignmentMode);
+  const [caretakers, setCaretakers] = useState([]);
 
   const [permissionMode, setPermissionMode] = useState("full"); // "full" | "custom"
   const [customPermissions, setCustomPermissions] = useState(NO_PERMISSIONS);
@@ -386,7 +394,10 @@ export default function InviteCaretaker() {
           .map((d) => ({ id: d.id, ...d.data() }))
           .filter((property) => !["inactive", "archived", "deactivated"].includes(String(property.status || "Active").trim().toLowerCase()));
         setProperties(list);
-        if (list.length === 1) setForm((prev) => ({ ...prev, assignedPropertyId: list[0].id }));
+        if (list.length === 1) setForm((prev) => ({ ...prev, assignedPropertyId: list[0].id, assignedPropertyIds: [list[0].id] }));
+        // Current caretakers, so a property that already has one is marked (one caretaker per property rules)
+        const people = await getDocs(query(collection(db, "users"), where("ownerUid", "==", currentUser.uid))).catch(() => null);
+        setCaretakers(people ? people.docs.map((d) => ({ id: d.id, ...d.data() })).filter((u) => u.role === "caretaker") : []);
       } catch (err) {
         console.error("Failed to load properties:", err);
         setError("Failed to load properties. Please refresh and try again.");
@@ -396,6 +407,9 @@ export default function InviteCaretaker() {
     }
     fetchProperties();
   }, [currentUser?.uid]);
+
+  // The properties picked: one, or several when the caretaker rule allows it
+  const chosenPropertyIds = () => (rule.multiProperty ? form.assignedPropertyIds : [form.assignedPropertyId]).filter(Boolean);
 
   const updateField = (field, value) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -424,9 +438,14 @@ export default function InviteCaretaker() {
       });
     }
     if (s === 1) {
-      if (!form.assignedPropertyId) e.assignedPropertyId = "Please select a property.";
-      else if (!loadingProperties && !properties.some((p) => p.id === form.assignedPropertyId)) {
+      const ids = chosenPropertyIds();
+      if (!ids.length) e.assignedPropertyId = "Please select a property.";
+      else if (!loadingProperties && !ids.every((id) => properties.some((p) => p.id === id))) {
         e.assignedPropertyId = "That property is no longer available. Pick another.";
+      } else {
+        // The owner's caretaker rule: how many properties, and whether properties can be shared
+        const problem = validateAssignment({ mode: assignmentMode, propertyIds: ids, caretakers, propertyName: (id) => propertyLabel(properties.find((p) => p.id === id) || {}) });
+        if (problem) e.assignedPropertyId = problem;
       }
     }
     return e;
@@ -529,7 +548,9 @@ export default function InviteCaretaker() {
         email: payload.email,
         mobilePhone: payload.mobilePhone,
         tempPassword,
-        assignedPropertyId: form.assignedPropertyId,
+        assignedPropertyId: chosenPropertyIds()[0],
+        assignedPropertyIds: chosenPropertyIds(),
+        assignedPropertyNames: Object.fromEntries(chosenPropertyIds().map((id) => [id, propertyLabel(properties.find((p) => p.id === id) || {})])),
         ownerUid: currentUser?.uid,
         permissions,
       });
@@ -544,7 +565,7 @@ export default function InviteCaretaker() {
           phone: payload.mobilePhone,
           email: payload.email,
           tempPassword,
-          propertyId: form.assignedPropertyId,
+          propertyId: chosenPropertyIds()[0],
         });
         setSendingSms(false);
         smsStatus = result.ok ? "sent" : "failed";
@@ -560,10 +581,11 @@ export default function InviteCaretaker() {
           dispatchMethod,
           smsStatus,
           smsError,
-          propertyName: (() => {
-            const p = properties.find((x) => x.id === form.assignedPropertyId);
-            return p ? p.propertyName || p.name || "" : "";
-          })(),
+          propertyName: chosenPropertyIds()
+            .map((id) => properties.find((x) => x.id === id))
+            .filter(Boolean)
+            .map((p) => p.propertyName || p.name || "")
+            .join(", "),
           permissionCount: Object.values(permissions || {}).filter(Boolean).length,
         },
       });
@@ -782,19 +804,35 @@ export default function InviteCaretaker() {
                       </Alert>
                     )}
 
-                    <FormRow label={t("Assigned property")} required>
+                    <FormRow label={rule.multiProperty ? t("Assigned properties") : t("Assigned property")} required>
                       <TextField
                         select
                         fullWidth
-                        label={loadingProperties ? "Loading properties…" : "Property"}
-                        value={form.assignedPropertyId}
-                        onChange={(e) => updateField("assignedPropertyId", e.target.value)}
+                        label={loadingProperties ? "Loading properties…" : rule.multiProperty ? "Properties" : "Property"}
+                        value={rule.multiProperty ? form.assignedPropertyIds : form.assignedPropertyId}
+                        onChange={(e) => {
+                          if (rule.multiProperty) {
+                            const ids = typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value;
+                            setForm((prev) => ({ ...prev, assignedPropertyIds: ids, assignedPropertyId: ids[0] || "" }));
+                            updateField("assignedPropertyId", ids[0] || "");
+                          } else {
+                            updateField("assignedPropertyId", e.target.value);
+                          }
+                        }}
                         disabled={loadingProperties || noProperties}
+                        slotProps={{ select: { multiple: rule.multiProperty, renderValue: rule.multiProperty ? (ids) => ids.map((id) => propertyLabel(properties.find((p) => p.id === id) || {})).join(", ") : undefined } }}
                         {...flag("assignedPropertyId")}
+                        helperText={fieldErrors.assignedPropertyId || t(rule.hint)}
                       >
-                        {properties.map((p) => (
-                          <MenuItem key={p.id} value={p.id}>{propertyLabel(p)}</MenuItem>
-                        ))}
+                        {properties.map((p) => {
+                          const takenBy = rule.sharedProperty ? null : takenProperties(caretakers).get(p.id);
+                          return (
+                            <MenuItem key={p.id} value={p.id} disabled={Boolean(takenBy)}>
+                              {propertyLabel(p)}
+                              {takenBy ? ` · ${t("has a caretaker")} (${takenBy.join(", ")})` : ""}
+                            </MenuItem>
+                          );
+                        })}
                       </TextField>
                     </FormRow>
 

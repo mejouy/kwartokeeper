@@ -13,10 +13,12 @@ initializeApp();
 const db = getFirestore();
 
 async function getPropertyCaretakers(propertyId, ownerId) {
+  // All of the owner's caretakers, then the ones looking after this property:
+  // the one they work on now, or any of theirs when the owner's caretaker rule
+  // allows several properties (assignedPropertyIds)
   const snapshot = await db
     .collection("caretakers")
     .where("ownerUid", "==", ownerId)
-    .where("assignedPropertyId", "==", propertyId)
     .get();
 
   return snapshot.docs
@@ -24,6 +26,11 @@ async function getPropertyCaretakers(propertyId, ownerId) {
       id: document.id,
       ...document.data(),
     }))
+    .filter(
+      (caretaker) =>
+        caretaker.assignedPropertyId === propertyId ||
+        (Array.isArray(caretaker.assignedPropertyIds) && caretaker.assignedPropertyIds.includes(propertyId)),
+    )
     .filter(
       (caretaker) =>
         !["inactive", "archived", "deactivated"].includes(

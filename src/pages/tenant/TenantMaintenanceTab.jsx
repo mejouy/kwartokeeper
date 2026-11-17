@@ -6,10 +6,11 @@ import HistoryIcon from "@mui/icons-material/History";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
+import TaskAltOutlinedIcon from "@mui/icons-material/TaskAltOutlined";
 import { PAGE_SIZE, row, cardSx, rise, EmptyState, TicketCard, ShowMore, FilterPills } from "./tenantParts";
 import { t } from "../../i18n";
 
-export default function TenantMaintenanceTab({ activeTickets, archiveOpen, archiveShown, isPhone, openRepair, openTicketDlg, rankedTickets, resolvedTickets, setArchiveOpen, setArchiveShown, setTicketFilter, setTicketsShown, shownTickets, ticketFilter, ticketsShown }) {
+export default function TenantMaintenanceTab({ activeTickets, confirmTickets = [], archiveOpen, archiveShown, isPhone, openRepair, openTicketDlg, rankedTickets, resolvedTickets, setArchiveOpen, setArchiveShown, setTicketFilter, setTicketsShown, shownTickets, ticketFilter, ticketsShown }) {
   return (
     <>
       <Box sx={{ ...row, justifyContent: "space-between", gap: 2, mb: { xs: 2, sm: 2.5 } }}>
@@ -33,6 +34,23 @@ export default function TenantMaintenanceTab({ activeTickets, archiveOpen, archi
         </Paper>
       ) : (
         <>
+          {/* Resolved requests waiting for the tenant's answer: confirm or reopen */}
+          {confirmTickets.length > 0 && (
+            <Box component="section" aria-label={t("Waiting for your answer")} sx={{ mb: { xs: 2.5, sm: 3 } }}>
+              <Typography sx={{ ...row, gap: 0.75, fontWeight: 800, mb: 1.25 }}>
+                <TaskAltOutlinedIcon fontSize="small" sx={{ color: "success.main" }} />
+                {t("Waiting for your answer · {n}", { n: confirmTickets.length })}
+              </Typography>
+              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.25, sm: 1.5 }, alignItems: "start" }}>
+                {confirmTickets.map((t, i) => (
+                  <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0 }}>
+                    <TicketCard t={t} onAction={openTicketDlg} />
+                  </Box>
+                ))}
+              </Box>
+            </Box>
+          )}
+
           {activeTickets.length === 0 ? (
             <Paper elevation={0} sx={{ ...cardSx }}>
               <EmptyState icon={<CheckCircleOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />} title={t("All sorted")} body={t("No open requests right now.")} />
@@ -95,7 +113,7 @@ export default function TenantMaintenanceTab({ activeTickets, archiveOpen, archi
                   <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.25, sm: 1.5 }, mt: 1.5, alignItems: "start" }}>
                     {resolvedTickets.slice(0, archiveShown).map((t) => (
                       <Box key={t.id} sx={{ minWidth: 0, opacity: 0.85 }}>
-                        <TicketCard t={t} collapsible defaultOpen={false} />
+                        <TicketCard t={t} onAction={openTicketDlg} collapsible defaultOpen={false} />
                       </Box>
                     ))}
                   </Box>

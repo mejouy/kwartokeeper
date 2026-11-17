@@ -23,9 +23,38 @@ export const FEE_TYPES = [
   { key: "appliance", label: "Appliance use" },
   { key: "parking", label: "Parking" },
   { key: "penalty", label: "Late fee" },
+  // Move-in payments (panel revisions): both one-time, both optional
+  { key: "advance", label: "Advance rent" },
+  { key: "deposit", label: "Security deposit" },
   { key: "other", label: "Other" },
 ];
 export const feeTypeLabel = (key) => FEE_TYPES.find((t) => t.key === key)?.label || "Fee";
+
+/*
+ * Move-in payments, added like any other fee for the move-in month:
+ *  - Advance rent: rent paid ahead. It lists the months it pays for
+ *    (coversPeriods); once its own month is paid, those months show as paid
+ *    (utils/tenantRent.js, advanceCreditFor).
+ *  - Security deposit: held by the owner while the tenant stays, then
+ *    refunded, used for unpaid rent or fees, or kept for damages
+ *    (depositStatus on the fee, set from the tenant's profile).
+ */
+export const MOVE_IN_TYPES = ["advance", "deposit"];
+export const isMoveInType = (type) => MOVE_IN_TYPES.includes(type);
+
+/** The months an advance pays for: the `count` months right after `period`. */
+export function advanceCovers(period, count) {
+  const start = periodIndex(period);
+  const n = Math.max(Math.round(Number(count) || 0), 0);
+  return start === null ? [] : Array.from({ length: n }, (_, i) => periodFromIndex(start + 1 + i));
+}
+
+export const DEPOSIT_OUTCOMES = [
+  { key: "refunded", label: "Refunded to the tenant" },
+  { key: "applied", label: "Used for unpaid rent or fees" },
+  { key: "forfeited", label: "Kept for damages" },
+];
+export const depositOutcomeLabel = (key) => DEPOSIT_OUTCOMES.find((o) => o.key === key)?.label || "";
 
 export const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
 
@@ -101,6 +130,9 @@ export const billSnapshot = (rent, fees = []) => ({
   total: round2(round2(rent) + feesTotal(fees)),
 });
 
+/** The same, from a whole bill (billForMonth in utils/tenantRent.js): rent after any advance, fees with any late fee. */
+export const snapshotOfBill = (bill) => billSnapshot(bill?.rent || 0, bill?.fees || []);
+
 /** "November 2026 only" / "Every month from November 2026" / "Every month, Nov 2026 – Jan 2027". */
 export function describeRepeat(c) {
   if (c.repeat !== "monthly") return `${c.period} only`;
@@ -124,7 +156,7 @@ const peso = (n) => `₱${Number(n || 0).toLocaleString("en-PH", { minimumFracti
  * tenants: [{ id, name, propertyId, propertyName, roomNumber }]
  * amounts: one amount per tenant (same order)
  */
-export async function addCharges({ ownerUid, tenants, amounts, type, label, repeat, period, note }) {
+export async function addCharges({ ownerUid, tenants, amounts, type, label, repeat, period, note, extra = {} }) {
   const uid = auth.currentUser?.uid;
   if (!uid || !ownerUid || tenants.length === 0) throw new Error("Nothing to add.");
   const batch = writeBatch(db);
@@ -149,6 +181,8 @@ export async function addCharges({ ownerUid, tenants, amounts, type, label, repe
       endPeriod: "",
       note: String(note || "").trim(),
       status: "active",
+      // e.g. coversPeriods for advance rent
+      ...extra,
       createdBy: uid,
       createdAt: serverTimestamp(),
     });
@@ -161,6 +195,10 @@ export async function addCharges({ ownerUid, tenants, amounts, type, label, repe
       message:
         repeat === "monthly"
           ? `${peso(amount)} will be added to your rent every month starting ${period}.${note ? ` Note: ${String(note).trim()}` : ""}`
+          : type === "advance" && Array.isArray(extra.coversPeriods) && extra.coversPeriods.length
+          ? `${peso(amount)} advance rent was added to your bill for ${period}. Once paid, it covers your rent for ${extra.coversPeriods.join(", ")}.`
+          : type === "deposit"
+          ? `${peso(amount)} security deposit was added to your bill for ${period}. Your landlord holds it while you stay and settles it when you move out.`
           : `${peso(amount)} was added to your bill for ${period}.${note ? ` Note: ${String(note).trim()}` : ""}`,
       chargeId: ref.id,
       ownerId: ownerUid,
@@ -179,3 +217,13 @@ export const updateCharge = (id, patch) => updateDoc(doc(db, "charges", id), { .
 export const stopCharge = (id, lastPeriod) => updateCharge(id, { endPeriod: lastPeriod });
 
 export const removeCharge = (id) => updateCharge(id, { status: "removed", removedAt: serverTimestamp(), removedBy: auth.currentUser?.uid || "" });
+
+/** Settles a security deposit: refunded, used for unpaid rent or fees, or kept for damages. */
+export const settleDeposit = (id, { outcome, amountReturned = 0, note = "" }) =>
+  updateCharge(id, {
+    depositStatus: outcome,
+    depositAmountReturned: round2(amountReturned),
+    depositNote: String(note || "").trim().slice(0, 200),
+    depositSettledAt: serverTimestamp(),
+    depositSettledBy: auth.currentUser?.uid || "",
+  });

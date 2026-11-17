@@ -39,6 +39,9 @@ import { getPropertyCoverPhotoUrl } from "../../../utils/getPropertyCoverPhotoUr
 import AddressFields from "../../../components/AddressFields";
 import { findDuplicateProperty } from "../../../utils/duplicates";
 import { t } from "../../../i18n";
+import BedRatesDialog from "../../../components/BedRatesDialog";
+import ContractEditor from "../../../components/ContractEditor";
+import { cleanBedRates, customBedRates, rateRangeText } from "../../../utils/bedRates";
 
 // Must match the owner layout: top bar height, and bottom nav height on phones
 const BAR_H = { xs: 56, md: 72 };
@@ -224,6 +227,16 @@ const occupancyChipSx = (occupied, capacity) => {
 
 const EMPTY_ADDRESS = { street: "", barangay: "", cityMunicipality: "", province: "", region: "", regionCode: "", provinceCode: "", cityCode: "" };
 
+// "2 beds with their own rate" under a room's rate, with a button to set them
+function BedRatesLink({ room, onOpen }) {
+  const own = customBedRates(room).length;
+  return (
+    <Button size="small" onClick={onOpen} sx={{ mt: 0.5, ml: -0.75, fontWeight: 700, textTransform: "none", minHeight: 30, py: 0 }}>
+      {own ? t("{n} beds with their own rate · {range}", { n: own, range: rateRangeText(room) }) : t("Set rates per bed")}
+    </Button>
+  );
+}
+
 export default function PropertyDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -290,6 +303,8 @@ export default function PropertyDetails() {
     },
     amenities: [],
     rulesText: "",
+    // Rental contract tenants agree to in the app (panel revisions, utils/contract.js)
+    contract: { enabled: false, title: "", body: "", version: 0 },
     ruleFiles: [], // Array of uploaded document objects { name, url, path }
     rooms: []
   });
@@ -340,6 +355,12 @@ export default function PropertyDetails() {
             amenities: Array.isArray(data.amenities) ? data.amenities : [],
             rulesText: Array.isArray(data.rules) ? data.rules.join("\n") : typeof data.rules === "string" ? data.rules : data.rulesText || "",
             ruleFiles: Array.isArray(data.ruleFiles) ? data.ruleFiles : [],
+            contract: {
+              enabled: Boolean(data.contract?.enabled),
+              title: String(data.contract?.title || ""),
+              body: String(data.contract?.body || ""),
+              version: Number(data.contract?.version) || 0,
+            },
             rooms: rooms
           };
           setFormData(loaded);
@@ -408,6 +429,7 @@ export default function PropertyDetails() {
   };
 
   // Rooms logic
+  const [bedRatesRoom, setBedRatesRoom] = useState(null); // index of the room whose bed rates are open
   const handleRoomChange = (index, field, value) => {
     setFormData(prev => {
       const updatedRooms = [...prev.rooms];
@@ -677,6 +699,20 @@ export default function PropertyDetails() {
         amenities: formData.amenities,
         rules: formData.rulesText.split("\n").map(r => r.trim()).filter(Boolean),
         ruleFiles: formData.ruleFiles,
+        // A changed contract gets a new version, so tenants are asked to agree again
+        contract: (() => {
+          const before = savedSnapshot ? JSON.parse(savedSnapshot).contract || {} : {};
+          const c = formData.contract || {};
+          const changed = c.enabled !== Boolean(before.enabled) || c.title !== (before.title || "") || c.body !== (before.body || "");
+          const textChanged = c.title !== (before.title || "") || c.body !== (before.body || "");
+          return {
+            enabled: Boolean(c.enabled && c.body.trim()),
+            title: c.title.trim(),
+            body: c.body,
+            version: textChanged || (changed && !before.version) ? (Number(before.version) || 0) + 1 : Number(before.version) || 1,
+            updatedAt: changed ? new Date().toISOString() : before.updatedAt || new Date().toISOString(),
+          };
+        })(),
         rooms: formData.rooms.map(room => ({
           ...room,
           id: room.id || `room_${Math.random()}`,
@@ -684,14 +720,16 @@ export default function PropertyDetails() {
           floor: Number(room.floor),
           capacity: Number(room.capacity),
           occupiedBeds: Number((liveRooms.get(room.id)?.occupiedBeds ?? room.occupiedBeds) || 0),
-          monthlyRatePerBed: Number(room.monthlyRatePerBed || 0)
+          monthlyRatePerBed: Number(room.monthlyRatePerBed || 0),
+          // Beds with their own rate (only real beds, only rates that differ from the room's)
+          bedRates: cleanBedRates(room.bedRates, room.capacity, room.monthlyRatePerBed)
         })),
         updatedAt: new Date()
       };
 
       await updateDoc(docRef, updatePayload);
 
-      const savedForm = { ...formData, coverPhotoUrl: coverUrl };
+      const savedForm = { ...formData, coverPhotoUrl: coverUrl, contract: { ...formData.contract, version: updatePayload.contract.version } };
       setFormData(savedForm);
       setSavedSnapshot(JSON.stringify(savedForm));
       setSavedDocUrls(formData.ruleFiles.map((f) => f.url).filter(Boolean));
@@ -1013,6 +1051,7 @@ export default function PropertyDetails() {
                               </Box>
                               <Box sx={{ mt: 1.5 }}>
                                 <RateInput value={room.monthlyRatePerBed} onChange={(val) => handleRoomChange(idx, "monthlyRatePerBed", val)} />
+                                <BedRatesLink room={room} onOpen={() => setBedRatesRoom(idx)} />
                               </Box>
                             </Box>
                           );
@@ -1062,6 +1101,7 @@ export default function PropertyDetails() {
                                   </TableCell>
                                   <TableCell sx={{ minWidth: 190 }}>
                                     <RateInput value={room.monthlyRatePerBed} onChange={(val) => handleRoomChange(idx, "monthlyRatePerBed", val)} />
+                                    <BedRatesLink room={room} onOpen={() => setBedRatesRoom(idx)} />
                                   </TableCell>
                                   <TableCell align="right" sx={{ pr: 2 }}>
                                     <IconButton aria-label={`Delete ${roomName(room)}`} color="error" size="small" onClick={() => setRoomToDelete(idx)}>
@@ -1261,6 +1301,20 @@ export default function PropertyDetails() {
               </Box>
             )}
           </Section>
+
+          {/* Rental contract: tenants read it with their details filled in and agree in the app */}
+          <Section
+            title={t("Rental contract")}
+            description={t("Optional. Write the agreement for this property; tenants agree to it in the app and both of you can download it.")}
+          >
+            <ContractEditor
+              value={formData.contract}
+              onChange={(contract) => setFormData((prev) => ({ ...prev, contract }))}
+              property={{ ...formData, id }}
+              rules={formData.rulesText.split("\n").map((r) => r.trim()).filter(Boolean)}
+              fieldSx={fieldSx}
+            />
+          </Section>
         </Paper>
       )}
 
@@ -1446,6 +1500,10 @@ export default function PropertyDetails() {
       )}
 
       {/* Toast — lifted above the phone bottom bar */}
+      {bedRatesRoom !== null && formData.rooms[bedRatesRoom] && (
+        <BedRatesDialog room={formData.rooms[bedRatesRoom]} onClose={() => setBedRatesRoom(null)} onSave={(bedRates) => handleRoomChange(bedRatesRoom, "bedRates", bedRates)} />
+      )}
+
       <Snackbar
         open={toast.open}
         autoHideDuration={4000}

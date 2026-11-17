@@ -5,7 +5,7 @@
 // "profile" | "maintenance").
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Fab, IconButton, LinearProgress, Paper, Skeleton, Snackbar, TextField, Typography, useMediaQuery } from "@mui/material";
+import { Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Fab, IconButton, LinearProgress, Paper, Rating, Skeleton, Snackbar, TextField, Typography, useMediaQuery } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import CalendarMonthOutlinedIcon from "@mui/icons-material/CalendarMonthOutlined";
 import AddIcon from "@mui/icons-material/Add";
@@ -27,18 +27,22 @@ import PolicyOutlinedIcon from "@mui/icons-material/PolicyOutlined";
 import CloudOffOutlinedIcon from "@mui/icons-material/CloudOffOutlined";
 import { useNavigate } from "react-router-dom";
 import { onAuthStateChanged } from "firebase/auth";
-import { doc, collection, addDoc, updateDoc, arrayUnion, query, where, onSnapshot, serverTimestamp, writeBatch } from "firebase/firestore";
+import { doc, collection, addDoc, updateDoc, arrayUnion, deleteField, query, where, onSnapshot, serverTimestamp, writeBatch } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
-import { notifyMaintenanceSubmitted, notifyMaintenanceCancelled, notifyMaintenanceFollowUp, notifyPaymentSubmitted } from "../../services/notificationService";
+import { notifyMaintenanceSubmitted, notifyMaintenanceCancelled, notifyMaintenanceFollowUp, notifyMaintenanceConfirmed, notifyMaintenanceReopened, notifyMaintenanceReviewed, notifyPaymentSubmitted } from "../../services/notificationService";
 import { normalizePayment } from "../../utils/normalizePayment";
 import { saveReceiptImage } from "../../utils/receiptImage";
-import { leaseLengthText } from "../../utils/tenantRent";
-import { billSnapshot, chargeAppliesTo, isActiveCharge, monthBill } from "../../utils/charges";
+import { billForMonth, dueDateOn, dueDayOf, leaseLengthText } from "../../utils/tenantRent";
+import { isActiveCharge, snapshotOfBill } from "../../utils/charges";
+import { useOwnerBilling } from "../../utils/billingSettings";
+import { agreementStatus } from "../../utils/contract";
+import { buildProofCheck, checkReference, compareAmount, compareWithReceipt, findDuplicateRef, parseReceiptText, readReceiptText } from "../../utils/paymentProof";
 import { BillBreakdown } from "../../components/Fees";
 import { addMonthsClamped } from "../../utils/addMonthsClamped";
 import { uploadToCloudinary } from "../../utils/cloudinary";
 import { getPropertyCoverPhotoUrl } from "../../utils/getPropertyCoverPhotoUrl";
 import { CATEGORIES, rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
+import { MAX_REOPEN_REASON, MAX_REVIEW_COMMENT, canReview, needsTenantAnswer, reviewFields, validateReopenReason } from "../../utils/maintenanceWorkflow";
 import { ADVANCE_MONTHS, periodLabel, shortPeriod, periodsText, PAGE_SIZE, ANNOUNCE_PREVIEW, BOTTOM_NAV_H, row, cardSx, CATEGORY_OPTIONS, readPayMethods, prettyMobile, peso, getTodayInputValue, getTimestampMillis, fmtDate, LEASE_MONTHS, formatLeaseDuration, paymentTone, AnimationStyles, Pill, EmptyState, Facts, useToday, readOutbox, writeOutbox, useOnline, PhotoPicker, TabErrorBoundary, saveImage, parseClock, useClock } from "./tenantParts";
 import TenantOverviewTab from "./TenantOverviewTab";
 import TenantPaymentsTab from "./TenantPaymentsTab";
@@ -101,7 +105,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const [curfewRecords, setCurfewRecords] = useState([]);
   const [outbox, setOutbox] = useState([]);
   const flushing = useRef(false);
-  const [ticketDlg, setTicketDlg] = useState({ mode: "", ticket: null, title: "", description: "", text: "", photo: null, photoError: "", busy: false, error: "" });
+  const [ticketDlg, setTicketDlg] = useState({ mode: "", ticket: null, title: "", description: "", text: "", photo: null, photoError: "", rating: 0, comment: "", reason: "", busy: false, error: "" });
 
   // ---- maintenance
   const [tickets, setTickets] = useState([]);
@@ -118,6 +122,20 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const [paymentFilter, setPaymentFilter] = useState("all");
   const [proofFile, setProofFile] = useState(null);
   const [proofError, setProofError] = useState("");
+  // The receipt screenshot, read on the phone (OCR) to compare with what is typed
+  const [proofRead, setProofRead] = useState({ file: null, text: "" });
+  const proofReading = useRef({ file: null, promise: null });
+  useEffect(() => {
+    if (!proofFile) return undefined;
+    let alive = true;
+    const promise = readReceiptText(proofFile);
+    proofReading.current = { file: proofFile, promise };
+    promise.then((text) => alive && setProofRead({ file: proofFile, text }));
+    return () => {
+      alive = false;
+    };
+  }, [proofFile]);
+  const proofStatus = !proofFile ? "none" : proofRead.file === proofFile ? "read" : "reading";
   const [announcementsShown, setAnnouncementsShown] = useState(ANNOUNCE_PREVIEW);
   const [announcementFilter, setAnnouncementFilter] = useState("all");
   const [attentionOpen, setAttentionOpen] = useState(false);
@@ -142,24 +160,28 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   // ---- billing period / due date
   const currentPeriod = useMemo(() => today.toLocaleDateString("en-US", { month: "long", year: "numeric" }), [today]);
 
-  // What one month costs: rent + that month's fees, less what was received
+  // The owner's billing rules (late fee); the same ones the owner's screens use
+  const billing = useOwnerBilling(tenantInfo.ownerUid);
+  // What one month costs: rent (less advance rent) + that month's fees and any
+  // late fee, less what was received (utils/tenantRent.js, billForMonth)
   const billFor = useCallback(
     (label) =>
-      monthBill(
-        Number(tenantInfo.monthlyRent) || 0,
-        charges.filter((c) => chargeAppliesTo(c, label)),
-        payments.filter((p) => String(p.periodMonth || "").trim().toLowerCase() === String(label).toLowerCase())
-      ),
-    [charges, payments, tenantInfo.monthlyRent]
+      billForMonth({
+        tenant: { ...tenantInfo, id: auth.currentUser?.uid, monthlyRent: Number(tenantInfo.monthlyRent) || 0 },
+        period: label,
+        charges,
+        payments,
+        settings: billing,
+        today,
+      }),
+    [charges, payments, tenantInfo, billing, today]
   );
   const currentBill = billFor(currentPeriod);
   // Rent marked paid, but fees added for the month are still open
   const feesOutstanding = currentBill.hasPaid && currentBill.balance > 0;
 
-  const dueDate = useMemo(() => {
-    const day = Math.min(Math.max(Number(tenantInfo.rentDueDay || 5), 1), 28);
-    return new Date(today.getFullYear(), today.getMonth(), day);
-  }, [tenantInfo.rentDueDay, today]);
+  // A due day this month doesn't have (the 30th in February) falls on its last day
+  const dueDate = useMemo(() => dueDateOn(today.getFullYear(), today.getMonth(), dueDayOf({ rentDueDay: tenantInfo.rentDueDay })), [tenantInfo.rentDueDay, today]);
 
   const dueDateLabel = dueDate.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 
@@ -321,6 +343,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
             amenities: Array.isArray(propData.amenities) ? propData.amenities.filter(Boolean) : [],
             emergencyPhone: propData.emergencyPhone || "",
             paymentMethods: readPayMethods(propData.paymentMethods),
+            // The owner's rental contract for this property, if any (utils/contract.js)
+            contract: propData.contract || null,
             paymentNote: String(propData.paymentNote || ""),
           };
           // The tenant's room (roomId is the room's name/id, e.g. "A2")
@@ -357,6 +381,10 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           ownerUid: data.ownerUid || data.landlordUid || data.invitedBy || "",
           propertyId,
           rentDueDay: Number(data.rentDueDay || data.dueDay || 5),
+          // Months the owner waived the late fee for (owner → tenant profile)
+          lateFeeWaived: Array.isArray(data.lateFeeWaived) ? data.lateFeeWaived : [],
+          // The rental contract this tenant agreed to (version, when)
+          contractAgreement: data.contractAgreement || null,
         });
         setLoadError("");
         setLoading(false);
@@ -512,10 +540,67 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   };
 
   // ---- repair requests: add an update, edit, cancel
-  const openTicketDlg = (mode, t) => setTicketDlg({ mode, ticket: t, title: t.title || "", description: t.description || "", text: "", photo: null, photoError: "", busy: false, error: "" });
+  // Modes: update, edit, cancel; and for a resolved request: confirm (it's fixed,
+  // with an optional rating), reopen (not fixed yet) and review (rate it later)
+  const openTicketDlg = (mode, t) => setTicketDlg({ mode, ticket: t, title: t.title || "", description: t.description || "", text: "", photo: null, photoError: "", rating: 0, comment: "", reason: "", busy: false, error: "" });
   const closeTicketDlg = () => {
     if (!ticketDlg.busy) setTicketDlg((d) => ({ ...d, mode: "" }));
   };
+  // The tenant's answer to a resolved request: confirm the fix (maybe with a
+  // rating), say it isn't fixed yet (back to Pending), or rate it later
+  const answerResolvedTicket = async (live) => {
+    const { mode, rating, comment, reason } = ticketDlg;
+    if (mode === "review" ? !canReview(live) : !needsTenantAnswer(live)) {
+      setTicketDlg((d) => ({ ...d, error: t("This request has changed. Close this and check it again.") }));
+      return;
+    }
+    if (mode === "reopen") {
+      const problem = validateReopenReason(reason);
+      if (problem) {
+        setTicketDlg((d) => ({ ...d, error: t(problem) }));
+        return;
+      }
+    }
+    if (mode === "review" && !rating) {
+      setTicketDlg((d) => ({ ...d, error: t("Choose from 1 to 5 stars.") }));
+      return;
+    }
+    const review = rating ? reviewFields(rating, comment) : null;
+    setTicketDlg((d) => ({ ...d, busy: true, error: "" }));
+    try {
+      const ref = doc(db, "maintenance_tickets", live.id);
+      if (mode === "confirm") {
+        await updateDoc(ref, {
+          tenantConfirmed: true,
+          tenantConfirmedAt: serverTimestamp(),
+          ...(review ? { review: { ...review, at: serverTimestamp() } } : {}),
+          updatedAt: serverTimestamp(),
+        });
+        notifyMaintenanceConfirmed(live, review);
+        notify(review ? t("Thanks! You confirmed the fix and rated the service.") : t("Thanks! You confirmed the fix."));
+      } else if (mode === "reopen") {
+        await updateDoc(ref, {
+          status: "Pending",
+          reopenCount: (Number(live.reopenCount) || 0) + 1,
+          reopenedAt: serverTimestamp(),
+          reopenReason: reason.trim(),
+          resolvedAt: deleteField(),
+          updatedAt: serverTimestamp(),
+        });
+        notifyMaintenanceReopened(live, reason.trim());
+        notify(t("Sent back to your landlord. The request is open again."));
+      } else {
+        await updateDoc(ref, { review: { ...review, at: serverTimestamp() }, updatedAt: serverTimestamp() });
+        notifyMaintenanceReviewed(live, review);
+        notify(t("Thanks for rating the service."));
+      }
+      setTicketDlg((d) => ({ ...d, mode: "", busy: false }));
+    } catch (err) {
+      console.error("Couldn't send your answer:", err);
+      setTicketDlg((d) => ({ ...d, busy: false, error: t("Couldn't do that right now. Please try again.") }));
+    }
+  };
+
   const submitTicketDlg = async () => {
     const user = auth.currentUser;
     const t = ticketDlg.ticket;
@@ -529,7 +614,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       setTicketDlg((d) => ({ ...d, mode: "" }));
       return;
     }
-    if (ticketDlg.mode !== "update" && (live.status || "Pending") !== "Pending") {
+    if (["edit", "cancel"].includes(ticketDlg.mode) && (live.status || "Pending") !== "Pending") {
       setTicketDlg((d) => ({ ...d, error: "Work has already started on this request, so it can't be changed. Add an update instead." }));
       return;
     }
@@ -539,6 +624,10 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     }
     if (ticketDlg.mode === "update" && !ticketDlg.text.trim() && !ticketDlg.photo) {
       setTicketDlg((d) => ({ ...d, error: "Write a message or add a photo." }));
+      return;
+    }
+    if (["confirm", "reopen", "review"].includes(ticketDlg.mode)) {
+      await answerResolvedTicket(live);
       return;
     }
     setTicketDlg((d) => ({ ...d, busy: true, error: "" }));
@@ -747,10 +836,12 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       propertyName: tenantInfo.propertyName,
       roomNumber: tenantInfo.roomNumber,
       amount: months.length > 1 ? monthDue(periodMonth) : amountNum,
-      paymentMethod: payMethodKey,
+      paymentMethod: activePayMethod?.method === "Bank" ? "Bank transfer" : activePayMethod?.method || payMethodKey,
+      // Which of the owner's accounts it was sent to (owners can have several)
+      ...(activePayMethod ? { paymentAccount: { name: activePayMethod.accountName, number: activePayMethod.accountNumber, ...(activePayMethod.bankName ? { bank: activePayMethod.bankName } : {}) } } : {}),
       periodMonth,
       // What the month was billed at (rent + fees), for the owner's review and the receipt
-      bill: billSnapshot(monthlyRentNum, charges.filter((c) => chargeAppliesTo(c, periodMonth))),
+      bill: snapshotOfBill(billFor(periodMonth)),
       // IMPORTANT: a tenant can never mark a payment as Paid.
       status: "Pending",
       verificationStatus: "Pending",
@@ -793,7 +884,18 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         }
       }
 
-      const records = months.map((m) => buildRecord(m, proofUrl ? { proofUrl } : {}));
+      // What was checked (format, repeat, amount, receipt), for the owner's review
+      const ocrText = !proofFile ? "" : proofRead.file === proofFile ? proofRead.text : (await proofReading.current.promise?.catch(() => "")) || "";
+      const proofCheck = buildProofCheck({
+        method: payMethodName,
+        amount: amountNum,
+        referenceNumber: paymentForm.referenceNumber,
+        due: dueForPayment,
+        duplicateOf: findDuplicateRef(paymentForm.referenceNumber, payments),
+        ocrText,
+        hadImage: Boolean(proofFile),
+      });
+      const records = months.map((m) => buildRecord(m, { ...(proofUrl ? { proofUrl } : {}), proofCheck }));
       // All months are saved together, or none are
       const batch = writeBatch(db);
       const refs = records.map((record) => {
@@ -870,10 +972,33 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   // ---- derived
   const rankedTickets = useMemo(() => rankMaintenanceRequests(tickets), [tickets]);
   const activeTickets = rankedTickets.filter((t) => !["Resolved", "Cancelled"].includes(t.status || "Pending"));
-  const resolvedTickets = rankedTickets.filter((t) => ["Resolved", "Cancelled"].includes(t.status || "Pending"));
+  // Resolved requests waiting for the tenant to confirm stay in view, not in the archive
+  const confirmTickets = rankedTickets.filter(needsTenantAnswer);
+  const resolvedTickets = rankedTickets.filter((t) => ["Resolved", "Cancelled"].includes(t.status || "Pending") && !needsTenantAnswer(t));
   const payMethods = tenantInfo.paymentMethods || [];
   const activePayMethod = payMethods.find((m) => m.key === selectedPaymentMethod) || payMethods[0] || null;
   const payMethodKey = activePayMethod?.key || selectedPaymentMethod || "GCash";
+
+  // Checks before sending (panel revisions): never block, only warn. The owner sees them too.
+  const payMethodName = activePayMethod?.method === "Bank" ? "Bank transfer" : activePayMethod?.method || payMethodKey;
+  const dueForPayment = multiMonth ? totalDue : monthDue(sortedPayMonths[0] || currentPeriod);
+  const proofWarnings = (() => {
+    const list = [];
+    const ref = paymentForm.referenceNumber.trim();
+    if (ref) {
+      const format = checkReference(payMethodName, ref);
+      if (format) list.push(t(format));
+      if (findDuplicateRef(ref, payments)) list.push(t("You already sent a payment with this reference number."));
+    }
+    if (!multiMonth && compareAmount(amountNum, dueForPayment) === "short") list.push(t("This is less than the {amount} due, so it will count as a partial payment.", { amount: peso(dueForPayment) }));
+    if (proofStatus === "read" && proofRead.text.trim()) {
+      const { amountMatch, refMatch } = compareWithReceipt(parseReceiptText(proofRead.text), { amount: amountNum, referenceNumber: ref });
+      if (amountMatch === false) list.push(t("The amount on your receipt doesn't match the amount you typed."));
+      if (refMatch === false && ref) list.push(t("We couldn't find this reference number on your receipt."));
+    }
+    return list;
+  })();
+
 
   const statusTone = /suspend|inactive|terminated/i.test(tenantInfo.status) ? "error" : /pending/i.test(tenantInfo.status) ? "warning" : "success";
 
@@ -977,6 +1102,28 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const attention = [];
   if (statusTone === "error") {
     attention.push({ key: "account", tone: "error", title: t("Your account is {status}", { status: t(String(tenantInfo.status)).toLowerCase() }), body: t("Please contact your landlord to sort this out.") });
+  }
+  const contractProperty = { id: tenantInfo.propertyId, propertyName: tenantInfo.propertyName, addressText: tenantInfo.propertyAddress, contract: tenantInfo.contract, rules: tenantInfo.rules };
+  const contractState = agreementStatus(contractProperty, tenantInfo);
+  if (contractState === "pending" || contractState === "outdated") {
+    attention.push({
+      key: "contract",
+      tone: "info",
+      title: contractState === "outdated" ? t("Your rental contract was updated") : t("Please read your rental contract"),
+      body: t("Your landlord asks you to read it and agree in the app."),
+      actionLabel: t("Read it"),
+      onAction: () => goTab("profile"),
+    });
+  }
+  if (confirmTickets.length > 0) {
+    attention.push({
+      key: "confirm-fix",
+      tone: "info",
+      title: confirmTickets.length === 1 ? t("Is \"{title}\" fixed?", { title: confirmTickets[0].title || t("your repair request") }) : t("{n} repairs are waiting for your answer", { n: confirmTickets.length }),
+      body: t("Your landlord marked it resolved. Confirm it's fixed and rate the service, or say it isn't fixed yet."),
+      actionLabel: t("Answer"),
+      onAction: () => goTab("maintenance"),
+    });
   }
   if (tenantInfo.propertyName === "Not Assigned") {
     attention.push({ key: "unassigned", tone: "warning", title: t("No room assigned yet"), body: t("Your landlord hasn't linked you to a room. Rent and lease details appear once they do.") });
@@ -1102,6 +1249,8 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
     <TenantPaymentsTab
       canPay={canPay}
       canPayAhead={canPayAhead}
+      charges={charges}
+      depositTenant={{ ...tenantInfo, id: auth.currentUser?.uid, monthlyRent: Number(tenantInfo.monthlyRent) || 0 }}
       currentBill={currentBill}
       currentPeriod={currentPeriod}
       currentPeriodPayment={currentPeriodPayment}
@@ -1133,6 +1282,9 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
 
   const profileTab = (
     <TenantProfileTab
+      contractProperty={contractProperty}
+      contractTenant={{ ...tenantInfo, id: auth.currentUser?.uid }}
+      notify={notify}
       ackRules={ackRules}
       hasCover={hasCover}
       hasHouseRules={hasHouseRules}
@@ -1151,6 +1303,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const maintenanceTab = (
     <TenantMaintenanceTab
       activeTickets={activeTickets}
+      confirmTickets={confirmTickets}
       archiveOpen={archiveOpen}
       archiveShown={archiveShown}
       isPhone={isPhone}
@@ -1388,7 +1541,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                       <Box sx={{ ...row, justifyContent: "center", gap: 1, mb: 1 }}>
                         <QrCode2Icon color="primary" />
                         <Typography sx={{ fontWeight: 800 }}>
-                          {activePayMethod.kind === "wallet" ? `Scan with ${activePayMethod.label}` : t("Scan with any bank or e-wallet app")}
+                          {activePayMethod.kind === "wallet" ? `Scan with ${activePayMethod.methodLabel || activePayMethod.label}` : activePayMethod.kind === "bank" ? t("Send by bank transfer") : t("Scan with any bank or e-wallet app")}
                         </Typography>
                       </Box>
 
@@ -1417,7 +1570,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                                 {t("Save QR to my phone")}
                               </Button>
                               <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1.25 }}>
-                                {t("Paying from this phone? Save the QR, then in your")}{" "}{activePayMethod.kind === "wallet" ? activePayMethod.label : t("bank or e-wallet")}{" "}{t("app choose")}{" "}<strong>{t("Pay QR → Upload from gallery")}</strong>.
+                                {t("Paying from this phone? Save the QR, then in your")}{" "}{activePayMethod.kind === "wallet" ? activePayMethod.methodLabel || activePayMethod.label : t("bank or e-wallet")}{" "}{t("app choose")}{" "}<strong>{t("Pay QR → Upload from gallery")}</strong>.
                               </Typography>
                             </Box>
                           )}
@@ -1437,9 +1590,19 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                           </IconButton>
                         </Box>
                       )}
+                      {activePayMethod.kind === "bank" && activePayMethod.accountNumber && (
+                        <Box sx={{ ...row, justifyContent: "center", gap: 0.5 }}>
+                          <Typography variant="body2" color="text.secondary">
+                            {[activePayMethod.bankName, activePayMethod.accountNumber].filter(Boolean).join(" · ")}
+                          </Typography>
+                          <IconButton size="small" aria-label={t("Copy account number")} onClick={() => copyText(activePayMethod.accountNumber, "Account number copied.")}>
+                            <ContentCopyIcon sx={{ fontSize: 16 }} />
+                          </IconButton>
+                        </Box>
+                      )}
                       {activePayMethod.kind === "wallet" && !activePayMethod.qrUrl && (
                         <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
-                          {t("Send to this number in your")}{" "}{activePayMethod.label}{" "}{t("app.")}
+                          {t("Send to this number in your")}{" "}{activePayMethod.methodLabel || activePayMethod.label}{" "}{t("app.")}
                         </Typography>
                       )}
                     </Box>
@@ -1468,7 +1631,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                 <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
                   {t("Paid via")}
                 </Typography>
-                <Pill label={payMethodKey} />
+                <Pill label={activePayMethod?.label || payMethodKey} />
               </Box>
 
               {multiMonth && (
@@ -1553,7 +1716,28 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                     {proofError}
                   </Typography>
                 )}
+                {proofStatus !== "none" && (
+                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
+                    {proofStatus === "reading" ? t("Reading your receipt…") : proofRead.text.trim() ? t("Receipt read. We compare it with what you typed.") : t("We couldn't read the receipt, but it will still be sent.")}
+                  </Typography>
+                )}
               </Box>
+
+              {proofWarnings.length > 0 && (
+                <Alert severity="warning" sx={{ borderRadius: 2 }}>
+                  <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
+                    {t("Please check before sending")}
+                  </Typography>
+                  {proofWarnings.map((w) => (
+                    <Typography key={w} variant="body2" component="div">
+                      • {w}
+                    </Typography>
+                  ))}
+                  <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
+                    {t("You can still send it. Your landlord will see these notes when checking it.")}
+                  </Typography>
+                </Alert>
+              )}
 
               {!online && (
                 <Alert severity="warning" icon={<WifiOffOutlinedIcon />} sx={{ borderRadius: 2 }}>
@@ -1651,7 +1835,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
         slotProps={{ paper: { sx: { borderRadius: 3, bgcolor: "background.default", m: 2, width: "calc(100% - 32px)", maxHeight: "calc(100% - 32px)" } } }}
       >
         <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
-          {ticketDlg.mode === "cancel" ? t("Cancel this request?") : ticketDlg.mode === "edit" ? t("Edit request") : t("Add an update")}
+          {{ cancel: t("Cancel this request?"), edit: t("Edit request"), confirm: t("Confirm the fix"), reopen: t("Not fixed yet?"), review: t("Rate the service") }[ticketDlg.mode] || t("Add an update")}
           <IconButton edge="end" aria-label={t("Close")} onClick={closeTicketDlg} disabled={ticketDlg.busy}>
             <CloseIcon />
           </IconButton>
@@ -1671,6 +1855,68 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
             <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
               <TextField fullWidth required label={t("Title")} value={ticketDlg.title} onChange={(e) => setTicketDlg((d) => ({ ...d, title: e.target.value, error: "" }))} slotProps={{ htmlInput: { maxLength: 100 } }} />
               <TextField fullWidth multiline minRows={3} label={t("Details")} value={ticketDlg.description} onChange={(e) => setTicketDlg((d) => ({ ...d, description: e.target.value }))} slotProps={{ htmlInput: { maxLength: 600 } }} />
+            </Box>
+          )}
+          {(ticketDlg.mode === "confirm" || ticketDlg.mode === "review") && (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
+              {ticketDlg.mode === "confirm" && (
+                <Typography variant="body2" color="text.secondary">
+                  {t("Glad \"{title}\" is fixed! Your landlord and caretaker will see that you confirmed it.", { title: ticketDlg.ticket?.title || t("your repair request") })}
+                </Typography>
+              )}
+              {ticketDlg.ticket?.resolutionNotes && (
+                <Box sx={{ p: 1.25, borderRadius: 2, bgcolor: (th) => alpha(th.palette.success.main, 0.08) }}>
+                  <Typography variant="caption" sx={{ fontWeight: 800, color: "success.dark" }}>
+                    {t("How it was fixed")}
+                  </Typography>
+                  <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
+                    {ticketDlg.ticket.resolutionNotes}
+                  </Typography>
+                </Box>
+              )}
+              <Box>
+                <Typography sx={{ fontWeight: 800, mb: 0.5 }}>
+                  {ticketDlg.mode === "confirm" ? t("How was the service? (optional)") : t("How was the service?")}
+                </Typography>
+                <Rating
+                  name="repair-rating"
+                  size="large"
+                  value={ticketDlg.rating || null}
+                  onChange={(e, value) => setTicketDlg((d) => ({ ...d, rating: value || 0, error: "" }))}
+                  disabled={ticketDlg.busy}
+                />
+              </Box>
+              <TextField
+                fullWidth
+                multiline
+                minRows={2}
+                label={t("Comment (optional)")}
+                placeholder={t("e.g. fixed quickly, very polite")}
+                value={ticketDlg.comment}
+                onChange={(e) => setTicketDlg((d) => ({ ...d, comment: e.target.value.slice(0, MAX_REVIEW_COMMENT) }))}
+                disabled={ticketDlg.busy || !ticketDlg.rating}
+                helperText={ticketDlg.rating ? t("{n}/{max}", { n: ticketDlg.comment.length, max: MAX_REVIEW_COMMENT }) : t("Choose the stars first.")}
+              />
+            </Box>
+          )}
+          {ticketDlg.mode === "reopen" && (
+            <Box sx={{ display: "flex", flexDirection: "column", gap: 2, pt: 0.5 }}>
+              <Typography variant="body2" color="text.secondary">
+                {t("Tell your landlord what is still wrong with \"{title}\". The request goes back to Pending so they can look at it again.", { title: ticketDlg.ticket?.title || t("your repair request") })}
+              </Typography>
+              <TextField
+                fullWidth
+                multiline
+                minRows={3}
+                required
+                autoFocus
+                label={t("What is still wrong?")}
+                placeholder={t("e.g. it still leaks when the shower is on")}
+                value={ticketDlg.reason}
+                onChange={(e) => setTicketDlg((d) => ({ ...d, reason: e.target.value.slice(0, MAX_REOPEN_REASON), error: "" }))}
+                disabled={ticketDlg.busy}
+                helperText={t("{n}/{max}", { n: ticketDlg.reason.length, max: MAX_REOPEN_REASON })}
+              />
             </Box>
           )}
           {ticketDlg.mode === "update" && (
@@ -1694,12 +1940,14 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
           </Button>
           <Button
             variant="contained"
-            color={ticketDlg.mode === "cancel" ? "error" : "primary"}
+            color={ticketDlg.mode === "cancel" ? "error" : ticketDlg.mode === "confirm" ? "success" : ticketDlg.mode === "reopen" ? "warning" : "primary"}
             onClick={submitTicketDlg}
-            disabled={ticketDlg.busy || !online}
+            disabled={ticketDlg.busy || !online || (ticketDlg.mode === "review" && !ticketDlg.rating) || (ticketDlg.mode === "reopen" && !ticketDlg.reason.trim())}
             sx={{ fontWeight: 800, borderRadius: 2.5, px: 3, textTransform: "none" }}
           >
-            {ticketDlg.busy ? t("Please wait...") : ticketDlg.mode === "cancel" ? t("Cancel request") : ticketDlg.mode === "edit" ? t("Save changes") : t("Send update")}
+            {ticketDlg.busy
+              ? t("Please wait...")
+              : { cancel: t("Cancel request"), edit: t("Save changes"), confirm: t("Yes, it's fixed"), reopen: t("Reopen request"), review: t("Send rating") }[ticketDlg.mode] || t("Send update")}
           </Button>
         </DialogActions>
       </Dialog>

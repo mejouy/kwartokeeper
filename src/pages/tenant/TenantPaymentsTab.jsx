@@ -9,8 +9,9 @@ import HistoryIcon from "@mui/icons-material/History";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import { ADVANCE_MONTHS, row, cardSx, peso, paymentTone, rise, StepTrack, Pill, Panel, EmptyState, FilterPills, PaymentYear } from "./tenantParts";
 import { t } from "../../i18n";
+import { DepositPanel } from "../../components/DepositPanel";
 
-export default function TenantPaymentsTab({ canPay, canPayAhead, currentBill, currentPeriod, currentPeriodPayment, currentStep, daysToDue, dueDateLabel, dueNow, dueText, filteredPayments, isAwaitingVerification, isPaid, isPhone, lease, openMonths, openPayRentModal, paidThisYear, payableMonths, paymentCounts, paymentFilter, payments, paymentsByYear, rentMissing, rentStatus, setPaymentFilter, setReceipt, statusKey }) {
+export default function TenantPaymentsTab({ canPay, canPayAhead, charges = [], depositTenant, currentBill, currentPeriod, currentPeriodPayment, currentStep, daysToDue, dueDateLabel, dueNow, dueText, filteredPayments, isAwaitingVerification, isPaid, isPhone, lease, openMonths, openPayRentModal, paidThisYear, payableMonths, paymentCounts, paymentFilter, payments, paymentsByYear, rentMissing, rentStatus, setPaymentFilter, setReceipt, statusKey }) {
   return (
     <>
       <Box sx={{ ...row, justifyContent: "space-between", gap: 2, mb: { xs: 2, sm: 2.5 } }}>
@@ -33,7 +34,17 @@ export default function TenantPaymentsTab({ canPay, canPayAhead, currentBill, cu
       <Paper elevation={0} sx={{ ...cardSx, overflow: "hidden", display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", md: "repeat(4, minmax(0, 1fr))" }, mb: { xs: 2, sm: 2.5 }, ...rise(0) }}>
         {[
           { label: t("Billing period"), value: currentPeriod },
-          { label: isPaid ? t("Amount paid") : t("Amount due"), value: peso(isPaid ? currentBill.total : dueNow), sub: currentBill.fees.length ? t("Includes {amount} fees", { amount: peso(currentBill.feeTotal) }) : undefined },
+          {
+            label: isPaid ? t("Amount paid") : t("Amount due"),
+            value: peso(isPaid ? currentBill.total : dueNow),
+            sub: currentBill.coveredByAdvance
+              ? t("Paid with your advance rent")
+              : currentBill.lateFee
+              ? t("Includes a {amount} late fee", { amount: peso(currentBill.lateFee.amount) })
+              : currentBill.fees.length
+              ? t("Includes {amount} fees", { amount: peso(currentBill.feeTotal) })
+              : undefined,
+          },
           { label: t("Due date"), value: dueDateLabel, sub: dueText },
           { label: t("Status"), value: t(rentStatus), tone: paymentTone(rentStatus) },
         ].map((item, i) => (
@@ -66,6 +77,13 @@ export default function TenantPaymentsTab({ canPay, canPayAhead, currentBill, cu
           </Box>
         ))}
       </Paper>
+
+      {/* Security deposit from move-in: held while they stay, settled at move-out */}
+      {depositTenant && charges.some((c) => c.type === "deposit" && c.status !== "removed") && (
+        <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 2.5 }, mb: { xs: 2, sm: 2.5 }, ...rise(1) }}>
+          <DepositPanel tenant={depositTenant} charges={charges} payments={payments} readOnly embedded={false} />
+        </Paper>
+      )}
 
       {/* Where is this month's payment? */}
       {currentPeriodPayment ? (

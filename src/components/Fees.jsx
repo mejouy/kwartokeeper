@@ -28,10 +28,12 @@ import MoreVertIcon from "@mui/icons-material/MoreVert";
 import {
   FEE_TYPES,
   addCharges,
+  advanceCovers,
   describeRepeat,
   feePeriodOptions,
   feeTypeLabel,
   isActiveCharge,
+  isMoveInType,
   periodIndex,
   periodOfDate,
   removeCharge,
@@ -51,15 +53,23 @@ const paperSx = { borderRadius: "20px", m: { xs: 2, sm: 4 }, width: { xs: "calc(
 const blankForm = (period) => ({ type: "electricity", label: "", amount: "", split: "each", repeat: "once", period, note: "" });
 
 /**
- * tenants: [{ id, name, propertyId, propertyName, roomNumber }]
+ * tenants: [{ id, name, propertyId, propertyName, roomNumber, rent }]
  * charges: the owner's existing fees (to stop exact duplicates)
  * editing: a fee to change instead of adding new ones
+ * settings: the owner's billing rules (utils/billingSettings.js): their own
+ *   fee types with default amounts, offered next to the built-in ones
+ * initialType: open on this fee type (e.g. "deposit")
  */
-export function AddFeeDialog({ open, onClose, onSaved, ownerUid, tenants = [], initialTenantIds = [], charges = [], editing = null }) {
+export function AddFeeDialog({ open, onClose, onSaved, ownerUid, tenants = [], initialTenantIds = [], charges = [], editing = null, settings = null, initialType = "" }) {
   const today = useMemo(() => new Date(), []);
   const periods = useMemo(() => feePeriodOptions(today), [today]);
   const thisMonth = periodOfDate(today);
-  const [form, setForm] = useState(() => (editing ? { type: editing.type || "other", label: editing.label || "", amount: String(editing.amount ?? ""), split: "each", repeat: editing.repeat === "monthly" ? "monthly" : "once", period: editing.period || thisMonth, note: editing.note || "" } : blankForm(thisMonth)));
+  const ownTypes = useMemo(() => (Array.isArray(settings?.feeTypes) ? settings.feeTypes : []), [settings]);
+  const [form, setForm] = useState(() =>
+    editing
+      ? { type: editing.type || "other", label: editing.label || "", amount: String(editing.amount ?? ""), split: "each", repeat: editing.repeat === "monthly" ? "monthly" : "once", period: editing.period || thisMonth, note: editing.note || "", months: editing.coversPeriods?.length || 1 }
+      : { ...blankForm(thisMonth), ...(initialType ? { type: initialType } : {}), months: 1 }
+  );
   const [picked, setPicked] = useState(() => new Set(editing ? [editing.tenantId] : initialTenantIds));
   const [errors, setErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -87,10 +97,16 @@ export function AddFeeDialog({ open, onClose, onSaved, ownerUid, tenants = [], i
   }, [tenants]);
 
   const chosen = tenants.filter((t) => picked.has(t.id));
-  const amountNum = round2(form.amount);
-  const splitting = !editing && form.split === "split" && chosen.length > 1;
-  const amounts = splitting ? splitAmount(amountNum, chosen.length) : chosen.map(() => amountNum);
-  const label = form.label.trim() || (form.type === "other" ? "" : feeTypeLabel(form.type));
+  const isAdvance = form.type === "advance";
+  const moveIn = isMoveInType(form.type);
+  const ownType = ownTypes.find((f) => f.key === form.type);
+  // Advance rent is each tenant's own rent × the months it covers
+  const advanceAmount = (tenant) => round2((Number(tenant?.rent) || 0) * form.months);
+  const amountNum = isAdvance ? (editing ? round2(form.amount) : advanceAmount(chosen[0])) : round2(form.amount);
+  const splitting = !editing && !moveIn && form.split === "split" && chosen.length > 1;
+  const amounts = isAdvance && !editing ? chosen.map(advanceAmount) : splitting ? splitAmount(amountNum, chosen.length) : chosen.map(() => amountNum);
+  const covers = isAdvance ? advanceCovers(form.period, form.months) : [];
+  const label = form.label.trim() || (form.type === "other" ? "" : ownType ? ownType.label : feeTypeLabel(form.type));
 
   const toggle = (ids, on) =>
     setPicked((prev) => {
@@ -105,7 +121,10 @@ export function AddFeeDialog({ open, onClose, onSaved, ownerUid, tenants = [], i
     if (!label) e.label = "Name this fee, e.g. Aircon use.";
     else if (label.length > 40) e.label = "Keep the name under 40 characters.";
     const raw = String(form.amount).trim();
-    if (!raw || !(Number(raw) > 0)) e.amount = "Enter an amount above zero.";
+    if (isAdvance && !editing) {
+      const noRent = chosen.filter((x) => !(Number(x.rent) > 0));
+      if (noRent.length) e.amount = `${noRent.length === 1 ? noRent[0].name : `${noRent.length} tenants`} ${noRent.length === 1 ? "has" : "have"} no rent set, so advance rent can't be worked out.`;
+    } else if (!raw || !(Number(raw) > 0)) e.amount = "Enter an amount above zero.";
     else if (!/^\d+(\.\d{1,2})?$/.test(raw)) e.amount = "Use at most 2 decimal places.";
     else if (Number(raw) > MAX_FEE) e.amount = "That amount looks too large.";
     else if (splitting && amounts.some((a) => !(a > 0))) e.amount = "That's too little to split between this many tenants.";
@@ -135,11 +154,13 @@ export function AddFeeDialog({ open, onClose, onSaved, ownerUid, tenants = [], i
     if (Object.keys(e).length) return;
     setSaving(true);
     try {
+      const repeat = moveIn ? "once" : form.repeat;
+      const extra = isAdvance ? { coversPeriods: covers } : {};
       if (editing) {
-        await updateCharge(editing.id, { type: form.type, label, amount: amountNum, repeat: form.repeat, period: form.period, note: form.note.trim(), ...(form.repeat === "monthly" ? {} : { endPeriod: "" }) });
+        await updateCharge(editing.id, { type: form.type, label, amount: amountNum, repeat, period: form.period, note: form.note.trim(), ...extra, ...(repeat === "monthly" ? {} : { endPeriod: "" }) });
         onSaved?.(`Saved ${label}.`);
       } else {
-        await addCharges({ ownerUid, tenants: chosen, amounts, type: form.type, label, repeat: form.repeat, period: form.period, note: form.note });
+        await addCharges({ ownerUid, tenants: chosen, amounts, type: form.type, label, repeat, period: form.period, note: form.note, extra });
         onSaved?.(chosen.length === 1 ? `Added ${label} for ${chosen[0].name}. They've been notified.` : `Added ${label} for ${chosen.length} tenants. They've been notified.`);
       }
       onClose();
@@ -180,22 +201,38 @@ export function AddFeeDialog({ open, onClose, onSaved, ownerUid, tenants = [], i
           <Box>
             <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>{t("What is it for?")}</Typography>
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
-              {FEE_TYPES.map((t) => {
+              {[...ownTypes.map((f) => ({ ...f, own: true })), ...FEE_TYPES].map((t) => {
                 const on = form.type === t.key;
+                const builtInLabel = (l) => FEE_TYPES.some((x) => x.label === l) || ownTypes.some((x) => x.label === l);
                 return (
                   <Box
                     key={t.key}
                     component="button"
                     type="button"
                     aria-pressed={on}
-                    onClick={() => set({ type: t.key, label: t.key === "other" ? "" : form.label && FEE_TYPES.some((x) => x.label === form.label) ? "" : form.label })}
-                    sx={{ height: 36, px: 1.5, borderRadius: 99, font: "inherit", fontSize: 13.5, fontWeight: 700, cursor: "pointer", border: "1px solid", borderColor: on ? "text.primary" : "divider", bgcolor: on ? "text.primary" : "background.default", color: on ? "background.default" : "text.secondary" }}
+                    onClick={() =>
+                      set(
+                        t.own
+                          ? // The owner's own fee type: its name, default amount and how often
+                            { type: t.key, label: t.label, amount: t.defaultAmount > 0 ? String(t.defaultAmount) : form.amount, repeat: t.repeat }
+                          : { type: t.key, label: t.key === "other" ? "" : form.label && builtInLabel(form.label) ? "" : form.label }
+                      )
+                    }
+                    sx={{ height: 36, px: 1.5, borderRadius: 99, font: "inherit", fontSize: 13.5, fontWeight: 700, cursor: "pointer", border: "1px solid", borderColor: on ? "text.primary" : t.own ? "primary.main" : "divider", bgcolor: on ? "text.primary" : "background.default", color: on ? "background.default" : t.own ? "primary.main" : "text.secondary" }}
                   >
                     {t.label}
+                    {t.own && t.defaultAmount > 0 ? ` · ${peso(t.defaultAmount)}` : ""}
                   </Box>
                 );
               })}
             </Box>
+            {moveIn && (
+              <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+                {isAdvance
+                  ? t("Rent paid ahead at move-in. Once this month's bill is paid, the months it covers show as paid.")
+                  : t("Refundable. Your tenant sees it as held while they stay; settle it from their profile when they move out.")}
+              </Typography>
+            )}
           </Box>
 
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(0, 1.3fr) minmax(0, 1fr)" }, gap: 2 }}>
@@ -209,22 +246,40 @@ export function AddFeeDialog({ open, onClose, onSaved, ownerUid, tenants = [], i
               helperText={errors.label || (form.type === "other" ? "" : `Leave blank to use "${feeTypeLabel(form.type)}"`)}
               slotProps={{ htmlInput: { maxLength: 40 }, inputLabel: { shrink: true } }}
             />
-            <TextField
-              fullWidth
-              label={splitting ? "Total bill to split" : "Amount"}
-              value={form.amount}
-              onChange={(e) => set({ amount: e.target.value })}
-              error={Boolean(errors.amount)}
-              helperText={errors.amount || (splitting && amountNum > 0 ? `${peso(amounts[amounts.length - 1])}${amounts[0] !== amounts[amounts.length - 1] ? `–${peso(amounts[0])}` : ""} each for ${chosen.length} tenants` : "")}
-              slotProps={{ input: { startAdornment: <InputAdornment position="start">₱</InputAdornment> }, htmlInput: { inputMode: "decimal" } }}
-            />
+            {isAdvance && !editing ? (
+              <TextField
+                select
+                fullWidth
+                label={t("Months of rent")}
+                value={form.months}
+                onChange={(e) => set({ months: Number(e.target.value), amount: "" })}
+                error={Boolean(errors.amount)}
+                helperText={errors.amount || (chosen.length === 1 && amountNum > 0 ? `${peso(amountNum)} · ${t("covers")} ${covers.join(", ")}` : chosen.length > 1 ? t("Each tenant's own rent × the months") : `${t("Covers")} ${covers.join(", ")}`)}
+              >
+                {[1, 2, 3, 4, 5, 6].map((n) => (
+                  <MenuItem key={n} value={n}>
+                    {n === 1 ? t("1 month") : t("{n} months", { n })}
+                  </MenuItem>
+                ))}
+              </TextField>
+            ) : (
+              <TextField
+                fullWidth
+                label={splitting ? "Total bill to split" : "Amount"}
+                value={form.amount}
+                onChange={(e) => set({ amount: e.target.value })}
+                error={Boolean(errors.amount)}
+                helperText={errors.amount || (splitting && amountNum > 0 ? `${peso(amounts[amounts.length - 1])}${amounts[0] !== amounts[amounts.length - 1] ? `–${peso(amounts[0])}` : ""} each for ${chosen.length} tenants` : "")}
+                slotProps={{ input: { startAdornment: <InputAdornment position="start">₱</InputAdornment> }, htmlInput: { inputMode: "decimal" } }}
+              />
+            )}
           </Box>
 
           {/* When it applies */}
           <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(0, 1fr) minmax(0, 1fr)" }, gap: 2, alignItems: "start" }}>
             <Box>
               <Typography variant="body2" sx={{ fontWeight: 700, mb: 1 }}>{t("How often")}</Typography>
-              <ToggleButtonGroup exclusive fullWidth size="small" value={form.repeat} onChange={(_, v) => v && set({ repeat: v })} sx={{ "& .MuiToggleButton-root": { fontWeight: 700, textTransform: "none", minHeight: 40 } }}>
+              <ToggleButtonGroup exclusive fullWidth size="small" value={moveIn ? "once" : form.repeat} disabled={moveIn} onChange={(_, v) => v && set({ repeat: v })} sx={{ "& .MuiToggleButton-root": { fontWeight: 700, textTransform: "none", minHeight: 40 } }}>
                 <ToggleButton value="once">{t("One month")}</ToggleButton>
                 <ToggleButton value="monthly">{t("Every month")}</ToggleButton>
               </ToggleButtonGroup>
@@ -292,7 +347,7 @@ export function AddFeeDialog({ open, onClose, onSaved, ownerUid, tenants = [], i
                   })}
                 </Box>
               )}
-              {chosen.length > 1 && (
+              {chosen.length > 1 && !moveIn && (
                 <ToggleButtonGroup exclusive fullWidth size="small" value={form.split} onChange={(_, v) => v && set({ split: v })} sx={{ mt: 1.5, "& .MuiToggleButton-root": { fontWeight: 700, textTransform: "none", minHeight: 40 } }}>
                   <ToggleButton value="each">{t("Same amount each")}</ToggleButton>
                   <ToggleButton value="split">{t("Split one bill")}</ToggleButton>
@@ -313,7 +368,7 @@ export function AddFeeDialog({ open, onClose, onSaved, ownerUid, tenants = [], i
   );
 }
 
-/** Rent, each fee, and the total for one month. bill comes from monthBill(). */
+/** Rent, each fee, and the total for one month. bill comes from monthBill() or billForMonth(). */
 export function BillBreakdown({ bill, dark = false, showPaid = true }) {
   if (!bill) return null;
   const muted = dark ? "rgba(255,255,255,.7)" : "text.secondary";
@@ -328,7 +383,9 @@ export function BillBreakdown({ bill, dark = false, showPaid = true }) {
   );
   return (
     <Box>
-      {line("Rent", peso(bill.rent))}
+      {line("Rent", peso(bill.baseRent ?? bill.rent))}
+      {/* Advance rent collected at move-in for this month (utils/tenantRent.js) */}
+      {bill.advanceCredit > 0 && line("Advance rent applied", `− ${peso(bill.advanceCredit)}`, { color: dark ? "#9be7b0" : "success.dark", note: bill.coveredByAdvance ? "This month is already paid" : "" })}
       {bill.fees.map((c) => line(c.label || feeTypeLabel(c.type), peso(c.amount), { note: c.note, k: c.id }))}
       <Box sx={{ borderTop: "1px solid", borderColor: dark ? "rgba(255,255,255,.18)" : "divider", mt: 0.5, pt: 0.5 }}>
         {line("Total", peso(bill.total), { bold: true })}

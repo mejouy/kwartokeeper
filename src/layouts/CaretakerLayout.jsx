@@ -53,7 +53,8 @@ export default function CaretakerLayout({ children }) {
         };
         const ownerUid = data.ownerUid || data.invitedBy || "";
         if (ownerUid) {
-          const propertyId = data.assignedPropertyId || data.propertyId || "";
+          // The property they work on now is on their profile (a caretaker with several properties switches it there)
+          const propertyId = (userProfile.exists() && userProfile.data().assignedPropertyId) || data.assignedPropertyId || data.propertyId || "";
           checkLeaseEndsOnOwnerAppOpen(ownerUid, user.uid, { propertyId, name: data.name || data.fullName || "" }).catch((error) => console.error("Unable to check lease-end notifications:", error));
         }
         if (active) {

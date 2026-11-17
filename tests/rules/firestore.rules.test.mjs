@@ -6,7 +6,7 @@
 import fs from "node:fs";
 import { initializeTestEnvironment, assertSucceeds, assertFails } from "@firebase/rules-unit-testing";
 import {
-  collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc, addDoc, deleteDoc, writeBatch, serverTimestamp, Timestamp, runTransaction,
+  collection, doc, getDoc, getDocs, query, where, setDoc, updateDoc, addDoc, deleteDoc, deleteField, writeBatch, serverTimestamp, Timestamp, runTransaction,
 } from "firebase/firestore";
 
 const rulesPath = process.argv[2] || new URL("../../firestore.rules", import.meta.url);
@@ -32,6 +32,9 @@ await env.withSecurityRulesDisabled(async (ctx) => {
     await put(`caretakers/${id}`, c);
   }
   await put("users/C3", { role: "caretaker", ownerUid: "O1", invitedBy: "O1", assignedPropertyId: "P1", permissions: {}, name: "C3" }); // no permissions
+  // Owner O1's caretaker rule allows several properties: C4 works on P1A now, also looks after P1
+  await put("properties/P1A", { ownerUid: "O1", propertyName: "One-A" });
+  await put("users/C4", { role: "caretaker", ownerUid: "O1", invitedBy: "O1", assignedPropertyId: "P1A", assignedPropertyIds: ["P1A", "P1"], permissions: PERMS, name: "C4" });
   for (const [id, owner, prop] of [["T1", "O1", "P1"], ["T1b", "O1", "P1"], ["T2", "O2", "P2"]]) {
     const t = { role: "tenant", ownerUid: owner, propertyId: prop, name: id, phone: "0917" + id };
     await put(`users/${id}`, t);
@@ -42,6 +45,13 @@ await env.withSecurityRulesDisabled(async (ctx) => {
   await put("payments/payLegacy", { tenantId: "T1", propertyId: "P1", periodMonth: NOV, status: "Paid", amount: 3000 });
   await put("maintenance_tickets/tk1", { ownerUid: "O1", propertyId: "P1", tenantUid: "T1", status: "Pending", title: "Leak" });
   await put("maintenance_tickets/tk2", { ownerUid: "O2", propertyId: "P2", tenantUid: "T2", status: "Pending", title: "Door" });
+  // Repair steps (panel revisions): waiting for the tenant, confirmed, rated, to reopen, still pending
+  const fixed = { ownerUid: "O1", propertyId: "P1", tenantUid: "T1", status: "Resolved", resolutionNotes: "Fixed" };
+  await put("maintenance_tickets/tk3", { ...fixed, title: "Sink" });
+  await put("maintenance_tickets/tk4", { ...fixed, title: "Fan", tenantConfirmed: true });
+  await put("maintenance_tickets/tk5", { ...fixed, title: "Light", tenantConfirmed: true, review: { rating: 5, comment: "", at: Timestamp.now() } });
+  await put("maintenance_tickets/tk6", { ...fixed, title: "Shower" });
+  await put("maintenance_tickets/tk7", { ownerUid: "O1", propertyId: "P1", tenantUid: "T1", status: "Pending", title: "Window" });
   await put("occupancy_logs/P1_2026-11-07", { ownerUid: "O1", propertyId: "P1", date: "2026-11-07", entries: {} });
   await put("occupancy_logs/P2_2026-11-07", { ownerUid: "O2", propertyId: "P2", date: "2026-11-07", entries: {} });
   await put("curfew_records/old", { tenantId: "T1", propertyId: "P1", ownerUid: "O1", status: "late", at: Timestamp.fromMillis(Date.now() - 3600_000) });
@@ -117,6 +127,16 @@ const eq = (f, v) => where(f, "==", v);
   await check("owner edits property", true, () => updateDoc(doc(db, "properties/P1"), { propertyName: "One!" }));
   await check("owner creates property", true, () => addDoc(collection(db, "properties"), { ownerUid: "O1", propertyName: "Three" }));
   await check("owner updates ticket", true, () => updateDoc(doc(db, "maintenance_tickets/tk1"), { status: "In Progress" }));
+  await check("owner saves billing rules", true, () => updateDoc(doc(db, "users/O1"), { billingSettings: { defaultDueDay: 10, feeTypes: [], lateFee: { enabled: true, mode: "fixed", amount: 200, graceDays: 3 }, moveIn: { advanceMonths: 1, depositMonths: 1 } } }));
+  await check("owner sets a tenant's due day and waives a late fee", true, () => updateDoc(doc(db, "users/T1"), { rentDueDay: 15, lateFeeWaived: ["November 2026"] }));
+  await check("owner adds a security deposit", true, () => addDoc(collection(db, "charges"), { ownerUid: "O1", tenantId: "T1", propertyId: "P1", type: "deposit", amount: 3000, repeat: "once", period: NOV, status: "active" }));
+  await check("owner settles a deposit", true, () => updateDoc(doc(db, "charges/ch1"), { depositStatus: "refunded", depositAmountReturned: 350, depositNote: "Cash" }));
+  await check("owner changes priority with a reason", true, () => updateDoc(doc(db, "maintenance_tickets/tk1"), { category: "safety", originalCategory: "routine", priorityChanges: [{ from: "routine", to: "safety", reason: "Sparks", byUid: "O1" }], updatedAt: serverTimestamp() }));
+  await check("owner resolves without notes", false, () => updateDoc(doc(db, "maintenance_tickets/tk7"), { status: "Resolved" }));
+  await check("owner resolves with blank notes", false, () => updateDoc(doc(db, "maintenance_tickets/tk7"), { status: "Resolved", resolutionNotes: "   " }));
+  await check("owner confirms for the tenant", false, () => updateDoc(doc(db, "maintenance_tickets/tk3"), { tenantConfirmed: true, tenantConfirmedAt: serverTimestamp() }));
+  await check("owner writes the tenant's rating", false, () => updateDoc(doc(db, "maintenance_tickets/tk4"), { review: { rating: 5, at: serverTimestamp() } }));
+  await check("owner edits remarks on a resolved request", true, () => updateDoc(doc(db, "maintenance_tickets/tk5"), { remarks: "Thanks", updatedAt: serverTimestamp() }));
   await check("owner receipt counter", true, () => updateDoc(doc(db, "users/O1"), { receiptSeq: 5 }));
   await check("owner notifies own tenant", true, () => addDoc(collection(db, "notifications"), { userId: "T1", ownerId: "O1", createdBy: "O1", title: "x" }));
   await check("owner lease note to self", true, () => addDoc(collection(db, "notifications"), { userId: "O1", ownerId: "O1", createdBy: "O1", title: "x" }));
@@ -214,7 +234,12 @@ await check("legacy owner notifies", true, () => addDoc(collection(as("LEG"), "n
   await check("caretaker undoes fresh mark", true, () => deleteDoc(doc(db, "curfew_records/P1_2026-11-08_T1")));
   await check("caretaker records cash", true, () => addDoc(collection(db, "payments"), { ownerUid: "O1", tenantId: "T1", propertyId: "P1", paymentMethod: "Cash", amount: 3000, status: "Paid", verificationStatus: "Approved" }));
   await check("caretaker edits rooms", true, () => updateDoc(doc(db, "properties/P1"), { rooms: [], totalRooms: 0, totalBeds: 0, totalFloors: 1, updatedAt: new Date() }));
-  await check("caretaker updates ticket", true, () => updateDoc(doc(db, "maintenance_tickets/tk1"), { status: "Resolved", updatedBy: "C1" }));
+  await check("caretaker resolves without notes", false, () => updateDoc(doc(db, "maintenance_tickets/tk1"), { status: "Resolved", updatedBy: "C1" }));
+  await check("caretaker changes priority with a reason", true, () => updateDoc(doc(db, "maintenance_tickets/tk1"), { category: "utility", priorityChanges: [{ from: "safety", to: "utility", reason: "Checked it", byUid: "C1" }], updatedBy: "C1" }));
+  await check("caretaker updates ticket", true, () => updateDoc(doc(db, "maintenance_tickets/tk1"), { status: "Resolved", resolutionNotes: "Replaced the washer", resolvedBy: "C1", updatedBy: "C1" }));
+  await check("caretaker reopens and clears the old confirmation", true, () => updateDoc(doc(db, "maintenance_tickets/tk4"), { status: "In Progress", tenantConfirmed: deleteField(), tenantConfirmedAt: deleteField(), resolvedAt: deleteField(), updatedBy: "C1" }));
+  await check("caretaker resolves again with notes", true, () => updateDoc(doc(db, "maintenance_tickets/tk4"), { status: "Resolved", resolutionNotes: "Tightened the blades", updatedBy: "C1" }));
+  await check("caretaker fakes a rating", false, () => updateDoc(doc(db, "maintenance_tickets/tk5"), { review: { rating: 1, at: serverTimestamp() } }));
   await check("caretaker notices batch of 40", true, () => {
     const b = writeBatch(db);
     for (let i = 0; i < 40; i += 1) b.set(doc(collection(db, "notifications")), { userId: `T${i}`, propertyId: "P1", ownerId: "O1", createdBy: "C1", title: "Curfew" });
@@ -228,6 +253,7 @@ await check("legacy owner notifies", true, () => addDoc(collection(as("LEG"), "n
   await check("caretaker saves push token", true, () => updateDoc(doc(db, "users/C1"), { fcmTokens: ["abc"], mustChangePassword: false }));
 
   await check("caretaker other property's payments", false, () => q(db, "payments", eq("propertyId", "P2")));
+  await check("caretaker switches to a property not theirs", false, () => updateDoc(doc(db, "users/C1"), { assignedPropertyId: "P2" }));
   await check("caretaker all payments", false, () => q(db, "payments"));
   await check("caretaker other tenants", false, () => q(db, "tenants", eq("propertyId", "P2")));
   await check("caretaker owner-wide tenants", false, () => q(db, "tenants", eq("ownerUid", "O1")));
@@ -290,6 +316,19 @@ await check("legacy owner notifies", true, () => addDoc(collection(as("LEG"), "n
   await check("caretaker cash without a number still works", true, () => addDoc(collection(db, "payments"), { ownerUid: "O1", tenantId: "T1", propertyId: "P1", paymentMethod: "Cash", amount: 1, status: "Paid" }));
 }
 
+// ---------------- Caretaker C4 (several properties: working on P1A, also P1) ----------------
+{
+  const db = as("C4");
+  await check("multi-property caretaker reads active property's tickets", true, () => q(db, "maintenance_tickets", eq("propertyId", "P1A")));
+  await check("multi-property caretaker can't read the other property until switching", false, () => q(db, "maintenance_tickets", eq("propertyId", "P1")));
+  await check("multi-property caretaker switches to another of their properties", true, () => updateDoc(doc(db, "users/C4"), { assignedPropertyId: "P1", activePropertyChangedAt: "now" }));
+  await check("after switching, reads that property's tickets", true, () => q(db, "maintenance_tickets", eq("propertyId", "P1")));
+  await check("multi-property caretaker switches to a property not theirs", false, () => updateDoc(doc(db, "users/C4"), { assignedPropertyId: "P2" }));
+  await check("multi-property caretaker adds a property to their own list", false, () => updateDoc(doc(db, "users/C4"), { assignedPropertyIds: ["P1A", "P1", "P2"] }));
+  // Back to P1A, so the tenant checks below reach C4 through the list only
+  await check("multi-property caretaker switches back", true, () => updateDoc(doc(db, "users/C4"), { assignedPropertyId: "P1A", activePropertyChangedAt: "again" }));
+}
+
 // ---------------- Tenant T1 ----------------
 {
   const db = as("T1");
@@ -303,14 +342,32 @@ await check("legacy owner notifies", true, () => addDoc(collection(as("LEG"), "n
   await check("tenant notifications", true, () => q(db, "notifications", eq("userId", "T1")));
   await check("tenant curfew", true, () => q(db, "curfew_records", eq("tenantId", "T1")));
   await check("tenant property caretakers", true, () => q(db, "users", eq("role", "caretaker"), eq("assignedPropertyId", "P1")));
+  await check("tenant property caretakers with several properties", true, () => q(db, "users", eq("role", "caretaker"), where("assignedPropertyIds", "array-contains", "P1")));
+  await check("tenant notifies a caretaker who has several properties", true, () => addDoc(collection(db, "notifications"), { userId: "C4", createdBy: "T1", title: "Repair" }));
   await check("tenant submits payment", true, () => addDoc(collection(db, "payments"), { tenantId: "T1", ownerUid: "O1", propertyId: "P1", status: "Pending", verificationStatus: "Pending", amount: 3000, bill: { rent: 3000 } }));
   await check("tenant reports repair", true, () => addDoc(collection(db, "maintenance_tickets"), { tenantUid: "T1", ownerUid: "O1", propertyId: "P1", status: "Pending" }));
   await check("tenant follows up", true, () => updateDoc(doc(db, "maintenance_tickets/tk1"), { followUps: ["x"], updatedAt: new Date() }));
+  // Repair steps: confirm, reopen, rate
+  const reopen = (reason) => ({ status: "Pending", reopenCount: 1, reopenedAt: serverTimestamp(), reopenReason: reason, resolvedAt: deleteField(), updatedAt: serverTimestamp() });
+  await check("tenant rates 6 stars", false, () => updateDoc(doc(db, "maintenance_tickets/tk3"), { tenantConfirmed: true, tenantConfirmedAt: serverTimestamp(), review: { rating: 6, at: serverTimestamp() } }));
+  await check("tenant confirms the fix with a rating", true, () => updateDoc(doc(db, "maintenance_tickets/tk3"), { tenantConfirmed: true, tenantConfirmedAt: serverTimestamp(), review: { rating: 4, comment: "Quick", at: serverTimestamp() }, updatedAt: serverTimestamp() }));
+  await check("tenant rates twice", false, () => updateDoc(doc(db, "maintenance_tickets/tk3"), { review: { rating: 1, at: serverTimestamp() }, updatedAt: serverTimestamp() }));
+  await check("tenant confirms without a rating", true, () => updateDoc(doc(db, "maintenance_tickets/tk4"), { tenantConfirmed: true, tenantConfirmedAt: serverTimestamp(), updatedAt: serverTimestamp() }));
+  await check("tenant rates later", true, () => updateDoc(doc(db, "maintenance_tickets/tk4"), { review: { rating: 5, comment: "", at: serverTimestamp() }, updatedAt: serverTimestamp() }));
+  await check("tenant changes a rating", false, () => updateDoc(doc(db, "maintenance_tickets/tk5"), { review: { rating: 1, at: serverTimestamp() }, updatedAt: serverTimestamp() }));
+  await check("tenant reopens a confirmed fix", false, () => updateDoc(doc(db, "maintenance_tickets/tk5"), reopen("Broke again")));
+  await check("tenant reopens without a reason", false, () => updateDoc(doc(db, "maintenance_tickets/tk6"), reopen("  ")));
+  await check("tenant reopens with a reason", true, () => updateDoc(doc(db, "maintenance_tickets/tk6"), reopen("Still leaks")));
+  await check("tenant marks own request resolved", false, () => updateDoc(doc(db, "maintenance_tickets/tk7"), { status: "Resolved", resolutionNotes: "Fixed it myself" }));
+  await check("tenant changes own priority after reporting", false, () => updateDoc(doc(db, "maintenance_tickets/tk7"), { category: "safety" }));
+  await check("tenant cancels own pending request", true, () => updateDoc(doc(db, "maintenance_tickets/tk7"), { status: "Cancelled", cancelledAt: serverTimestamp(), cancelledBy: "tenant", updatedAt: serverTimestamp() }));
+  await check("tenant cancels a request that is no longer pending", false, () => updateDoc(doc(db, "maintenance_tickets/tk1"), { status: "Cancelled", cancelledBy: "tenant" }));
   await check("tenant notifies owner", true, () => addDoc(collection(db, "notifications"), { userId: "O1", createdBy: "T1", title: "Paid" }));
   await check("tenant notifies caretaker", true, () => addDoc(collection(db, "notifications"), { userId: "C1", createdBy: "T1", title: "Repair" }));
   await check("tenant note to self", true, () => addDoc(collection(db, "notifications"), { userId: "T1", createdBy: "T1", title: "x" }));
   await check("tenant marks read", true, () => updateDoc(doc(db, "notifications/n1"), { isRead: true }));
   await check("tenant saves push token", true, () => updateDoc(doc(db, "users/T1"), { fcmTokens: ["x"] }));
+  await check("tenant agrees to the rental contract", true, () => updateDoc(doc(db, "users/T1"), { contractAgreement: { propertyId: "P1", version: 1, title: "Rental agreement", name: "T1", agreedAt: serverTimestamp() } }));
 
   await check("tenant other payment", false, () => getDoc(doc(db, "payments/pay2")));
   await check("tenant property payments", false, () => q(db, "payments", eq("propertyId", "P1")));
@@ -330,8 +387,14 @@ await check("legacy owner notifies", true, () => addDoc(collection(as("LEG"), "n
   await check("tenant pays at other property", false, () => addDoc(collection(db, "payments"), { tenantId: "T1", propertyId: "P2", status: "Pending", verificationStatus: "Pending", amount: 1 }));
   await check("tenant repair at other property", false, () => addDoc(collection(db, "maintenance_tickets"), { tenantUid: "T1", propertyId: "P2", status: "Pending" }));
   await check("tenant repair as someone else", false, () => addDoc(collection(db, "maintenance_tickets"), { tenantUid: "T2", propertyId: "P1" }));
+  await check("tenant reports an already-resolved repair", false, () => addDoc(collection(db, "maintenance_tickets"), { tenantUid: "T1", ownerUid: "O1", propertyId: "P1", status: "Resolved" }));
+  await check("tenant reports a repair with a rating", false, () => addDoc(collection(db, "maintenance_tickets"), { tenantUid: "T1", ownerUid: "O1", propertyId: "P1", status: "Pending", review: { rating: 1, at: serverTimestamp() } }));
+  await check("tenant confirms someone else's repair", false, () => updateDoc(doc(db, "maintenance_tickets/tk2"), { tenantConfirmed: true, tenantConfirmedAt: serverTimestamp() }));
   await check("tenant moves self to other property", false, () => updateDoc(doc(db, "users/T1"), { propertyId: "P2" }));
   await check("tenant lowers own rent", false, () => updateDoc(doc(db, "users/T1"), { monthlyRent: 1 }));
+  await check("tenant moves own due day", false, () => updateDoc(doc(db, "users/T1"), { rentDueDay: 28 }));
+  await check("tenant changes own due rule", false, () => updateDoc(doc(db, "users/T1"), { rentDueMode: "custom" }));
+  await check("tenant waives own late fee", false, () => updateDoc(doc(db, "users/T1"), { lateFeeWaived: ["December 2026"] }));
   await check("tenant edits payment", false, () => updateDoc(doc(db, "payments/pay1"), { amount: 1 }));
   await check("tenant adds fee", false, () => addDoc(collection(db, "charges"), { ownerUid: "O1", tenantId: "T1", propertyId: "P1", amount: 1 }));
   await check("tenant writes activity for owner", false, () => addDoc(collection(db, "audit_logs"), { ownerUid: "O1", actorUid: "T1", summary: "x", at: serverTimestamp() }));

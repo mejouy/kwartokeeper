@@ -38,10 +38,14 @@ function getCurrentPeriod(now = new Date()) {
   };
 }
 
+// Due day 1-31 (owners can pick the 30th, or the lease start's date)
 function getRentDueDay(tenant) {
-  const day = Number(tenant?.rentDueDay || tenant?.dueDay || 5);
-  return Math.min(Math.max(day, 1), 28);
+  const day = Math.round(Number(tenant?.rentDueDay || tenant?.dueDay || 5)) || 5;
+  return Math.min(Math.max(day, 1), 31);
 }
+
+// A due day the month doesn't have (the 30th in February) falls on its last day
+const daysInMonth = (year, month) => new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
 
 /**
  * Returns overdue details, or null when the tenant is not overdue.
@@ -56,7 +60,7 @@ function getOverdueInfo(tenant, now, hasPaymentThisPeriod) {
   if (rent <= 0) return null;
 
   const today = manilaParts(now);
-  const dueDay = getRentDueDay(tenant);
+  const dueDay = Math.min(getRentDueDay(tenant), daysInMonth(today.year, today.month));
   if (today.day <= dueDay) return null;
 
   const dueKey = Date.UTC(today.year, today.month, dueDay);

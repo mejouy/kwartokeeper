@@ -2,7 +2,10 @@
 //
 // Owner payments, in two tabs:
 //   "Rent"              — who has paid, what needs review, record a payment
-//   "Payment accounts"  — where tenants send rent (GCash / Maya / QR Ph, each with a QR image)
+//   "Payment accounts"  — where tenants send rent (GCash / Maya / QR Ph, each with a QR image,
+//                          and bank transfer). Each method can have more than one account
+//                          (panel revisions: "add more payment accounts"): the first one plus
+//                          paymentMethods[method].more = [{ id, accountName, accountNumber, bankName, qrUrl }]
 //
 // The accounts are saved on the property document (properties/{id}.paymentMethods
 // and .paymentNote). The tenant dashboard reads them from there.
@@ -63,6 +66,8 @@ import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined";
 import SmartphoneOutlinedIcon from "@mui/icons-material/SmartphoneOutlined";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import AccountBalanceWalletOutlinedIcon from "@mui/icons-material/AccountBalanceWalletOutlined";
+import AccountBalanceOutlinedIcon from "@mui/icons-material/AccountBalanceOutlined";
+import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import PendingActionsOutlinedIcon from "@mui/icons-material/PendingActionsOutlined";
 import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
 
@@ -84,9 +89,11 @@ import { useAuth } from "../../context/AuthContext";
 import { uploadToCloudinary } from "../../utils/cloudinary";
 import { isReceiptable, issueReceipt, reserveReceiptNo } from "../../utils/receipt";
 import { issuerFromProfile, printReceipt as printReceiptDoc } from "../../utils/receiptPrint";
-import { rentStatusOf } from "../../utils/tenantRent";
+import { billForMonth, rentStatusOf } from "../../utils/tenantRent";
+import { useOwnerBilling } from "../../utils/billingSettings";
+import { checkReference, findDuplicateRef, proofFindings } from "../../utils/paymentProof";
 import { withoutRemoved } from "../../utils/accountState";
-import { billSnapshot, chargesFor, isActiveCharge, monthBill } from "../../utils/charges";
+import { chargesFor, isActiveCharge, snapshotOfBill } from "../../utils/charges";
 import { AddFeeDialog, BillBreakdown, FeeList } from "../../components/Fees";
 import BoltOutlinedIcon from "@mui/icons-material/BoltOutlined";
 // Translation is "tr" here: this file also uses "t" for tenants and the theme
@@ -196,9 +203,25 @@ const METHOD_DEFS = [
     icon: QrCode2Icon,
     qrHint: "Upload your QR Ph code. Tenants can scan it from any bank or e-wallet app.",
   },
+  {
+    key: "Bank",
+    label: tr("Bank transfer"),
+    kind: "bank",
+    icon: AccountBalanceOutlinedIcon,
+    qrHint: "Optional: your bank's QR code, if it has one.",
+  },
 ];
+const MAX_EXTRA_ACCOUNTS = 4; // more accounts per method, after the first
 
-const emptyMethod = () => ({ enabled: false, accountName: "", accountNumber: "", qrUrl: "" });
+const emptyAccount = () => ({ id: Math.random().toString(36).slice(2, 9), accountName: "", accountNumber: "", bankName: "", qrUrl: "" });
+const emptyMethod = () => ({ enabled: false, accountName: "", accountNumber: "", bankName: "", qrUrl: "", more: [] });
+const readAccount = (r) => ({
+  id: String(r?.id || Math.random().toString(36).slice(2, 9)),
+  accountName: String(r?.accountName || ""),
+  accountNumber: String(r?.accountNumber || ""),
+  bankName: String(r?.bankName || ""),
+  qrUrl: String(r?.qrUrl || ""),
+});
 
 const normalizeMethods = (raw) => {
   const out = {};
@@ -209,7 +232,9 @@ const normalizeMethods = (raw) => {
       enabled: Boolean(r.enabled),
       accountName: String(r.accountName || ""),
       accountNumber: String(r.accountNumber || ""),
+      bankName: String(r.bankName || ""),
       qrUrl: String(r.qrUrl || ""),
+      more: (Array.isArray(r.more) ? r.more : []).map(readAccount),
     };
   });
   return out;
@@ -222,6 +247,8 @@ const draftFromProperty = (p) => ({
 
 // A property counts as "set up" when at least one method is on and has something to pay to
 const methodUsable = (m) => Boolean(m?.enabled && (String(m.accountNumber || "").trim() || m.qrUrl));
+// Bank account numbers: digits, spaces and dashes, 6 to 20 digits
+const validBankNumber = (v) => /^[\d\s-]+$/.test(String(v || "").trim()) && String(v).replace(/\D/g, "").length >= 6 && String(v).replace(/\D/g, "").length <= 20;
 const hasPaymentSetup = (p) => METHOD_DEFS.some((d) => methodUsable(p?.paymentMethods?.[d.key]));
 
 // Philippine mobile numbers: 09XXXXXXXXX (also accepts +63 9XXXXXXXXX)
@@ -247,8 +274,24 @@ const validateAccounts = (draft) => {
       if (!m.accountNumber.trim()) e.accountNumber = "Enter the mobile number.";
       else if (!normalizeMobile(m.accountNumber)) e.accountNumber = "Use a Philippine mobile number, like 0917 123 4567.";
     }
-    // Tenants pay by scanning, so every method needs its QR image
-    if (!m.qrUrl) e.qrUrl = d.kind === "qrph" ? "Upload your QR Ph code so tenants can scan it." : `Upload your ${d.label} QR code so tenants can scan it.`;
+    if (d.kind === "bank") {
+      if (!m.bankName.trim()) e.bankName = "Enter the bank, e.g. BPI or BDO.";
+      if (!m.accountNumber.trim()) e.accountNumber = "Enter the account number.";
+      else if (!validBankNumber(m.accountNumber)) e.accountNumber = "Use the account number's digits (6 to 20).";
+    }
+    // Tenants pay by scanning, so every e-wallet and QR Ph account needs its QR image (a bank's is optional)
+    if (!m.qrUrl && d.kind !== "bank") e.qrUrl = d.kind === "qrph" ? "Upload your QR Ph code so tenants can scan it." : `Upload your ${d.label} QR code so tenants can scan it.`;
+    // More accounts of the same method: a name, and a number or a QR to pay to
+    m.more.forEach((a, i) => {
+      const ae = {};
+      if (!a.accountName.trim()) ae.accountName = "Enter the account name.";
+      if (d.kind === "wallet" && a.accountNumber.trim() && !normalizeMobile(a.accountNumber)) ae.accountNumber = "Use a Philippine mobile number.";
+      if (d.kind === "wallet" && !a.accountNumber.trim()) ae.accountNumber = "Enter the mobile number.";
+      if (d.kind === "bank" && !a.bankName.trim()) ae.bankName = "Enter the bank.";
+      if (d.kind === "bank" && !validBankNumber(a.accountNumber)) ae.accountNumber = "Use the account number's digits (6 to 20).";
+      if (d.kind === "qrph" && !a.qrUrl) ae.qrUrl = "Upload this account's QR Ph code.";
+      if (Object.keys(ae).length) e[`more${i}`] = ae;
+    });
     if (Object.keys(e).length) errors[d.key] = e;
   });
   if (draft.note.length > 300) errors._note = "Keep the note under 300 characters.";
@@ -261,11 +304,16 @@ const cleanMethods = (methods) => {
   METHOD_DEFS.forEach((d) => {
     const m = methods[d.key];
     const number = m.accountNumber.trim();
+    const tidy = (a) => (d.kind === "wallet" ? normalizeMobile(a.accountNumber.trim()) || a.accountNumber.trim() : d.kind === "bank" ? a.accountNumber.trim() : "");
     out[d.key] = {
       enabled: Boolean(m.enabled),
       accountName: m.accountName.trim(),
-      accountNumber: d.kind === "wallet" ? normalizeMobile(number) || number : "",
+      accountNumber: d.kind === "wallet" ? normalizeMobile(number) || number : d.kind === "bank" ? number : "",
+      ...(d.kind === "bank" ? { bankName: m.bankName.trim() } : {}),
       qrUrl: m.qrUrl || "",
+      more: m.more
+        .filter((a) => a.accountName.trim())
+        .map((a) => ({ id: a.id, accountName: a.accountName.trim(), accountNumber: tidy(a), ...(d.kind === "bank" ? { bankName: a.bankName.trim() } : {}), qrUrl: a.qrUrl || "" })),
     };
   });
   return out;
@@ -311,7 +359,112 @@ function MethodPreviewCard({ def, m }) {
           {prettyMobile(normalizeMobile(m.accountNumber) || m.accountNumber) || "—"}
         </Typography>
       )}
+      {def.kind === "bank" && (
+        <Typography variant="body2" color="text.secondary">
+          {[m.bankName, m.accountNumber].filter(Boolean).join(" · ") || "—"}
+        </Typography>
+      )}
+      {(m.more || []).filter((a) => a.accountName.trim()).length > 0 && (
+        <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
+          {tr("+ {n} more", { n: m.more.filter((a) => a.accountName.trim()).length })}
+        </Typography>
+      )}
     </Paper>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   What was checked about a tenant's payment (panel revisions: proof of payment
+   validation + OCR, utils/paymentProof.js). Flags only: the owner decides.
+--------------------------------------------------------------------------- */
+function ProofChecks({ payment, payments }) {
+  // Months paid together share one reference number, so they never count as repeats
+  const others = payments.filter((p) => !(payment.advanceGroupId && p.advanceGroupId === payment.advanceGroupId));
+  const dup = payment.referenceNumber ? findDuplicateRef(payment.referenceNumber, others, payment.id) : null;
+  const check = {
+    ...(payment.proofCheck || {}),
+    // Checked again here: the owner can see every tenant's payments, the tenant only their own
+    duplicateOf: dup ? { id: dup.id, periodMonth: dup.periodMonth || "", tenantName: dup.tenantName || "" } : null,
+    refFormatOk: payment.referenceNumber ? !checkReference(payment.paymentMethod, payment.referenceNumber) : true,
+  };
+  const findings = proofFindings(check);
+  if (!findings.length) return null;
+  const color = { error: "error.main", warning: "warning.dark", info: "text.secondary", success: "success.dark" };
+  return (
+    <Box sx={{ mt: 1, display: "flex", flexDirection: "column", gap: 0.25 }}>
+      {findings.map((f) => (
+        <Typography key={f.text} variant="caption" sx={{ ...row, gap: 0.5, alignItems: "flex-start", fontWeight: 700, color: color[f.tone] }}>
+          {f.tone === "success" ? <CheckCircleIcon sx={{ fontSize: 14, mt: "1px" }} /> : <ErrorOutlineRoundedIcon sx={{ fontSize: 14, mt: "1px" }} />}
+          {tr(f.text)}
+        </Typography>
+      ))}
+    </Box>
+  );
+}
+
+/* ---------------------------------------------------------------------------
+   More accounts of one method (panel revisions: "add more payment accounts")
+--------------------------------------------------------------------------- */
+function ExtraAccounts({ def, accounts, errors, uploadingKey, onChange, onPickQr, inputRef, onFile }) {
+  const set = (id, patch) => onChange(accounts.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+  return (
+    <Box>
+      {accounts.map((a, i) => {
+        const e = errors[`more${i}`] || {};
+        const uploading = uploadingKey === `${def.key}:${a.id}`;
+        return (
+          <Box key={a.id} sx={{ mt: 1, p: 1.5, borderRadius: 2, border: "1px dashed", borderColor: "divider", display: "flex", flexDirection: "column", gap: 1.5 }}>
+            <Box sx={{ ...row, justifyContent: "space-between", gap: 1 }}>
+              <Typography variant="body2" sx={{ fontWeight: 800 }}>
+                {def.label} · {tr("account {n}", { n: i + 2 })}
+              </Typography>
+              <Button size="small" color="error" startIcon={<DeleteOutlineIcon />} onClick={() => onChange(accounts.filter((x) => x.id !== a.id))} sx={{ fontWeight: 700, textTransform: "none" }}>
+                {tr("Remove")}
+              </Button>
+            </Box>
+            <TextField size="small" required label={tr("Account name")} value={a.accountName} onChange={(ev) => set(a.id, { accountName: ev.target.value })} error={Boolean(e.accountName)} helperText={e.accountName || ""} fullWidth slotProps={{ htmlInput: { maxLength: 60 } }} />
+            {def.kind === "bank" && (
+              <TextField size="small" required label={tr("Bank")} value={a.bankName} onChange={(ev) => set(a.id, { bankName: ev.target.value })} error={Boolean(e.bankName)} helperText={e.bankName || ""} fullWidth slotProps={{ htmlInput: { maxLength: 40 } }} />
+            )}
+            {def.kind !== "qrph" && (
+              <TextField
+                size="small"
+                required
+                label={def.kind === "wallet" ? tr("Mobile number") : tr("Account number")}
+                value={a.accountNumber}
+                onChange={(ev) => set(a.id, { accountNumber: ev.target.value })}
+                error={Boolean(e.accountNumber)}
+                helperText={e.accountNumber || ""}
+                fullWidth
+                slotProps={{ htmlInput: { inputMode: def.kind === "wallet" ? "tel" : "numeric", maxLength: 30 } }}
+              />
+            )}
+            <input ref={(el) => inputRef(a.id, el)} type="file" accept="image/*" hidden onChange={(ev) => onFile(a.id, ev)} />
+            <Box sx={{ ...row, gap: 1.5, flexWrap: "wrap" }}>
+              {a.qrUrl && <Box component="img" src={a.qrUrl} alt={`${def.label} QR code`} sx={{ width: 72, height: 72, objectFit: "contain", bgcolor: "#fff", borderRadius: 1.5, border: "1px solid", borderColor: "divider" }} />}
+              <Button size="small" variant="outlined" color={e.qrUrl ? "error" : "primary"} startIcon={uploading ? <CircularProgress size={16} /> : <QrCode2Icon />} disabled={uploading} onClick={() => onPickQr(a.id)} sx={{ fontWeight: 700, textTransform: "none" }}>
+                {uploading ? tr("Uploading…") : a.qrUrl ? tr("Replace QR") : def.kind === "qrph" ? tr("Upload QR image") : tr("Add QR (optional)")}
+              </Button>
+              {a.qrUrl && (
+                <Button size="small" color="error" onClick={() => set(a.id, { qrUrl: "" })} sx={{ fontWeight: 700, textTransform: "none" }}>
+                  {tr("Remove QR")}
+                </Button>
+              )}
+            </Box>
+            {e.qrUrl && (
+              <Typography variant="caption" color="error">
+                {e.qrUrl}
+              </Typography>
+            )}
+          </Box>
+        );
+      })}
+      {accounts.length < MAX_EXTRA_ACCOUNTS && (
+        <Button size="small" startIcon={<AddIcon />} onClick={() => onChange([...accounts, emptyAccount()])} sx={{ mt: 1, fontWeight: 700, textTransform: "none" }}>
+          {tr("Add another {method} account", { method: def.label })}
+        </Button>
+      )}
+    </Box>
   );
 }
 
@@ -378,7 +531,8 @@ function PaymentAccountsPanel({ properties, showToast }) {
     });
   };
 
-  const pickQr = async (key, event) => {
+  // `apply(url)` puts the uploaded QR on the right account (the first one by default)
+  const pickQr = async (key, event, apply = (url) => setMethod(key, { qrUrl: url })) => {
     const file = event.target.files?.[0];
     event.target.value = ""; // so the same file can be chosen again
     if (!file) return;
@@ -394,7 +548,7 @@ function PaymentAccountsPanel({ properties, showToast }) {
     try {
       const url = await uploadToCloudinary(file);
       if (!url) throw new Error("No link came back from the upload.");
-      setMethod(key, { qrUrl: url });
+      apply(url);
       showToast("QR uploaded. Don't forget to save.");
     } catch (err) {
       console.error("QR upload failed:", err);
@@ -565,12 +719,18 @@ function PaymentAccountsPanel({ properties, showToast }) {
                       slotProps={{ htmlInput: { inputMode: "tel", maxLength: 25 } }}
                     />
                   )}
+                  {def.kind === "bank" && (
+                    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(0, 1fr) minmax(0, 1.3fr)" }, gap: 2 }}>
+                      <TextField required label={tr("Bank")} placeholder={tr("e.g. BPI")} value={m.bankName} onChange={(ev) => setMethod(def.key, { bankName: ev.target.value })} error={Boolean(e.bankName)} helperText={e.bankName || ""} fullWidth slotProps={{ htmlInput: { maxLength: 40 } }} />
+                      <TextField required label={tr("Account number")} value={m.accountNumber} onChange={(ev) => setMethod(def.key, { accountNumber: ev.target.value })} error={Boolean(e.accountNumber)} helperText={e.accountNumber || ""} fullWidth slotProps={{ htmlInput: { inputMode: "numeric", maxLength: 30 } }} />
+                    </Box>
+                  )}
 
                   {/* QR image */}
                   <Box>
                     <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
                       {tr("QR code")}{" "}
-                      <Box component="span" aria-hidden="true" sx={{ color: "error.main" }}>*</Box>
+                      {def.kind !== "bank" && <Box component="span" aria-hidden="true" sx={{ color: "error.main" }}>*</Box>}
                     </Typography>
                     <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1 }}>
                       {def.qrHint}
@@ -641,6 +801,20 @@ function PaymentAccountsPanel({ properties, showToast }) {
                       </Typography>
                     )}
                   </Box>
+
+                  {/* More accounts of this method (e.g. a second GCash number) */}
+                  <ExtraAccounts
+                    def={def}
+                    accounts={m.more}
+                    errors={e}
+                    uploadingKey={uploadingKey}
+                    onChange={(more) => setMethod(def.key, { more })}
+                    onPickQr={(id) => fileInputs.current[`${def.key}:${id}`]?.click()}
+                    inputRef={(id, el) => {
+                      fileInputs.current[`${def.key}:${id}`] = el;
+                    }}
+                    onFile={(id, ev) => pickQr(`${def.key}:${id}`, ev, (url) => setMethod(def.key, { more: draft.methods[def.key].more.map((a) => (a.id === id ? { ...a, qrUrl: url } : a)) }))}
+                  />
                 </Box>
               )}
             </Paper>
@@ -761,6 +935,8 @@ const STATUS_FILTERS = ["All", "Overdue", "Unpaid", "Pending", "Partial", "Paid"
 
 export default function PaymentsPage() {
   const { currentUser } = useAuth() || {};
+  // The owner's billing rules: late fee, own fee types (Account → Billing rules)
+  const billing = useOwnerBilling(currentUser?.uid);
 
   const [tab, setTab] = useState(0); // 0 = Rent, 1 = Payment accounts
   const [tenants, setTenants] = useState([]);
@@ -1059,13 +1235,14 @@ export default function PaymentsPage() {
   // Unpaid (not due yet), Not due (lease ended / starts later / not active).
   // Due dates use the same rules as the Tenants pages and overdue reminders.
   const getTenantPaymentInfo = (tenant) => {
-    const tenantPayments = payments.filter((payment) => payment.tenantId === tenant.id && isForCurrentPeriod(payment));
+    const allTenantPayments = payments.filter((payment) => payment.tenantId === tenant.id);
+    const tenantPayments = allTenantPayments.filter(isForCurrentPeriod);
     const paidAmount = tenantPayments.filter(isReceived).reduce((total, payment) => total + Number(payment.amount || 0), 0);
     const latestPayment = [...tenantPayments].sort((a, b) => (getPaymentDate(b)?.getTime() || 0) - (getPaymentDate(a)?.getTime() || 0))[0];
     const rent = Number(tenant.monthlyRent || 0);
-    // Rent plus this month's extra fees, less what was received
-    const bill = monthBill(rent, chargesFor(charges, tenant.id, currentPeriodValue), tenantPayments);
-    const due = rentStatusOf(tenant, tenantPayments, today, charges);
+    // Rent (less advance rent) plus this month's extra fees and late fee, less what was received
+    const bill = billForMonth({ tenant: { ...tenant, monthlyRent: rent }, period: currentPeriodValue, charges, payments: allTenantPayments, settings: billing, today });
+    const due = rentStatusOf(tenant, allTenantPayments, today, charges, billing);
     const owes = countsTowardRent(tenant) && ["paid", "review", "due", "overdue"].includes(due.key);
 
     let status;
@@ -1137,7 +1314,7 @@ export default function PaymentsPage() {
       .filter((prop) => prop.rooms.length > 0)
       .sort((a, b) => a.name.localeCompare(b.name));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [normalizedTenants, payments, charges, currentPeriodValue, search, statusFilter, today]);
+  }, [normalizedTenants, payments, charges, currentPeriodValue, search, statusFilter, today, billing]);
 
   const filtersActive = Boolean(search.trim()) || statusFilter !== "All";
 
@@ -1301,8 +1478,8 @@ export default function PaymentsPage() {
     const sum = (list) => round2(list.reduce((t, p) => t + Number(p.amount || 0), 0));
     const statusOf = (p) => String(p.status || "").toLowerCase();
     const rent = round2(selectedFormTenant.monthlyRent);
-    const fees = chargesFor(charges, selectedFormTenant.id, paymentForm.periodMonth);
-    const bill = monthBill(rent, fees, forPeriod);
+    const bill = billForMonth({ tenant: { ...selectedFormTenant, monthlyRent: rent }, period: paymentForm.periodMonth, charges, payments: formTenantPayments.list, settings: billing, today: new Date() });
+    const fees = bill.fees;
     const pending = forPeriod.filter((p) => statusOf(p) === "pending");
     return {
       rent,
@@ -1314,7 +1491,7 @@ export default function PaymentsPage() {
       pendingAmount: sum(pending),
       pendingCount: pending.length,
     };
-  }, [selectedFormTenant, formInfoLoading, formTenantPayments, paymentForm.periodMonth, charges]);
+  }, [selectedFormTenant, formInfoLoading, formTenantPayments, paymentForm.periodMonth, charges, billing]);
 
   // What the form actually uses: the owner's own entries, or the suggestions
   const suggestedAmount = selectedFormInfo && selectedFormInfo.balance > 0 ? String(selectedFormInfo.balance) : "";
@@ -1381,7 +1558,7 @@ export default function PaymentsPage() {
         verificationStatus: status === "Pending" ? "Pending" : "Approved",
         remarks: paymentForm.remarks.trim(),
         // What the month was billed at, so the receipt can show rent and fees
-        bill: billSnapshot(selectedTenant.monthlyRent, chargesFor(charges, selectedTenant.id, paymentForm.periodMonth)),
+        bill: snapshotOfBill(billForMonth({ tenant: { ...selectedTenant, monthlyRent: Number(selectedTenant.monthlyRent) || 0 }, period: paymentForm.periodMonth, charges, payments: payments.filter((x) => x.tenantId === selectedTenant.id), settings: billing, today: new Date() })),
         ownerUid: currentUser.uid,
         recordedBy: currentUser.uid,
         recordedByRole: "owner",
@@ -1430,7 +1607,7 @@ export default function PaymentsPage() {
   // EXTRA FEES (electricity, Wi-Fi, kitchen access...)
   // ------------------------------------------------------------
 
-  const feeTenants = recordableTenants.map((t) => ({ id: t.id, name: t.fullName, propertyId: t.propertyId || "", propertyName: t.propertyName, roomNumber: t.roomNumber !== "Unassigned" ? t.roomNumber : "" }));
+  const feeTenants = recordableTenants.map((t) => ({ id: t.id, name: t.fullName, propertyId: t.propertyId || "", propertyName: t.propertyName, roomNumber: t.roomNumber !== "Unassigned" ? t.roomNumber : "", rent: Number(t.monthlyRent) || 0 }));
   const openFeeDialog = (tenantIds = [], editing = null) => setFeeDialog((d) => ({ open: true, key: d.key + 1, tenantIds, editing }));
   const tenantNameById = new Map(normalizedTenants.map((t) => [t.id, t.fullName]));
   const feesThisMonth = charges.filter((c) => chargesFor([c], c.tenantId, currentPeriodValue).length > 0 && tenantNameById.has(c.tenantId));
@@ -1796,6 +1973,8 @@ export default function PaymentsPage() {
                               .join(" · ")}
                           </Typography>
                         )}
+                        {/* Reference format, repeats, amount and what the receipt shows */}
+                        <ProofChecks payment={payment} payments={payments} />
                         {payment.proofUrl && (
                           <Box component="a" href={payment.proofUrl} target="_blank" rel="noopener noreferrer" sx={{ display: { xs: "inline-block", sm: "none" }, mt: 1 }}>
                             <Box component="img" src={payment.proofUrl} alt={tr("Proof of payment")} loading="lazy" sx={{ display: "block", width: 120, height: 120, objectFit: "cover", borderRadius: "12px", border: "1px solid", borderColor: "divider" }} />
@@ -2208,6 +2387,7 @@ export default function PaymentsPage() {
           initialTenantIds={feeDialog.tenantIds}
           charges={charges}
           editing={feeDialog.editing}
+          settings={billing}
         />
       )}
 

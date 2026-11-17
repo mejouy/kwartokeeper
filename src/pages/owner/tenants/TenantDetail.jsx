@@ -60,6 +60,7 @@ import {
   onSnapshot,
   setDoc,
   addDoc,
+  arrayUnion,
 } from "firebase/firestore";
 import { auth, db } from "../../../config/firebase";
 import { normalizePayment } from "../../../utils/normalizePayment";
@@ -68,7 +69,13 @@ import { addMonthsClamped } from "../../../utils/addMonthsClamped";
 import { reconcilePropertyOccupancy } from "../../../utils/reconcilePropertyOccupancy";
 import { isRoomUnderMaintenance, MAINTENANCE_ROOM_MESSAGE } from "../../../utils/roomStatus";
 import { useAuth } from "../../../context/AuthContext";
-import { normalizeStatus, rentStatusOf, paymentPeriodOf, dueDayOf, STATUS_TONE, leaseLengthText } from "../../../utils/tenantRent";
+import { normalizeStatus, rentStatusOf, paymentPeriodOf, dueDayOf, dueRuleOf, resolveDueDay, STATUS_TONE, leaseLengthText } from "../../../utils/tenantRent";
+import DueDayField from "../../../components/DueDayField";
+import { useOwnerBilling } from "../../../utils/billingSettings";
+import { DepositPanel } from "../../../components/DepositPanel";
+import { bedRateOf } from "../../../utils/bedRates";
+import ContractCard from "../../../components/ContractCard";
+import { contractOf } from "../../../utils/contract";
 import { isRemovedAccount, removedLabel } from "../../../utils/accountState";
 import { isActiveCharge } from "../../../utils/charges";
 import { findDuplicatePerson } from "../../../utils/duplicates";
@@ -483,6 +490,8 @@ export default function TenantDetail() {
   const fullScreen = useMediaQuery(theme.breakpoints.down("sm"));
   const { currentUser, loading: authLoading } = useAuth() || {};
   const ownerUid = currentUser?.uid || auth.currentUser?.uid || null;
+  // The owner's billing rules: late fee and own fee types (Account → Billing rules)
+  const billing = useOwnerBilling(ownerUid);
 
   const [tenant, setTenant] = useState(null);
   const [property, setProperty] = useState(null);
@@ -515,6 +524,8 @@ export default function TenantDetail() {
     roomId: "",
     bedId: "",
     monthlyRent: "",
+    rentDueDay: 5,
+    rentDueMode: "custom",
     leaseStart: "",
     leaseDuration: "",
     customLeaseDuration: "",
@@ -847,6 +858,8 @@ export default function TenantDetail() {
         tenant.rent ??
         assignedRoomForForm?.monthlyRatePerBed ??
         "",
+      rentDueDay: dueRuleOf(tenant).day,
+      rentDueMode: dueRuleOf(tenant).mode,
       leaseStart: toInputDate(lease.start),
       leaseDuration,
       customLeaseDuration,
@@ -887,6 +900,14 @@ export default function TenantDetail() {
           (r) => r.id === value || r.roomName === value || r.roomNumber === value
         );
         if (room?.monthlyRatePerBed) next.monthlyRent = room.monthlyRatePerBed;
+      }
+
+      // A bed with its own rate (Property → room → bed rates) sets the rent too
+      if (name === "bedId" && value) {
+        const prop = ownerProperties.find((p) => p.id === next.propertyId);
+        const room = prop?.rooms?.find((r) => r.id === next.roomId || r.roomName === next.roomId || r.roomNumber === next.roomId);
+        const rate = bedRateOf(room, value);
+        if (rate > 0) next.monthlyRent = rate;
       }
 
       // Start date or duration changed → recompute the end date (still editable afterwards)
@@ -998,6 +1019,10 @@ export default function TenantDetail() {
         monthlyRent: rent,
         rentAmount: rent,
         roomMonthlyRate: rent,
+        // Each tenant's own due day (panel revisions); the default comes from Billing rules
+        // "Same date as the lease start" follows the lease start saved here
+        rentDueDay: resolveDueDay({ mode: formData.rentDueMode, day: formData.rentDueDay }, formData.leaseStart),
+        rentDueMode: formData.rentDueMode,
         // Lease — every alias is written in step, so no reader (including the
         // property's room map) can pick up a stale value.
         leaseDuration: finalDuration,
@@ -1033,6 +1058,8 @@ export default function TenantDetail() {
       const beforeRent = Number(before.monthlyRent ?? before.rentAmount ?? before.roomMonthlyRate ?? 0) || 0;
       const changes = [
         beforeRent !== rent && `Monthly rent: ${formatAmount(beforeRent)} → ${formatAmount(rent)}`,
+        dueDayOf(before) !== resolveDueDay({ mode: formData.rentDueMode, day: formData.rentDueDay }, formData.leaseStart) &&
+          `Rent due day: every ${ordinal(dueDayOf(before))} → every ${ordinal(resolveDueDay({ mode: formData.rentDueMode, day: formData.rentDueDay }, formData.leaseStart))} of the month`,
         day(before.leaseStartDate || before.leaseStart) !== day(formData.leaseStart) && `Lease start: ${day(before.leaseStartDate || before.leaseStart)} → ${day(formData.leaseStart)}`,
         day(before.leaseEndDate || before.leaseEnd) !== day(leaseEndISO) && `Lease end: ${day(before.leaseEndDate || before.leaseEnd)} → ${day(leaseEndISO)}`,
         (before.propertyId || "") !== formData.propertyId && `Property: ${propName(formData.propertyId)}`,
@@ -1133,9 +1160,22 @@ export default function TenantDetail() {
   const paidPayments = sortedPayments.filter((p) => statusOfPayment(p) === "paid");
   const totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
   const underReview = sortedPayments.filter((p) => statusOfPayment(p) === "pending").length;
-  const rent = rentStatusOf({ ...tenant, id: tenantId, monthlyRent: monthlyRentValue }, payments, today, charges);
+  const rent = rentStatusOf({ ...tenant, id: tenantId, monthlyRent: monthlyRentValue }, payments, today, charges, billing);
   const thisMonthFees = rent.bill?.feeTotal || 0;
-  const feeTenant = { id: tenantId, name: displayName, propertyId: tenant.propertyId || "", propertyName: property?.propertyName || property?.name || tenant.propertyName || "", roomNumber: tenant.roomId || "" };
+  const feeTenant = { id: tenantId, name: displayName, propertyId: tenant.propertyId || "", propertyName: property?.propertyName || property?.name || tenant.propertyName || "", roomNumber: tenant.roomId || "", rent: Number(monthlyRentValue) || 0 };
+
+  // Waive this month's automatic late fee for this tenant (Billing rules → Late fee)
+  const waiveLateFee = async (period) => {
+    const patch = { lateFeeWaived: arrayUnion(period), updatedAt: new Date() };
+    try {
+      await Promise.all([setDoc(doc(db, "tenants", tenantId), patch, { merge: true }), setDoc(doc(db, "users", tenantId), patch, { merge: true })]);
+      setTenant((prev) => ({ ...prev, lateFeeWaived: [...(prev?.lateFeeWaived || []), period] }));
+      setSnackbar({ message: t("Late fee waived for {period}.", { period }), severity: "success" });
+    } catch (err) {
+      console.error("Couldn't waive the late fee:", err);
+      setSnackbar({ message: t("Couldn't waive the late fee. Please try again."), severity: "error" });
+    }
+  };
   const tenantSince = formatDate(tenant.leaseStartDate || tenant.leaseStart || tenant.createdAt);
 
   const toneSx = (tone) => ({
@@ -1436,12 +1476,17 @@ export default function TenantDetail() {
         >
           {t("Extra fees")}
         </SectionHeading>
-        {rent.bill && rent.bill.feeTotal > 0 && (
+        {rent.bill && (rent.bill.feeTotal > 0 || rent.bill.advanceCredit > 0) && (
           <Box sx={{ mb: 1.5, p: 1.5, borderRadius: "12px", bgcolor: (t) => alpha(t.palette.background.paper, 0.5) }}>
             <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.5 }}>
               {today.toLocaleDateString("en-US", { month: "long", year: "numeric" }).toUpperCase()}
             </Typography>
             <BillBreakdown bill={rent.bill} />
+            {rent.bill.lateFee && (
+              <Button size="small" onClick={() => waiveLateFee(rent.bill.lateFee.period)} sx={{ mt: 0.5, ml: -0.75, fontWeight: 700 }}>
+                {t("Waive this month's late fee")}
+              </Button>
+            )}
           </Box>
         )}
         <FeeList
@@ -1450,7 +1495,22 @@ export default function TenantDetail() {
           onEdit={(c) => setFeeDialog((d) => ({ open: true, key: d.key + 1, editing: c }))}
           onDone={(message, severity = "success") => setSnackbar({ message, severity })}
         />
+        {/* Security deposit: held while they stay, settled when they move out */}
+        <DepositPanel tenant={{ ...tenant, id: tenantId, monthlyRent: Number(monthlyRentValue) || 0 }} charges={charges} payments={payments} onDone={(message, severity = "success") => setSnackbar({ message, severity })} />
       </Box>
+
+      {/* ───── Rental contract: did they agree, and to which version ───── */}
+      {contractOf(property) && (
+        <Box sx={{ ...panelSx, p: { xs: 2.5, sm: 3 }, mb: 2.5 }}>
+          <ContractCard
+            readOnly
+            tenant={{ ...tenant, id: tenantId, monthlyRent: Number(monthlyRentValue) || 0 }}
+            property={{ ...property, id: tenant.propertyId || property?.id }}
+            ownerName={currentUser?.displayName || ""}
+            onDone={(message, severity = "success") => setSnackbar({ message, severity })}
+          />
+        </Box>
+      )}
 
       {/* ───── Curfew record ───── */}
       <CurfewRecord nights={curfewNights} showAll={showAllNights} onToggle={() => setShowAllNights((v) => !v)} />
@@ -1683,6 +1743,12 @@ export default function TenantDetail() {
                   {...fieldError("monthlyRent")}
                   helperText={formErrors.monthlyRent || "Filled in from the room's rate when you pick a room. You can change it."}
                 />
+                <DueDayField
+                  value={{ mode: formData.rentDueMode, day: formData.rentDueDay }}
+                  leaseStart={formData.leaseStart || null}
+                  onChange={({ mode, day }) => setFormData((prev) => ({ ...prev, rentDueMode: mode, rentDueDay: day }))}
+                  helperText={t("Rent is due on this day every month. Overdue reminders and the late fee follow it.")}
+                />
               </Box>
             </FormSection>
 
@@ -1823,6 +1889,7 @@ export default function TenantDetail() {
           initialTenantIds={[feeTenant.id]}
           charges={charges}
           editing={feeDialog.editing}
+          settings={billing}
         />
       )}
 

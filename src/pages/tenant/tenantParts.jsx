@@ -19,7 +19,12 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import InfoOutlinedIcon from "@mui/icons-material/InfoOutlined";
 import EditOutlinedIcon from "@mui/icons-material/EditOutlined";
 import DeleteOutlinedIcon from "@mui/icons-material/DeleteOutlined";
+import TaskAltOutlinedIcon from "@mui/icons-material/TaskAltOutlined";
+import ReplayOutlinedIcon from "@mui/icons-material/ReplayOutlined";
+import StarRoundedIcon from "@mui/icons-material/StarRounded";
+import SwapVertOutlinedIcon from "@mui/icons-material/SwapVertOutlined";
 import { CATEGORIES } from "../../utils/maintenancePrioritization";
+import { feedbackState, lastPriorityChange, stars } from "../../utils/maintenanceWorkflow";
 // Translation is "tr" here: TicketCard already calls its ticket "t"
 import { t as tr } from "../../i18n";
 
@@ -67,20 +72,34 @@ export const PAY_METHOD_DEFS = [
   { key: "GCash", label: "GCash", kind: "wallet" },
   { key: "Maya", label: tr("Maya"), kind: "wallet" },
   { key: "QR Ph", label: tr("QR Ph"), kind: "qrph" },
+  { key: "Bank", label: tr("Bank transfer"), kind: "bank" },
 ];
 
-// Only methods the owner switched on AND gave something to pay to
+// Every account the owner switched on AND gave something to pay to: the first
+// account of each method, then its extra accounts (paymentMethods[method].more,
+// panel revisions). `key` is unique per account; `method` is what a payment saves.
 export const readPayMethods = (raw) =>
-  PAY_METHOD_DEFS.map((d) => {
+  PAY_METHOD_DEFS.flatMap((d) => {
     const m = raw?.[d.key] || {};
-    return {
+    if (!m.enabled) return [];
+    const one = (a, i) => ({
       ...d,
-      enabled: Boolean(m.enabled),
-      accountName: String(m.accountName || ""),
-      accountNumber: String(m.accountNumber || ""),
-      qrUrl: String(m.qrUrl || ""),
-    };
-  }).filter((m) => m.enabled && (m.accountNumber.trim() || m.qrUrl));
+      key: i === 0 ? d.key : `${d.key}#${a?.id || i}`,
+      method: d.key,
+      methodLabel: d.label,
+      enabled: true,
+      accountName: String(a?.accountName || ""),
+      accountNumber: String(a?.accountNumber || ""),
+      bankName: String(a?.bankName || ""),
+      qrUrl: String(a?.qrUrl || ""),
+    });
+    const usable = [one(m, 0), ...(Array.isArray(m.more) ? m.more : []).map((a, i) => one(a, i + 1))].filter((a) => a.accountNumber.trim() || a.qrUrl);
+    // With more than one account, each chip says which one (last digits of the number, or the name)
+    return usable.map((a) => ({
+      ...a,
+      label: usable.length > 1 ? `${d.label} · ${a.accountNumber ? `…${a.accountNumber.replace(/\D/g, "").slice(-4)}` : a.accountName}` : d.label,
+    }));
+  });
 
 export const prettyMobile = (n) => (/^09\d{9}$/.test(String(n)) ? `${n.slice(0, 4)} ${n.slice(4, 7)} ${n.slice(7)}` : n);
 
@@ -405,7 +424,11 @@ export function TicketCard({ t, compact, onAction, collapsible = false, defaultO
   const stepIndex = status === "Resolved" ? 2 : status === "In Progress" ? 1 : 0;
   const details = !compact && (!collapsible || open);
   const updates = Array.isArray(t.followUps) ? t.followUps.length : 0;
-  const hasNote = Boolean(t.remarks || t.resolutionNotes);
+  // The landlord's general remarks; how it was fixed has its own box below
+  const hasNote = Boolean(t.remarks);
+  const answer = feedbackState(t); // none · awaiting · confirmed · reviewed
+  const priorityChange = lastPriorityChange(t);
+  const reopened = Number(t.reopenCount) > 0 && t.reopenReason && ["Pending", "In Progress"].includes(status);
 
   const summary = (
     <>
@@ -421,6 +444,8 @@ export function TicketCard({ t, compact, onAction, collapsible = false, defaultO
         {t.category && <Pill label={String(t.category)} />}
         {date && <Pill label={tr("Reported {date}", { date })} />}
         {collapsible && !open && hasNote && <Pill label={tr("Landlord replied")} tone="info" />}
+        {answer === "awaiting" && <Pill label={tr("Confirm the fix")} tone="warning" />}
+        {answer === "reviewed" && <Pill label={tr("Rated {n}/5", { n: t.review.rating })} tone="success" />}
         {collapsible && !open && updates > 0 && <Pill label={updates === 1 ? tr("1 update") : tr("{n} updates", { n: updates })} />}
       </Box>
     </>
@@ -470,14 +495,64 @@ export function TicketCard({ t, compact, onAction, collapsible = false, defaultO
           <Box component="img" src={t.photoUrl} alt={tr("Photo of the issue")} loading="lazy" sx={{ width: 96, height: 96, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider", display: "block" }} />
         </Box>
       )}
+      {priorityChange && details && (
+        <Box sx={{ mt: 1.5, p: 1.25, borderRadius: 2, bgcolor: (th) => alpha(th.palette.info.main, 0.08) }}>
+          <Typography variant="caption" sx={{ ...row, gap: 0.5, fontWeight: 800, color: "info.dark" }}>
+            <SwapVertOutlinedIcon sx={{ fontSize: 15 }} />
+            {tr("Priority updated: {from} → {to}", { from: tr(priorityChange.fromTier || "Low"), to: tr(priorityChange.toTier || "Low") })}
+          </Typography>
+          {priorityChange.reason && (
+            <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
+              {priorityChange.reason}
+            </Typography>
+          )}
+        </Box>
+      )}
+      {reopened && details && (
+        <Box sx={{ mt: 1.5, p: 1.25, borderRadius: 2, bgcolor: (th) => alpha(th.palette.warning.main, 0.1) }}>
+          <Typography variant="caption" sx={{ ...row, gap: 0.5, fontWeight: 800, color: "warning.dark" }}>
+            <ReplayOutlinedIcon sx={{ fontSize: 15 }} />
+            {tr("You said it isn't fixed yet")}
+          </Typography>
+          <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
+            {t.reopenReason}
+          </Typography>
+        </Box>
+      )}
+      {status === "Resolved" && t.resolutionNotes && (compact || details) && (
+        <Box sx={{ mt: 1.5, p: 1.25, borderRadius: 2, bgcolor: (th) => alpha(th.palette.success.main, 0.08) }}>
+          <Typography variant="caption" sx={{ ...row, gap: 0.5, fontWeight: 800, color: "success.dark" }}>
+            <TaskAltOutlinedIcon sx={{ fontSize: 15 }} />
+            {tr("How it was fixed")}
+          </Typography>
+          <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
+            {t.resolutionNotes}
+          </Typography>
+        </Box>
+      )}
       {hasNote && (compact || details) && (
         <Box sx={{ mt: 1.5, p: 1.25, borderRadius: 2, bgcolor: (th) => alpha(th.palette.info.main, 0.08) }}>
           <Typography variant="caption" sx={{ fontWeight: 800, color: "info.dark" }}>
             {tr("Note from your landlord")}
           </Typography>
           <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
-            {t.remarks || t.resolutionNotes}
+            {t.remarks}
           </Typography>
+        </Box>
+      )}
+      {answer === "reviewed" && details && (
+        <Box sx={{ mt: 1.5 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+            {tr("YOUR RATING")}
+          </Typography>
+          <Typography aria-label={tr("{n} out of 5 stars", { n: t.review.rating })} sx={{ color: "warning.main", fontSize: 20, letterSpacing: 2, lineHeight: 1.3 }}>
+            {stars(t.review.rating)}
+          </Typography>
+          {t.review.comment && (
+            <Typography variant="body2" color="text.secondary" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap", fontStyle: "italic" }}>
+              “{t.review.comment}”
+            </Typography>
+          )}
         </Box>
       )}
       {details && updates > 0 && (
@@ -502,6 +577,29 @@ export function TicketCard({ t, compact, onAction, collapsible = false, defaultO
               </Typography>
             </Box>
           ))}
+        </Box>
+      )}
+      {/* Resolved: the tenant confirms the fix or says it isn't fixed yet, then can rate it */}
+      {details && onAction && answer === "awaiting" && (
+        <Box sx={{ mt: 1.5 }}>
+          <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.75 }}>
+            {tr("Is it fixed?")}
+          </Typography>
+          <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75 }}>
+            <Button size="small" variant="contained" color="success" disableElevation startIcon={<CheckIcon />} onClick={() => onAction("confirm", t)} sx={{ minHeight: 40, fontWeight: 700, borderRadius: 2, textTransform: "none" }}>
+              {tr("Yes, it's fixed")}
+            </Button>
+            <Button size="small" variant="outlined" color="warning" startIcon={<ReplayOutlinedIcon />} onClick={() => onAction("reopen", t)} sx={{ minHeight: 40, fontWeight: 700, borderRadius: 2, textTransform: "none" }}>
+              {tr("Not fixed yet")}
+            </Button>
+          </Box>
+        </Box>
+      )}
+      {details && onAction && answer === "confirmed" && (
+        <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1.5 }}>
+          <Button size="small" variant="outlined" startIcon={<StarRoundedIcon />} onClick={() => onAction("review", t)} sx={{ minHeight: 40, fontWeight: 700, borderRadius: 2, textTransform: "none" }}>
+            {tr("Rate the service")}
+          </Button>
         </Box>
       )}
       {details && onAction && !["Resolved", "Cancelled"].includes(status) && (

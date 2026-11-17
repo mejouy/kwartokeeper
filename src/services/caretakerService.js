@@ -47,7 +47,9 @@ function getSecondaryApp() {
  * @param {string} params.email
  * @param {string} params.mobilePhone
  * @param {string} params.tempPassword       - plaintext temp password (see generateTempPassword.js)
- * @param {string} params.assignedPropertyId - Firestore doc id of the property
+ * @param {string} params.assignedPropertyId - Firestore doc id of the property they start on
+ * @param {string[]} [params.assignedPropertyIds] - every property they look after (owner's caretaker rule)
+ * @param {object} [params.assignedPropertyNames] - { propertyId: name }, for their property switcher
  * @param {string} params.ownerUid           - uid of the inviting owner
  * @param {object} params.permissions        - { manageTenants, logOccupancy, handleReports, viewFinancials, modifyLayout }
  * @returns {Promise<string>} the new caretaker's uid
@@ -58,6 +60,8 @@ export async function createCaretakerAccount({
   mobilePhone,
   tempPassword,
   assignedPropertyId,
+  assignedPropertyIds = [],
+  assignedPropertyNames = {},
   ownerUid,
   permissions,
 }) {
@@ -96,6 +100,9 @@ export async function createCaretakerAccount({
     role: "caretaker",
     status: "Active",
     assignedPropertyId,
+    // Every property they look after (one, unless the owner's caretaker rule allows more)
+    assignedPropertyIds: [...new Set([assignedPropertyId, ...assignedPropertyIds].filter(Boolean))],
+    assignedPropertyNames,
     permissions,
     invitedBy: ownerUid,
     mustChangePassword: true,

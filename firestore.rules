@@ -130,7 +130,11 @@ service cloud.firestore {
       return userId is string && userId != '' && propertyId is string && propertyId != '' &&
         exists(/databases/$(database)/documents/users/$(userId)) &&
         get(/databases/$(database)/documents/users/$(userId)).data.get('role', '') == 'caretaker' &&
-        get(/databases/$(database)/documents/users/$(userId)).data.get('assignedPropertyId', '') == propertyId;
+        (
+          get(/databases/$(database)/documents/users/$(userId)).data.get('assignedPropertyId', '') == propertyId ||
+          // A caretaker with several properties (owner's caretaker rule) is reachable at each of them
+          get(/databases/$(database)/documents/users/$(userId)).data.get('assignedPropertyIds', []).hasAny([propertyId])
+        );
     }
 
     // Who a signed-in person may send a notification to (besides themselves)
@@ -167,7 +171,11 @@ service cloud.firestore {
     // Profile fields only an owner or admin may change (never the person themselves)
     function selfLockedFields() {
       return ['role', 'suspendedAt', 'ownerUid', 'invitedBy', 'propertyId', 'assignedPropertyId', 'permissions',
-              'accountRemoved', 'roomId', 'bedId', 'monthlyRent', 'rentAmount', 'roomMonthlyRate'];
+              'accountRemoved', 'roomId', 'bedId', 'monthlyRent', 'rentAmount', 'roomMonthlyRate',
+              // Billing set by the owner (panel revisions): due day and waived late fees
+              'rentDueDay', 'rentDueMode', 'dueDay', 'lateFeeWaived',
+              // A caretaker's list of properties is the owner's to set (they may only switch within it)
+              'assignedPropertyIds', 'assignedPropertyNames'];
     }
 
     // ===============================================================
@@ -187,6 +195,10 @@ service cloud.firestore {
         (isTenant() && tenantPropertyId() != '' &&
           resource.data.get('role', '') == 'caretaker' &&
           resource.data.get('assignedPropertyId', '') == tenantPropertyId()) ||
+        // ...including caretakers who look after it among other properties
+        (isTenant() && tenantPropertyId() != '' &&
+          resource.data.get('role', '') == 'caretaker' &&
+          tenantPropertyId() in resource.data.get('assignedPropertyIds', [])) ||
         // Tenants and caretakers see their owner's profile
         ((isTenant() || isCaretaker()) && userId == myOwnerUid())
       );
@@ -244,6 +256,13 @@ service cloud.firestore {
         existsAfter(/databases/$(database)/documents/payments/$(request.resource.data.receiptLastPaymentId)) &&
         getAfter(/databases/$(database)/documents/payments/$(request.resource.data.receiptLastPaymentId)).data.get('receiptSeq', 0) == nextReceiptSeq(resource.data) &&
         getAfter(/databases/$(database)/documents/payments/$(request.resource.data.receiptLastPaymentId)).data.get('ownerUid', '') == userId
+      ) || (
+        // A caretaker with several properties switches the one they are working on:
+        // only to a property their owner gave them (assignedPropertyIds), nothing else changes
+        request.auth.uid == userId &&
+        resource.data.get('role', '') == 'caretaker' &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['assignedPropertyId', 'activePropertyChangedAt']) &&
+        request.resource.data.assignedPropertyId in resource.data.get('assignedPropertyIds', [])
       ) || (
         // An owner editing their own tenants and caretakers
         request.auth.uid != userId &&
@@ -506,13 +525,96 @@ service cloud.firestore {
 
       allow create: if isSignedIn() && (
         isAdmin() ||
-        (request.resource.data.get('tenantUid', '') == request.auth.uid && request.resource.data.get('propertyId', '') == tenantPropertyId())
+        (
+          request.resource.data.get('tenantUid', '') == request.auth.uid &&
+          request.resource.data.get('propertyId', '') == tenantPropertyId() &&
+          // A new request starts as Pending, without an outcome or a rating
+          request.resource.data.get('status', 'Pending') == 'Pending' &&
+          !request.resource.data.keys().hasAny(['review', 'tenantConfirmed', 'tenantConfirmedAt', 'resolutionNotes', 'resolvedAt', 'resolvedBy', 'priorityChanges', 'originalCategory', 'reopenCount'])
+        )
       );
+
+      // ---- Repair steps added after the final defense (utils/maintenanceWorkflow.js)
+
+      // Marking a request resolved needs resolution notes (what was done)
+      function resolvesWithNotes() {
+        return request.resource.data.get('status', 'Pending') != 'Resolved' ||
+          resource.data.get('status', 'Pending') == 'Resolved' ||
+          (request.resource.data.get('resolutionNotes', '') is string &&
+           request.resource.data.get('resolutionNotes', '').trim().size() > 0);
+      }
+
+      // The tenant's own answer (confirmation, reopen reason, rating) is only ever
+      // written by the tenant. The owner or caretaker may only clear a confirmation,
+      // which happens when they open the request again.
+      function keepsTenantAnswer() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return !changed.hasAny(['review', 'reopenCount', 'reopenReason', 'reopenedAt']) &&
+          (!changed.hasAny(['tenantConfirmed', 'tenantConfirmedAt']) || !('tenantConfirmed' in request.resource.data));
+      }
+
+      function validReview(r) {
+        return r is map &&
+          r.keys().hasOnly(['rating', 'comment', 'at']) &&
+          r.keys().hasAll(['rating', 'at']) &&
+          r.rating is int && r.rating >= 1 && r.rating <= 5 &&
+          r.get('comment', '') is string && r.get('comment', '').size() <= 500 &&
+          r.at is timestamp;
+      }
+
+      // Resolved, and the tenant hasn't confirmed it yet
+      function waitingForTenant() {
+        return resource.data.get('status', 'Pending') == 'Resolved' &&
+          resource.data.get('tenantConfirmed', false) != true;
+      }
+
+      // "Yes, it's fixed", with an optional first rating
+      function tenantConfirmsFix() {
+        let changed = request.resource.data.diff(resource.data).affectedKeys();
+        return waitingForTenant() &&
+          changed.hasOnly(['tenantConfirmed', 'tenantConfirmedAt', 'review', 'updatedAt']) &&
+          request.resource.data.tenantConfirmed == true &&
+          request.resource.data.tenantConfirmedAt == request.time &&
+          (!changed.hasAny(['review']) || (!('review' in resource.data) && validReview(request.resource.data.review)));
+      }
+
+      // "Not fixed yet": back to Pending, with a reason
+      function tenantReopens() {
+        return waitingForTenant() &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'reopenCount', 'reopenedAt', 'reopenReason', 'resolvedAt', 'updatedAt']) &&
+          request.resource.data.status == 'Pending' &&
+          request.resource.data.get('reopenCount', 0) == resource.data.get('reopenCount', 0) + 1 &&
+          request.resource.data.reopenedAt == request.time &&
+          request.resource.data.reopenReason is string &&
+          request.resource.data.reopenReason.trim().size() > 0 &&
+          request.resource.data.reopenReason.size() <= 300 &&
+          !('resolvedAt' in request.resource.data);
+      }
+
+      // The tenant cancels their own request before work starts (the "Cancel request" button)
+      function tenantCancels() {
+        return resource.data.get('status', 'Pending') == 'Pending' &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'cancelledAt', 'cancelledBy', 'cancelReason', 'updatedAt']) &&
+          request.resource.data.status == 'Cancelled' &&
+          request.resource.data.get('cancelledBy', '') == 'tenant';
+      }
+
+      // Rating the service later: once, after confirming the fix
+      function tenantRatesLater() {
+        return resource.data.get('status', 'Pending') == 'Resolved' &&
+          resource.data.get('tenantConfirmed', false) == true &&
+          !('review' in resource.data) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['review', 'updatedAt']) &&
+          validReview(request.resource.data.review);
+      }
 
       allow update: if isSignedIn() && (
         isAdmin() ||
-        ownsRecord(resource.data) ||
-        caretakerCan('handleReports', resource.data.get('propertyId', '')) ||
+        (
+          (ownsRecord(resource.data) || caretakerCan('handleReports', resource.data.get('propertyId', ''))) &&
+          resolvesWithNotes() &&
+          keepsTenantAnswer()
+        ) ||
         (
           resource.data.get('tenantUid', '') == request.auth.uid &&
           (
@@ -523,7 +625,11 @@ service cloud.firestore {
             (
               resource.data.get('status', 'Pending') != 'Pending' &&
               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['followUps', 'updatedAt'])
-            )
+            ) ||
+            tenantConfirmsFix() ||
+            tenantReopens() ||
+            tenantRatesLater() ||
+            tenantCancels()
           )
         )
       );

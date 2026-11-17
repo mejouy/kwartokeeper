@@ -39,6 +39,11 @@ import {
 } from "../../../utils/reconcilePropertyOccupancy";
 import { isRoomUnderMaintenance, MAINTENANCE_ROOM_MESSAGE } from "../../../utils/roomStatus";
 import { findDuplicatePerson } from "../../../utils/duplicates";
+import { useOwnerBilling } from "../../../utils/billingSettings";
+import { addCharges, advanceCovers, periodOfDate } from "../../../utils/charges";
+import { bedRateOf } from "../../../utils/bedRates";
+import { ordinalDay, resolveDueDay } from "../../../utils/tenantRent";
+import DueDayField from "../../../components/DueDayField";
 import { t } from "../../../i18n";
 
 // ---------------------------------------------------------------------------
@@ -293,7 +298,15 @@ export default function RegisterTenant() {
     leaseStartDate: "",
     leaseDuration: "",
     customLeaseDuration: "", // Added for custom duration tracking
+    // Billing (panel revisions). Empty = use the owner's Billing rules
+    rentDueMode: "",
+    rentDueDay: "",
+    advanceMonths: "",
+    depositMonths: "",
   });
+  // The owner's billing rules: default due day and move-in payments
+  const billing = useOwnerBilling(auth.currentUser?.uid);
+  const pick = (value, fallback) => (value === "" || value === null || value === undefined ? fallback : Number(value));
 
   const [idPhotoFile, setIdPhotoFile] = useState(null);
   const idPreviewRef = useRef(null);
@@ -570,7 +583,11 @@ export default function RegisterTenant() {
 
       // 4. Construct Tenant Document Payload
       const ownerUid = auth.currentUser?.uid || null;
-      const monthlyRent = Number(selectedRoom?.monthlyRatePerBed || 0);
+      // The bed's own rate when it has one, else the room's rate (Property → room → bed rates)
+      const monthlyRent = bedRateOf(selectedRoom, form.bedId);
+      // Every 15th / 30th / same date as the lease start / a custom day, worked out to a day
+      const rentDueMode = dueRule.mode;
+      const rentDueDay = resolveDueDay(dueRule, form.leaseStartDate);
       const leaseEndDate = leaseMonths !== null ? addMonthsClamped(leaseStart, leaseMonths).toISOString() : null;
       const tenantProfile = {
         uid: newUid,
@@ -589,6 +606,8 @@ export default function RegisterTenant() {
         monthlyRent,
         rentAmount: monthlyRent,
         roomMonthlyRate: monthlyRent,
+        rentDueDay,
+        rentDueMode,
         leaseStartDate: form.leaseStartDate,
         leaseEndDate,
         leaseEnd: leaseEndDate,
@@ -603,6 +622,24 @@ export default function RegisterTenant() {
         fullName: tenantProfile.name,
       });
       await reconcilePropertyOccupancy(form.propertyId);
+
+      // 6. Move-in payments (optional): advance rent and a security deposit,
+      //    added as one-time fees for the move-in month. Best effort: the tenant
+      //    is already saved, and these can be added later from their profile.
+      const moveInPeriod = periodOfDate(leaseStart);
+      const advanceMonths = pick(form.advanceMonths, billing.moveIn.advanceMonths);
+      const depositMonths = pick(form.depositMonths, billing.moveIn.depositMonths);
+      const feeTenant = [{ id: newUid, name: tenantProfile.name, propertyId: form.propertyId, propertyName: selectedProperty?.propertyName || selectedProperty?.name || "", roomNumber: form.roomId }];
+      try {
+        if (advanceMonths > 0 && monthlyRent > 0) {
+          await addCharges({ ownerUid, tenants: feeTenant, amounts: [monthlyRent * advanceMonths], type: "advance", label: "Advance rent", repeat: "once", period: moveInPeriod, note: "", extra: { coversPeriods: advanceCovers(moveInPeriod, advanceMonths) } });
+        }
+        if (depositMonths > 0 && monthlyRent > 0) {
+          await addCharges({ ownerUid, tenants: feeTenant, amounts: [monthlyRent * depositMonths], type: "deposit", label: "Security deposit", repeat: "once", period: moveInPeriod, note: "" });
+        }
+      } catch (feeErr) {
+        console.warn("Move-in payments not added:", feeErr?.code || feeErr);
+      }
 
       navigate(-1);
     } catch (err) {
@@ -619,7 +656,13 @@ export default function RegisterTenant() {
   // ------------------------------------------------------------------ UI
   const selectedProperty = properties.find((p) => p.id === form.propertyId);
   const selectedRoom = rooms.find((r) => r.roomName === form.roomId);
-  const monthlyRate = Number(selectedRoom?.monthlyRatePerBed || 0);
+  const monthlyRate = bedRateOf(selectedRoom, form.bedId);
+  // The due rule: what the owner picked here, else their Billing rules
+  const dueRule = { mode: form.rentDueMode || billing.defaultDueMode, day: pick(form.rentDueDay, billing.defaultDueDay) };
+  const dueDay = resolveDueDay(dueRule, form.leaseStartDate);
+  const advanceMonthsShown = pick(form.advanceMonths, billing.moveIn.advanceMonths);
+  const depositMonthsShown = pick(form.depositMonths, billing.moveIn.depositMonths);
+  const moveInPeriodShown = form.leaseStartDate ? periodOfDate(new Date(`${form.leaseStartDate}T00:00:00`)) : "";
   const leaseLabel =
     form.leaseDuration === "custom"
       ? form.customLeaseDuration.trim()
@@ -636,6 +679,8 @@ export default function RegisterTenant() {
     ["ID", [idTypeLabel, form.idNumber].filter(Boolean).join(" · ")],
     ["Room", [selectedProperty?.propertyName, form.roomId, form.bedId].filter(Boolean).join(" · ")],
     ["Monthly rent", monthlyRate ? `₱${monthlyRate.toLocaleString()}` : ""],
+    ["Rent due", dueRule.mode === "lease" && !form.leaseStartDate ? "Same date as the lease start" : `Every ${ordinalDay(dueDay)} of the month${dueDay >= 29 ? " (or its last day, if shorter)" : ""}`],
+    ["Move-in payments", monthlyRate > 0 ? [advanceMonthsShown > 0 && `₱${(monthlyRate * advanceMonthsShown).toLocaleString()} advance`, depositMonthsShown > 0 && `₱${(monthlyRate * depositMonthsShown).toLocaleString()} deposit`].filter(Boolean).join(" + ") : ""],
     ["Lease", [leaseLabel, form.leaseStartDate && `from ${form.leaseStartDate}`].filter(Boolean).join(" · ")],
   ].filter(([, v]) => v);
 
@@ -926,7 +971,10 @@ export default function RegisterTenant() {
                       <FormRow label={t("Bed / space")} required>
                         <TextField select fullWidth value={form.bedId} onChange={handleChange("bedId")} disabled={!form.roomId} {...flag("bedId")}>
                           {bedOptions.map((bed) => (
-                            <MenuItem key={bed} value={bed}>{bed}</MenuItem>
+                            <MenuItem key={bed} value={bed}>
+                              {bed}
+                              {Number(selectedRoom?.bedRates?.[bed]) > 0 ? ` · ₱${bedRateOf(selectedRoom, bed).toLocaleString()}` : ""}
+                            </MenuItem>
                           ))}
                         </TextField>
                       </FormRow>
@@ -938,7 +986,7 @@ export default function RegisterTenant() {
                           <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800 }}>
                             ₱{monthlyRate.toLocaleString()}
                             <Typography component="span" variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                              {" "}{t("per bed")}
+                              {" "}{form.bedId && Number(selectedRoom?.bedRates?.[form.bedId]) > 0 ? t("for {bed}", { bed: form.bedId }) : t("per bed")}
                             </Typography>
                           </Typography>
                         </Box>
@@ -975,6 +1023,41 @@ export default function RegisterTenant() {
                         />
                       </FormRow>
                     )}
+
+                    <FormRow label={t("Rent due day")}>
+                      <DueDayField
+                        label=""
+                        value={dueRule}
+                        leaseStart={form.leaseStartDate || null}
+                        onChange={({ mode, day }) => setForm((prev) => ({ ...prev, rentDueMode: mode, rentDueDay: day }))}
+                        helperText={t("From your Billing rules. You can change it for this tenant.")}
+                      />
+                    </FormRow>
+
+                    <FormRow label={t("Move-in payments")} top>
+                      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" }, gap: 1.5 }}>
+                        {[
+                          ["advanceMonths", t("Advance rent"), advanceMonthsShown],
+                          ["depositMonths", t("Security deposit"), depositMonthsShown],
+                        ].map(([field, label, value]) => (
+                          <TextField key={field} select fullWidth label={label} value={value} onChange={handleChange(field)}>
+                            {[0, 1, 2, 3, 4, 5, 6].map((n) => (
+                              <MenuItem key={n} value={n}>
+                                {n === 0 ? t("None") : `${n === 1 ? t("1 month") : t("{n} months", { n })}${monthlyRate > 0 ? ` · ₱${(monthlyRate * n).toLocaleString()}` : ""}`}
+                              </MenuItem>
+                            ))}
+                          </TextField>
+                        ))}
+                      </Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.75 }}>
+                        {advanceMonthsShown > 0 || depositMonthsShown > 0
+                          ? t("Added to the bill for {month}. Advance rent pays for {covers}; the deposit is refundable.", {
+                              month: moveInPeriodShown || t("the move-in month"),
+                              covers: moveInPeriodShown && advanceMonthsShown > 0 ? advanceCovers(moveInPeriodShown, advanceMonthsShown).join(", ") : t("the months after"),
+                            })
+                          : t("Optional. Nothing extra is billed at move-in.")}
+                      </Typography>
+                    </FormRow>
 
                     <FormRow label={t("Review")} top>
                       <Box sx={{ bgcolor: "background.paper", borderRadius: "4px", border: "1px solid", borderColor: "divider", p: 2 }}>

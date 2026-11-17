@@ -14,8 +14,11 @@ import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import { RULES_PREVIEW, row, cardSx, fmtDate, formatLeaseStart, initials, rise, Pill, Panel, Facts } from "./tenantParts";
 import { t } from "../../i18n";
 import LanguageSwitch from "../../components/LanguageSwitch";
+import ContractCard from "../../components/ContractCard";
+import { contractOf } from "../../utils/contract";
+import GavelOutlinedIcon from "@mui/icons-material/GavelOutlined";
 
-export default function TenantProfileTab({ ackRules, hasCover, hasHouseRules, lease, previewFile, recentCurfew, rulesAcked, rulesOpen, setPreviewFile, setRulesOpen, statusTone, tenantInfo }) {
+export default function TenantProfileTab({ contractProperty, contractTenant, notify, ackRules, hasCover, hasHouseRules, lease, previewFile, recentCurfew, rulesAcked, rulesOpen, setPreviewFile, setRulesOpen, statusTone, tenantInfo }) {
   return (
     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "minmax(0, 1fr) minmax(0, 1.4fr)" }, gap: { xs: 2, md: 3 }, alignItems: "start" }}>
       <Box sx={{ display: "flex", flexDirection: "column", gap: { xs: 2, md: 3 }, minWidth: 0 }}>
@@ -110,6 +113,12 @@ export default function TenantProfileTab({ ackRules, hasCover, hasHouseRules, le
           )}
         </Panel>
 
+        {/* Rental contract from the owner: read, agree, download (panel revisions) */}
+        {contractOf(contractProperty) && (
+          <Panel title={t("Rental contract")} icon={<GavelOutlinedIcon fontSize="small" />} sx={rise(3)}>
+            <ContractCard tenant={contractTenant} property={contractProperty} onDone={notify} />
+          </Panel>
+        )}
         <Panel title={t("House rules & curfew")} icon={<PolicyOutlinedIcon fontSize="small" />} sx={rise(3)}>
           {!hasHouseRules ? (
             <Typography variant="body2" color="text.secondary">

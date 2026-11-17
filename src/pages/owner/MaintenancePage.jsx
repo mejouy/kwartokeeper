@@ -33,9 +33,11 @@ import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined
 import EngineeringOutlinedIcon from "@mui/icons-material/EngineeringOutlined";
 import TaskAltOutlinedIcon from "@mui/icons-material/TaskAltOutlined";
 import ForumOutlinedIcon from "@mui/icons-material/ForumOutlined";
+import SwapVertOutlinedIcon from "@mui/icons-material/SwapVertOutlined";
 
 import {
   addDoc,
+  arrayUnion,
   collection,
   query,
   where,
@@ -50,8 +52,11 @@ import { useAuth } from "../../context/AuthContext";
 import {
   notifyMaintenanceStatusChanged,
   notifyMaintenanceCancelled,
+  notifyMaintenancePriorityChanged,
 } from "../../services/notificationService";
 import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
+import { categoryOf, priorityChangeEntry, priorityChangeFields } from "../../utils/maintenanceWorkflow";
+import { PriorityDialog, RepairOutcome, ResolveDialog } from "../../components/RepairWorkflow";
 import { t } from "../../i18n";
 
 const HEAD = '"Inter", sans-serif';
@@ -150,7 +155,7 @@ const segmentedSx = (status) => ({
 
 // One ticket. Remarks are edited in a draft that only exists while editing,
 // so live updates never fight what is being typed.
-function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
+function TicketCard({ ticket, busy, onStatusChange, onCancel, onPriority, notify }) {
   const [draft, setDraft] = useState(null); // null = not editing
   const [isSaving, setIsSaving] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -280,6 +285,9 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
         </Box>
       )}
 
+      {/* Priority changes, a reopened request, how it was fixed, the tenant's answer */}
+      <RepairOutcome ticket={ticket} />
+
       {status === "Cancelled" && ticket.cancelReason && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 1.5, overflowWrap: "anywhere" }}>
           <strong>{t("Reason:")}</strong> {ticket.cancelReason}
@@ -373,6 +381,11 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, notify }) {
         <Box sx={{ ...row, gap: 1, justifyContent: "flex-end" }}>
           {busy && <CircularProgress size={18} />}
           {!closed && (
+            <Button size="small" startIcon={<SwapVertOutlinedIcon />} onClick={() => onPriority(ticket)} disabled={busy} sx={{ fontWeight: 700, minHeight: 36, textTransform: "none" }}>
+              {t("Change priority")}
+            </Button>
+          )}
+          {!closed && (
             <Button size="small" color="error" startIcon={<CancelOutlinedIcon />} onClick={() => onCancel(ticket)} disabled={busy} sx={{ fontWeight: 700, minHeight: 36, textTransform: "none" }}>
               {t("Cancel request")}
             </Button>
@@ -396,6 +409,8 @@ export default function MaintenancePage() {
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
   const [cancelling, setCancelling] = useState(false);
+  const [resolveTarget, setResolveTarget] = useState(null);
+  const [priorityTarget, setPriorityTarget] = useState(null);
   const [toast, setToast] = useState({ open: false, severity: "success", message: "" });
   // "Now" for days-waiting, fixed when the page opens
   const [now] = useState(() => new Date());
@@ -443,8 +458,16 @@ export default function MaintenancePage() {
     }).catch((err) => console.warn("Repair notice failed:", err?.code || err));
   };
 
+  // Who is acting, for the priority log and "resolved by"
+  const me = { uid: currentUser?.uid || null, name: currentUser?.displayName || "Owner", role: "owner" };
+
   const handleStatusChange = async (ticket, newStatus) => {
     if (!ticket || busyId || newStatus === statusOf(ticket)) return;
+    // Resolving needs resolution notes, so it goes through its own dialog
+    if (newStatus === "Resolved") {
+      setResolveTarget(ticket);
+      return;
+    }
     const name = ticket.title || "your repair request";
     setBusyId(ticket.id);
     try {
@@ -452,27 +475,70 @@ export default function MaintenancePage() {
         status: newStatus,
         updatedAt: serverTimestamp(),
         // Keep the dates honest when something is resolved, then reopened
-        resolvedAt: newStatus === "Resolved" ? serverTimestamp() : deleteField(),
+        resolvedAt: deleteField(),
+        // A fix the tenant confirmed no longer stands once the request is open again
+        tenantConfirmed: deleteField(),
+        tenantConfirmedAt: deleteField(),
         ...(statusOf(ticket) === "Cancelled" ? { cancelledAt: deleteField(), cancelReason: deleteField(), cancelledBy: deleteField() } : {}),
       });
       notifyMaintenanceStatusChanged(ticket, newStatus, "owner");
       notifyTenant(
         ticket,
-        newStatus === "Resolved" ? "success" : "info",
+        "info",
         `Repair update: ${newStatus}`,
-        newStatus === "Resolved"
-          ? `"${name}" was marked resolved. If it isn't fixed, add an update from your dashboard.`
-          : newStatus === "In Progress"
-          ? `Work has started on "${name}".`
-          : `"${name}" is back to pending.`
+        newStatus === "In Progress" ? `Work has started on "${name}".` : `"${name}" is back to pending.`
       );
-      notify(`Marked as ${newStatus.toLowerCase()}.${newStatus === "Resolved" && view === "active" ? " It moves to Resolved." : ""}`);
+      notify(`Marked as ${newStatus.toLowerCase()}.`);
     } catch (err) {
       console.error("Failed to update ticket status:", err);
       notify("Failed to update status. You may not have permission.", "error");
     } finally {
       setBusyId("");
     }
+  };
+
+  // Mark resolved with resolution notes (from the Resolve dialog)
+  const confirmResolve = async ({ notes }) => {
+    const ticket = resolveTarget;
+    if (!ticket) return;
+    const name = ticket.title || "your repair request";
+    await updateDoc(doc(db, "maintenance_tickets", ticket.id), {
+      status: "Resolved",
+      resolutionNotes: notes,
+      resolvedAt: serverTimestamp(),
+      resolvedBy: me.uid,
+      resolvedByName: me.name,
+      resolvedByRole: "owner",
+      // Each fix gets its own answer from the tenant
+      tenantConfirmed: deleteField(),
+      tenantConfirmedAt: deleteField(),
+      updatedAt: serverTimestamp(),
+      ...(statusOf(ticket) === "Cancelled" ? { cancelledAt: deleteField(), cancelReason: deleteField(), cancelledBy: deleteField() } : {}),
+    });
+    setResolveTarget(null);
+    notifyMaintenanceStatusChanged(ticket, "Resolved", "owner");
+    notifyTenant(
+      ticket,
+      "success",
+      "Repair update: Resolved",
+      `"${name}" was marked resolved: ${notes} Open Repairs to confirm it's fixed and rate the service, or tell us if it isn't.`
+    );
+    notify(`Marked as resolved.${view === "active" ? " It moves to Resolved." : ""}`);
+  };
+
+  // Change the priority (the AHP category) with a reason (from the Priority dialog)
+  const savePriority = async ({ category, reason }) => {
+    const ticket = priorityTarget;
+    if (!ticket) return;
+    const entry = priorityChangeEntry({ from: categoryOf(ticket), to: category, reason, actor: me });
+    await updateDoc(doc(db, "maintenance_tickets", ticket.id), {
+      ...priorityChangeFields(ticket, category),
+      priorityChanges: arrayUnion(entry),
+      updatedAt: serverTimestamp(),
+    });
+    setPriorityTarget(null);
+    notifyMaintenancePriorityChanged(ticket, entry, "owner");
+    notify(`Priority changed to ${entry.toTier}.`);
   };
 
   const openCancel = (ticket) => {
@@ -750,11 +816,15 @@ export default function MaintenancePage() {
           )}
           <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 1.5 }}>
             {visibleTickets.map((t) => (
-              <TicketCard key={t.id} ticket={t} busy={busyId === t.id} onStatusChange={handleStatusChange} onCancel={openCancel} notify={notify} />
+              <TicketCard key={t.id} ticket={t} busy={busyId === t.id} onStatusChange={handleStatusChange} onCancel={openCancel} onPriority={setPriorityTarget} notify={notify} />
             ))}
           </Box>
         </>
       )}
+
+      {/* Resolving needs resolution notes; changing the priority needs a reason */}
+      <ResolveDialog ticket={resolveTarget} onClose={() => setResolveTarget(null)} onSave={confirmResolve} paper={{ sx: { borderRadius: R.lg, m: 2, width: "calc(100% - 32px)" } }} />
+      <PriorityDialog ticket={priorityTarget} onClose={() => setPriorityTarget(null)} onSave={savePriority} paper={{ sx: { borderRadius: R.lg, m: 2, width: "calc(100% - 32px)" } }} />
 
       {/* Cancellation confirmation */}
       <Dialog

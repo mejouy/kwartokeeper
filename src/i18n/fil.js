@@ -6,6 +6,8 @@
 import owner1 from "./fil-owner-1";
 import owner2 from "./fil-owner-2";
 import owner3 from "./fil-owner-3";
+// Screens added after the final defense (panel revisions)
+import panel from "./fil-panel";
 
 const tenant = {
   // ---- statuses and small words
@@ -360,6 +362,6 @@ const tenant = {
 
 
 // Owner and caretaker screens (fil-owner-*.js); the tenant wording above wins where both have the same phrase
-const fil = { ...owner1, ...owner2, ...owner3, ...tenant };
+const fil = { ...owner1, ...owner2, ...owner3, ...panel, ...tenant };
 
 export default fil;

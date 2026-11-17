@@ -8,7 +8,7 @@ import HistoryIcon from "@mui/icons-material/History";
 import { cardSx, LIST_PAGE, rise, EmptyState, FilterChips, RequestCard } from "./caretakerParts";
 import { t } from "../../i18n";
 
-export default function CaretakerMaintenanceTab({ activeTickets, archiveOpen, archiveShown, busyTicket, changeTicketStatus, highTickets, progressTickets, rankedTickets, resolvedTickets, setArchiveOpen, setArchiveShown, setTicketFilter, setTicketsShown, shownTickets, ticketFilter, ticketsShown }) {
+export default function CaretakerMaintenanceTab({ activeTickets, archiveOpen, archiveShown, busyTicket, changeTicketStatus, openPriority, highTickets, progressTickets, rankedTickets, resolvedTickets, setArchiveOpen, setArchiveShown, setTicketFilter, setTicketsShown, shownTickets, ticketFilter, ticketsShown }) {
   return (
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
@@ -39,7 +39,7 @@ export default function CaretakerMaintenanceTab({ activeTickets, archiveOpen, ar
             <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.5, sm: 2 } }}>
               {shownTickets.slice(0, ticketsShown).map((t, i) => (
                 <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0 }}>
-                  <RequestCard t={t} busy={busyTicket === t.id} onStatus={changeTicketStatus} />
+                  <RequestCard t={t} busy={busyTicket === t.id} onStatus={changeTicketStatus} onPriority={openPriority} />
                 </Box>
               ))}
             </Box>

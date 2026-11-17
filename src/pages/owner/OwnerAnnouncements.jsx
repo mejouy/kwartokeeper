@@ -436,7 +436,8 @@ export default function OwnerAnnouncements() {
   const recipients = users.filter((u) => {
     if (!matchesAudience(u)) return false;
     if (scope === "all") return true;
-    if (scope === "property") return !!selectedPropertyId && userProp(u) === selectedPropertyId;
+    // A caretaker with several properties (owner's caretaker rule) hears about each of them
+    if (scope === "property") return !!selectedPropertyId && (userProp(u) === selectedPropertyId || (Array.isArray(u.assignedPropertyIds) && u.assignedPropertyIds.includes(selectedPropertyId)));
     if (scope === "room")
       return !!selectedPropertyId && !!selectedRoomNumber && userProp(u) === selectedPropertyId && String(userRoom(u)) === selectedRoomNumber;
     if (scope === "individual") return !!selectedRecipientId && u.id === selectedRecipientId;

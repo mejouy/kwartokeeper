@@ -49,6 +49,7 @@ import { emailCaretakerResetLink } from "../../../services/caretakerService";
 import { isRemovedAccount, removedLabel } from "../../../utils/accountState";
 import CaretakerActivity from "./CaretakerActivity";
 import { t } from "../../../i18n";
+import { assignmentFields, modeOf, propertyIdsOf, takenProperties, useAssignmentMode, validateAssignment } from "../../../utils/caretakerAssignment";
 
 // Same wording as the Invite caretaker form
 const PERMISSIONS = [
@@ -164,8 +165,13 @@ export default function CaretakerDetail() {
     email: "",
     phone: "",
     assignedPropertyId: "",
+    assignedPropertyIds: [],
     permissions: { ...EMPTY_PERMISSIONS },
   });
+  // The owner's caretaker rule (Caretakers page) and the other caretakers, to check against it
+  const assignmentMode = useAssignmentMode(ownerUid);
+  const rule = modeOf(assignmentMode);
+  const [otherCaretakers, setOtherCaretakers] = useState([]);
 
   // =========================================================
   // LOAD CARETAKER & PROPERTY DETAILS
@@ -194,6 +200,8 @@ export default function CaretakerDetail() {
         const propsSnap = await getDocs(query(collection(db, "properties"), where("ownerUid", "==", ownerUid)));
         const propsList = propsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
         setOwnerProperties(propsList);
+        const people = await getDocs(query(collection(db, "users"), where("ownerUid", "==", ownerUid))).catch(() => null);
+        setOtherCaretakers(people ? people.docs.map((d) => ({ id: d.id, ...d.data() })).filter((u) => u.role === "caretaker" && u.id !== caretakerId) : []);
         setProperty(propsList.find((p) => p.id === caretakerData.assignedPropertyId) || null);
       } catch (err) {
         console.error("Error fetching caretaker details:", err);
@@ -216,6 +224,7 @@ export default function CaretakerDetail() {
       email: caretaker.email || "",
       phone: caretaker.phone || "",
       assignedPropertyId: caretaker.assignedPropertyId || "",
+      assignedPropertyIds: propertyIdsOf(caretaker),
       // Keep any permission keys beyond the standard five so saving doesn't drop them
       permissions: Object.fromEntries(
         Object.entries({ ...EMPTY_PERMISSIONS, ...(caretaker.permissions || {}) }).map(([k, v]) => [k, Boolean(v)])
@@ -265,8 +274,15 @@ export default function CaretakerDetail() {
     if (!formData.name.trim()) e.name = "Full name is required.";
     if (formData.email.trim() && !/^\S+@\S+\.\S+$/.test(formData.email.trim())) e.email = "Enter a valid email address.";
     if (formData.phone.trim() && !/^[0-9+\-\s()]{7,20}$/.test(formData.phone.trim())) e.phone = "Enter a valid phone number.";
+    // The owner's caretaker rule: how many properties, and whether a property can have more than one caretaker
+    const ids = chosenIds();
+    if (ids.length) {
+      const problem = validateAssignment({ mode: assignmentMode, propertyIds: ids, caretakerId, caretakers: otherCaretakers, propertyName: (id) => propertyNameOf(ownerProperties.find((p) => p.id === id) || {}) });
+      if (problem) e.assignedPropertyId = problem;
+    }
     return e;
   };
+  const chosenIds = () => (rule.multiProperty ? formData.assignedPropertyIds : [formData.assignedPropertyId]).filter(Boolean);
 
   const handleSaveEdit = async () => {
     const errs = validateForm();
@@ -285,7 +301,11 @@ export default function CaretakerDetail() {
         fullName: formData.name.trim(),
         email: formData.email.trim(),
         phone: formData.phone.trim(),
-        assignedPropertyId: formData.assignedPropertyId,
+        // Every property they look after, and the one they work on now (kept when still theirs)
+        ...assignmentFields(chosenIds(), {
+          current: caretaker.assignedPropertyId || "",
+          names: Object.fromEntries(ownerProperties.map((p) => [p.id, propertyNameOf(p)])),
+        }),
         permissions: formData.permissions,
         updatedAt: new Date(),
       };
@@ -313,7 +333,7 @@ export default function CaretakerDetail() {
       }
 
       setCaretaker((prev) => ({ ...prev, ...updatedPayload }));
-      setProperty(ownerProperties.find((p) => p.id === formData.assignedPropertyId) || null);
+      setProperty(ownerProperties.find((p) => p.id === updatedPayload.assignedPropertyId) || null);
       setOpenEdit(false);
       setSnackText("Caretaker details updated.");
       setSnackbar(true);
@@ -370,7 +390,11 @@ export default function CaretakerDetail() {
     {
       icon: HomeWorkOutlinedIcon,
       label: t("Assigned property"),
-      value: property ? propertyNameOf(property) : propertyMissing ? "Property unavailable" : "Not assigned",
+      value: property
+        ? `${propertyNameOf(property)}${propertyIdsOf(caretaker).length > 1 ? ` +${propertyIdsOf(caretaker).length - 1}` : ""}`
+        : propertyMissing
+        ? "Property unavailable"
+        : "Not assigned",
       sub: property ? formatPropertyAddress(property) : propertyMissing ? "The property couldn't be found" : "Assign one with Edit details",
       warn: !property,
       onClick: property ? () => navigate(`/owner/properties/${property.id}`) : null,
@@ -597,24 +621,56 @@ export default function CaretakerDetail() {
               </Box>
             </FormSection>
 
-            <FormSection icon={HomeWorkOutlinedIcon} title={t("Property")} description="The one property they look after.">
-              <TextField
-                select
-                label={t("Assigned property")}
-                name="assignedPropertyId"
-                value={formData.assignedPropertyId}
-                onChange={handleChange}
-                fullWidth
-                slotProps={{ select: { displayEmpty: true }, inputLabel: { shrink: true } }}
-                helperText={!formData.assignedPropertyId ? "Without a property they can't see any tenants or rooms." : ""}
-              >
-                <MenuItem value="">{t("Not assigned")}</MenuItem>
-                {ownerProperties.map((prop) => (
-                  <MenuItem key={prop.id} value={prop.id}>
-                    {propertyNameOf(prop)}
-                  </MenuItem>
-                ))}
-              </TextField>
+            <FormSection icon={HomeWorkOutlinedIcon} title={rule.multiProperty ? t("Properties") : t("Property")} description={t(rule.hint)}>
+              {rule.multiProperty ? (
+                <TextField
+                  select
+                  label={t("Assigned properties")}
+                  value={formData.assignedPropertyIds}
+                  onChange={(e) => {
+                    const ids = typeof e.target.value === "string" ? e.target.value.split(",") : e.target.value;
+                    setFormData((prev) => ({ ...prev, assignedPropertyIds: ids, assignedPropertyId: ids[0] || "" }));
+                    setFormErrors((prev) => ({ ...prev, assignedPropertyId: undefined }));
+                  }}
+                  fullWidth
+                  error={Boolean(formErrors.assignedPropertyId)}
+                  slotProps={{ select: { multiple: true, displayEmpty: true, renderValue: (ids) => (ids.length ? ids.map((id) => propertyNameOf(ownerProperties.find((p) => p.id === id) || {})).join(", ") : t("Not assigned")) }, inputLabel: { shrink: true } }}
+                  helperText={formErrors.assignedPropertyId || (!formData.assignedPropertyIds.length ? "Without a property they can't see any tenants or rooms." : "They switch between these on their dashboard.")}
+                >
+                  {ownerProperties.map((prop) => {
+                    const takenBy = rule.sharedProperty ? null : takenProperties(otherCaretakers).get(prop.id);
+                    return (
+                      <MenuItem key={prop.id} value={prop.id} disabled={Boolean(takenBy) && !formData.assignedPropertyIds.includes(prop.id)}>
+                        {propertyNameOf(prop)}
+                        {takenBy ? ` · ${t("has a caretaker")} (${takenBy.join(", ")})` : ""}
+                      </MenuItem>
+                    );
+                  })}
+                </TextField>
+              ) : (
+                <TextField
+                  select
+                  label={t("Assigned property")}
+                  name="assignedPropertyId"
+                  value={formData.assignedPropertyId}
+                  onChange={handleChange}
+                  fullWidth
+                  error={Boolean(formErrors.assignedPropertyId)}
+                  slotProps={{ select: { displayEmpty: true }, inputLabel: { shrink: true } }}
+                  helperText={formErrors.assignedPropertyId || (!formData.assignedPropertyId ? "Without a property they can't see any tenants or rooms." : "")}
+                >
+                  <MenuItem value="">{t("Not assigned")}</MenuItem>
+                  {ownerProperties.map((prop) => {
+                    const takenBy = rule.sharedProperty ? null : takenProperties(otherCaretakers).get(prop.id);
+                    return (
+                      <MenuItem key={prop.id} value={prop.id} disabled={Boolean(takenBy) && formData.assignedPropertyId !== prop.id}>
+                        {propertyNameOf(prop)}
+                        {takenBy ? ` · ${t("has a caretaker")} (${takenBy.join(", ")})` : ""}
+                      </MenuItem>
+                    );
+                  })}
+                </TextField>
+              )}
             </FormSection>
 
             <FormSection icon={SecurityOutlinedIcon} title={t("Permissions")} description="Turn on only what they need. You can change this any time.">

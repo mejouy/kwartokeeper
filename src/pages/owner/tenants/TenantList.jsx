@@ -46,6 +46,7 @@ import { collection, query, where, onSnapshot } from "firebase/firestore";
 import { auth, db } from "../../../config/firebase";
 import { normalizePayment } from "../../../utils/normalizePayment";
 import { MONTHS, DAY_MS, normalizeStatus, STATUS_TONE, rentStatusOf, leaseFlagOf } from "../../../utils/tenantRent";
+import { useOwnerBilling } from "../../../utils/billingSettings";
 import { withoutRemoved } from "../../../utils/accountState";
 import { isActiveCharge } from "../../../utils/charges";
 // Translation is "tr" here: this file also uses "t" for tenants and the theme
@@ -130,6 +131,8 @@ export default function TenantList() {
   const [loading, setLoading] = useState(() => Boolean(auth.currentUser));
   // "Today", fixed when the page opens
   const [today] = useState(() => new Date());
+  // The owner's billing rules (late fee), so the list says what the tenant sees
+  const billing = useOwnerBilling(auth.currentUser?.uid);
 
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -282,7 +285,7 @@ export default function TenantList() {
       const status = normalizeStatus(t.status);
       const property = propertyById.get(t.propertyId) || null;
       const tenantPayments = [...(paymentsByTenant.get(t.uid) || []), ...(t.uid !== t.id ? paymentsByTenant.get(t.id) || [] : [])];
-      const rent = rentStatusOf(t, tenantPayments, today, charges);
+      const rent = rentStatusOf(t, tenantPayments, today, charges, billing);
       const lease = leaseFlagOf(t, today);
 
       // out / late on the property's latest curfew check (tonight or last night)
@@ -313,7 +316,7 @@ export default function TenantList() {
         flags,
       };
     });
-  }, [tenants, payments, charges, logs, propertyById, today]);
+  }, [tenants, payments, charges, logs, propertyById, today, billing]);
 
   const attentionCounts = useMemo(() => {
     const counts = {};

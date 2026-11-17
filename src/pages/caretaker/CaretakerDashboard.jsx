@@ -27,16 +27,21 @@ import DeleteOutlineIcon from "@mui/icons-material/DeleteOutlined";
 import AddPhotoAlternateOutlinedIcon from "@mui/icons-material/AddPhotoAlternateOutlined";
 import SendOutlinedIcon from "@mui/icons-material/SendOutlined";
 import { onAuthStateChanged } from "firebase/auth";
-import { collection, deleteDoc, deleteField, doc, getDoc, onSnapshot, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
+import { arrayUnion, collection, deleteDoc, deleteField, doc, getDoc, onSnapshot, query, runTransaction, serverTimestamp, setDoc, updateDoc, where, writeBatch } from "firebase/firestore";
 import { reserveReceiptNo } from "../../utils/receipt";
 import { auth, db } from "../../config/firebase";
-import { notifyMaintenanceStatusChanged, notifyCashPaymentRecorded } from "../../services/notificationService";
+import { notifyMaintenanceStatusChanged, notifyMaintenancePriorityChanged, notifyCashPaymentRecorded } from "../../services/notificationService";
+import { categoryOf, priorityChangeEntry, priorityChangeFields } from "../../utils/maintenanceWorkflow";
+import { PriorityDialog, ResolveDialog } from "../../components/RepairWorkflow";
 import { uploadToCloudinary } from "../../utils/cloudinary";
 import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
 import { getPropertyCoverPhotoUrl } from "../../utils/getPropertyCoverPhotoUrl";
 import { normalizePayment } from "../../utils/normalizePayment";
 import { withoutRemoved } from "../../utils/accountState";
-import { billSnapshot, chargesFor, isActiveCharge, monthBill } from "../../utils/charges";
+import { isActiveCharge, snapshotOfBill } from "../../utils/charges";
+import { billForMonth } from "../../utils/tenantRent";
+import { useOwnerBilling } from "../../utils/billingSettings";
+import { propertyIdsOf, switchActiveProperty } from "../../utils/caretakerAssignment";
 import { BillBreakdown } from "../../components/Fees";
 import { logActivity } from "../../services/activityLog";
 import { BOTTOM_NAV_H, row, cardSx, TAB_IDS, NOTICE_DELAY_MS, CHECK_WORD, SMS_URL, HISTORY_NIGHTS, EMPTY_OBJ, CURFEW_WINDOW_MIN, NOTICE_TYPES, DEFAULT_CASH_NOTE, peso, localDateKey, periodLabel, normPeriod, rememberPendingMarks, forgetPendingMarks, readPendingMarks, getTimestampMillis, fmtDate, firstName, initials, payKind, isReceived, LIST_PAGE, ROOM_PAGE, NIGHT_PAGE, isInactiveStatus, addressText, AnimationStyles, Pill, EmptyState, Facts, useOnline, useToday, TabErrorBoundary, parseClock, useClock, buzz, ROOM_STATUS, roomStatusOf, sendNoticeSms } from "./caretakerParts";
@@ -84,6 +89,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const [uid, setUid] = useState("");
   const [profile, setProfile] = useState({ name: "Caretaker", permissions: {}, ownerUid: "" });
   const [property, setProperty] = useState(null);
+  // Every property this caretaker looks after (owner's caretaker rule), to switch between
+  const [myProperties, setMyProperties] = useState([]);
   const [userTenants, setUserTenants] = useState([]);
   const [legacyTenants, setLegacyTenants] = useState([]);
   const [tickets, setTickets] = useState([]);
@@ -119,6 +126,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const [tenantFilter, setTenantFilter] = useState("active");
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const [busyTicket, setBusyTicket] = useState("");
+  const [resolveTarget, setResolveTarget] = useState(null); // resolving needs resolution notes
+  const [priorityTarget, setPriorityTarget] = useState(null); // changing the priority needs a reason
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [payFilter, setPayFilter] = useState("all");
   const [payLimit, setPayLimit] = useState(20);
@@ -175,7 +184,11 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           }).catch((err) => console.warn("Couldn't sync the caretaker record:", err?.code || err));
         }
         const granted = data.permissions || {};
-        const propertyId = data.assignedPropertyId || data.propertyId || "";
+        // The property they work on now comes from their profile, which is also what the
+        // database rules use (a caretaker with several properties switches it there)
+        const own = userSnap.exists() ? userSnap.data() : {};
+        const propertyId = own.assignedPropertyId || data.assignedPropertyId || data.propertyId || "";
+        setMyProperties(propertyIdsOf({ ...own, assignedPropertyId: propertyId }).map((id) => ({ id, name: own.assignedPropertyNames?.[id] || data.assignedPropertyNames?.[id] || "" })));
         setUid(user.uid);
         setProfile({ name: data.name || data.fullName || user.displayName || "Caretaker", permissions: granted, ownerUid: data.ownerUid || data.invitedBy || "" });
 
@@ -349,13 +362,19 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   }, [tenants, search, tenantFilter]);
 
   // ---- derived: rent this month
-  // One month for one tenant: rent + the owner's fees, less what was received
+  // The owner's billing rules (late fee), the same ones the tenant's screen uses
+  const billing = useOwnerBilling(property?.ownerUid || profile.ownerUid || "");
+  // One month for one tenant: rent (less advance rent) + the owner's fees and
+  // late fee, less what was received. Same rules as the owner and tenant screens.
   const billOf = (t, period) =>
-    monthBill(
-      t.rent,
-      chargesFor(charges, t.id, period),
-      payments.filter((p) => p.tenantId === t.id && normPeriod(p.periodMonth) === normPeriod(period))
-    );
+    billForMonth({
+      tenant: t,
+      period,
+      charges,
+      payments: payments.filter((p) => p.tenantId === t.id),
+      settings: billing,
+      today: new Date(),
+    });
   const rentState = (() => {
     const rank = { paid: 4, pending: 3, partial: 2, rejected: 1 };
     const m = {};
@@ -490,13 +509,19 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       notify("You're offline. Connect to the internet to update requests.", "warning");
       return;
     }
+    // Resolving needs resolution notes, so it goes through its own dialog
+    if (next === "Resolved") {
+      setResolveTarget(t);
+      return;
+    }
     setBusyTicket(t.id);
     try {
       await updateDoc(doc(db, "maintenance_tickets", t.id), {
         status: next,
         updatedAt: serverTimestamp(),
         updatedBy: uid,
-        ...(next === "Resolved" ? { resolvedAt: serverTimestamp() } : {}),
+        // Back to open: the old fix (and the tenant's answer to it) no longer stands
+        ...(prev === "Resolved" ? { resolvedAt: deleteField(), tenantConfirmed: deleteField(), tenantConfirmedAt: deleteField() } : {}),
       });
       notifyMaintenanceStatusChanged(t, next, "caretaker");
       logAction("repair", `Changed repair request "${t.title || "Untitled"}" from ${prev} to ${next}`, { action: "repair.status", targetId: t.id, targetName: t.title || "", details: { from: prev, to: next } });
@@ -518,6 +543,54 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
     } finally {
       setBusyTicket("");
     }
+  };
+
+  // Mark resolved with resolution notes (from the Resolve dialog; errors show there)
+  const confirmResolve = async ({ notes }) => {
+    const t = resolveTarget;
+    if (!t) return;
+    if (!online) throw new Error("offline");
+    const prev = t.status || "Pending";
+    await updateDoc(doc(db, "maintenance_tickets", t.id), {
+      status: "Resolved",
+      resolutionNotes: notes,
+      resolvedAt: serverTimestamp(),
+      resolvedBy: uid,
+      resolvedByName: profile.name,
+      resolvedByRole: "caretaker",
+      // Each fix gets its own answer from the tenant
+      tenantConfirmed: deleteField(),
+      tenantConfirmedAt: deleteField(),
+      updatedAt: serverTimestamp(),
+      updatedBy: uid,
+    });
+    setResolveTarget(null);
+    notifyMaintenanceStatusChanged(t, "Resolved", "caretaker");
+    logAction("repair", `Resolved repair request "${t.title || "Untitled"}": ${notes}`, { action: "repair.status", targetId: t.id, targetName: t.title || "", details: { from: prev, to: "Resolved", resolutionNotes: notes } });
+    const tenantId = t.tenantUid || t.tenantId;
+    if (tenantId && property?.id) {
+      const text = `Your repair request "${t.title || "your request"}" was marked resolved: ${notes} Open Repairs to confirm it's fixed and rate the service, or tell us if it isn't.`;
+      pushNotices([{ userId: tenantId, kind: "notice", category: "maintenance", type: "success", title: "Repair update: Resolved", message: text }]).catch((err) => console.warn("Repair notice failed:", err?.code || err));
+    }
+    notify("Marked as resolved and moved to the archive.");
+  };
+
+  // Change the priority (the AHP category) with a reason (from the Priority dialog)
+  const savePriority = async ({ category, reason }) => {
+    const t = priorityTarget;
+    if (!t) return;
+    if (!online) throw new Error("offline");
+    const entry = priorityChangeEntry({ from: categoryOf(t), to: category, reason, actor: { uid, name: profile.name, role: "caretaker" } });
+    await updateDoc(doc(db, "maintenance_tickets", t.id), {
+      ...priorityChangeFields(t, category),
+      priorityChanges: arrayUnion(entry),
+      updatedAt: serverTimestamp(),
+      updatedBy: uid,
+    });
+    setPriorityTarget(null);
+    notifyMaintenancePriorityChanged(t, entry, "caretaker");
+    logAction("repair", `Changed the priority of "${t.title || "Untitled"}" from ${entry.fromTier} to ${entry.toTier}: ${reason}`, { action: "repair.priority", targetId: t.id, targetName: t.title || "", details: { from: entry.from, to: entry.to, reason } });
+    notify(`Priority changed to ${entry.toTier}.`);
   };
 
   // ---- curfew check + notices
@@ -804,7 +877,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         verificationStatus: "Approved",
         remarks: cash.notes.trim(),
         // What the month was billed at (rent + fees), for the receipt
-        bill: billSnapshot(cashTenant.rent, chargesFor(charges, cashTenant.id, cash.periodMonth)),
+        bill: snapshotOfBill(billOf(cashTenant, cash.periodMonth)),
         ownerUid: cashOwnerUid,
         paymentDate: new Date(`${cash.paymentDate}T12:00:00`),
         createdAt: serverTimestamp(),
@@ -1012,8 +1085,25 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
     canTenants && { key: "tenants", icon: <PeopleAltOutlinedIcon fontSize="small" />, label: tr("Tenants"), onClick: openDirectory },
   ].filter(Boolean);
 
+  // Work on another of their properties: the dashboard reloads for it (see the account listener above)
+  const switchProperty = async (id) => {
+    if (!uid || !id || id === property?.id) return;
+    if (!online) {
+      notify("You're offline. Connect to the internet to switch property.", "warning");
+      return;
+    }
+    try {
+      await switchActiveProperty(uid, id);
+    } catch (err) {
+      console.error("Couldn't switch property:", err);
+      notify("Couldn't switch property. Please try again.", "error");
+    }
+  };
+
   const overview = (
     <CaretakerOverviewTab
+      myProperties={myProperties}
+      switchProperty={switchProperty}
       activeTenants={activeTenants}
       activeTickets={activeTickets}
       address={address}
@@ -1170,6 +1260,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       archiveShown={archiveShown}
       busyTicket={busyTicket}
       changeTicketStatus={changeTicketStatus}
+      openPriority={setPriorityTarget}
       highTickets={highTickets}
       progressTickets={progressTickets}
       rankedTickets={rankedTickets}
@@ -1562,6 +1653,10 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       </Dialog>
 
       {/* ===================== RECORD CASH PAYMENT ===================== */}
+      {/* Repairs: resolving needs resolution notes; changing the priority needs a reason */}
+      <ResolveDialog ticket={resolveTarget} onClose={() => setResolveTarget(null)} onSave={confirmResolve} paper={dialogPaper} fullScreen={isPhone} />
+      <PriorityDialog ticket={priorityTarget} onClose={() => setPriorityTarget(null)} onSave={savePriority} paper={dialogPaper} fullScreen={isPhone} />
+
       <Dialog open={cashOpen} onClose={closeCash} fullScreen={isPhone} fullWidth maxWidth="sm" slotProps={{ paper: dialogPaper }}>
         <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
           {tr("Record cash payment")}

@@ -41,8 +41,11 @@ import { isReceiptable, issueMissingReceipts } from "../../utils/receipt";
 import { computePriority } from "../../utils/maintenancePrioritization";
 import { occupancyOf } from "../../utils/occupancy";
 import { normalizePayment } from "../../utils/normalizePayment";
-import { normalizeStatus, rentOf } from "../../utils/tenantRent";
-import { chargesFor, feesTotal, isActiveCharge, periodOfDate } from "../../utils/charges";
+import { billForMonth, normalizeStatus, rentOf } from "../../utils/tenantRent";
+import { chargesFor, describeRepeat, depositOutcomeLabel, feesTotal, feeTypeLabel, isActiveCharge, periodOfDate } from "../../utils/charges";
+import { feedbackState, feedbackSummary, stars } from "../../utils/maintenanceWorkflow";
+import { useOwnerBilling } from "../../utils/billingSettings";
+import PersonOutlineIcon from "@mui/icons-material/PersonOutlined";
 import { useAuth } from "../../context/AuthContext";
 import { withoutRemoved } from "../../utils/accountState";
 
@@ -137,6 +140,8 @@ const REPORTS = [
   { id: "occupancy", label: "Occupancy", desc: "Beds filled and open today", Icon: HomeWorkOutlinedIcon },
   { id: "maintenance", label: "Maintenance", desc: "Repairs and time to fix", Icon: BuildOutlinedIcon },
   { id: "curfew", label: "Curfew", desc: "Late and out nights", Icon: NightsStayOutlinedIcon },
+  // Panel revisions: one tenant's own report (statement of account and everything about them)
+  { id: "tenant", label: "Per tenant", desc: "One tenant's bills, payments and records", Icon: PersonOutlineIcon },
 ];
 
 // ------------------------------------------------------------
@@ -440,6 +445,9 @@ function buildMaintenance({ tickets, range }) {
     byProperty.set(k, cur);
   });
   const propList = [...byProperty.values()].sort((a, b) => b.total - a.total || a.name.localeCompare(b.name));
+  // Panel revisions: did tenants confirm the fixes, and how did they rate the service?
+  const feedback = feedbackSummary(rows);
+  const rated = rows.filter((t) => feedbackState(t) === "reviewed");
   const extra = [...new Set(rows.map((t) => t.status))].filter((s) => !TICKET_STATUSES.includes(s));
   const statusRows = [...TICKET_STATUSES, ...extra].map((s) => ({ status: s, count: rows.filter((t) => t.status === s).length }));
 
@@ -452,6 +460,9 @@ function buildMaintenance({ tickets, range }) {
       { label: "Still open", value: String(open.length), raw: open.length, tone: open.length ? "warning" : undefined },
       { label: "Resolved", value: String(resolved.length), raw: resolved.length, tone: resolved.length ? "success" : undefined },
       { label: "Avg. time to resolve", value: avg === null ? "—" : `${avg.toFixed(1)} days`, raw: avg === null ? "" : Number(avg.toFixed(1)) },
+      { label: "Confirmed fixed by tenants", value: feedback.resolved ? `${feedback.confirmed} of ${feedback.resolved}` : "—", raw: feedback.confirmed, tone: feedback.awaiting ? "warning" : feedback.confirmed ? "success" : undefined },
+      { label: "Average service rating", value: feedback.averageRating === null ? "—" : `${feedback.averageRating} / 5 (${feedback.reviews})`, raw: feedback.averageRating === null ? "" : feedback.averageRating },
+      { label: "Reopened by tenants", value: String(feedback.reopened), raw: feedback.reopened, tone: feedback.reopened ? "warning" : undefined },
     ],
     sections: [
       {
@@ -489,6 +500,8 @@ function buildMaintenance({ tickets, range }) {
           { key: "submitted", label: "Submitted" },
           { key: "closed", label: "Closed" },
           { key: "days", label: "Days", align: "right" },
+          { key: "confirmed", label: "Tenant confirmed" },
+          { key: "rating", label: "Rating" },
         ],
         rows: [...rows]
           .sort((a, b) => b.created - a.created)
@@ -511,9 +524,186 @@ function buildMaintenance({ tickets, range }) {
               closed: closedOn ? fmtDate(closedOn) : open ? "Still open" : "—",
               days_raw: d !== null ? Number(d.toFixed(1)) : "",
               days: d !== null ? (open ? `${d.toFixed(1)} so far` : d.toFixed(1)) : "—",
+              confirmed: { none: "—", awaiting: "Waiting", confirmed: "Yes", reviewed: "Yes" }[feedbackState(t)] + (Number(t.reopenCount) > 0 ? ` (reopened ${t.reopenCount}×)` : ""),
+              rating_raw: t.review?.rating || "",
+              rating: t.review?.rating ? stars(t.review.rating) : "—",
             };
           }),
         empty: "No requests in this period.",
+      },
+      {
+        title: "Service ratings",
+        note: "Tenants rate a repair after confirming it is fixed.",
+        columns: [
+          { key: "title", label: "Request" },
+          { key: "tenant", label: "Tenant" },
+          { key: "fixedBy", label: "Fixed by" },
+          { key: "rating", label: "Rating" },
+          { key: "comment", label: "Comment" },
+        ],
+        rows: rated.map((t) => ({
+          title: t.title || "Untitled request",
+          tenant: t.tenantName || "—",
+          fixedBy: [t.resolvedByName, t.resolvedByRole].filter(Boolean).join(", ") || "—",
+          rating_raw: t.review.rating,
+          rating: `${stars(t.review.rating)} ${t.review.rating}/5`,
+          comment: t.review.comment || "—",
+        })),
+        empty: "No ratings in this period.",
+      },
+    ],
+  };
+}
+
+// One tenant's report (panel revisions: "reports dapat may individual"): a
+// statement of account month by month, then their payments, fees and deposit,
+// repairs and curfew nights in the period.
+function buildTenantStatement({ tenant, payments, charges, tickets, logs, range, billing }) {
+  if (!tenant) {
+    return { id: "tenant", title: "Per tenant", headline: { label: "Choose a tenant", value: "—", raw: "" }, tiles: [], sections: [] };
+  }
+  const id = tenant.uid || tenant.id;
+  const mine = (x) => x.tenantId === id || x.tenantUid === id || x.tenantId === tenant.id;
+  const myPayments = payments.filter(mine);
+  const myCharges = charges.filter((c) => c.tenantId === id || c.tenantId === tenant.id);
+  const fromD = startOfDay(range.from);
+  const toD = endOfDay(range.to);
+  const now = new Date();
+
+  // Every month in the range, up to this month (no bills for the future)
+  const months = [];
+  for (let i = monthIdx(fromD); i <= Math.min(monthIdx(toD), monthIdx(now)); i += 1) months.push(periodOfDate(new Date(Math.floor(i / 12), i % 12, 1)));
+  const statement = months.map((period) => {
+    const bill = billForMonth({ tenant: { ...tenant, id }, period, charges: myCharges, payments: myPayments, settings: billing, today: now });
+    return { period, bill };
+  });
+  const billed = num(statement.reduce((t, s) => t + s.bill.total, 0));
+  const received = num(statement.reduce((t, s) => t + s.bill.received, 0));
+  const balance = num(statement.reduce((t, s) => t + s.bill.balance, 0));
+
+  const paid = myPayments
+    .map((p) => ({ ...p, on: toDate(p.paymentDate) || toDate(p.createdAt) }))
+    .filter((p) => p.on && p.on >= fromD && p.on <= toD)
+    .sort((a, b) => b.on - a.on);
+  const myTickets = tickets
+    .filter(mine)
+    .map((t) => ({ ...t, created: toDate(t.createdAt), status: ticketStatus(t.status) }))
+    .filter((t) => t.created && t.created >= fromD && t.created <= toD)
+    .sort((a, b) => b.created - a.created);
+  const nights = [];
+  logs.forEach((l) => {
+    const night = String(l.date || String(l.id || "").slice(-10)).slice(0, 10);
+    const e = (l.entries || {})[id] || (l.entries || {})[tenant.id];
+    if (e && /^\d{4}-\d{2}-\d{2}$/.test(night) && night >= range.from && night <= range.to && (e.status === "late" || e.status === "out")) nights.push({ night, status: e.status });
+  });
+  nights.sort((a, b) => (a.night < b.night ? 1 : -1));
+
+  return {
+    id: "tenant",
+    title: tenantName(tenant),
+    headline: { label: "Balance for these months", tone: balance > 0 ? "warning" : "success", value: peso(balance), raw: balance, hint: `${tenant.propertyName || ""}${tenant.roomNumber || tenant.roomId ? ` · Room ${tenant.roomNumber || tenant.roomId}` : ""}` },
+    tiles: [
+      { label: "Billed (rent + fees)", value: peso(billed), raw: billed },
+      { label: "Received", value: peso(received), raw: received, tone: received ? "success" : undefined },
+      { label: "Repair requests", value: String(myTickets.length), raw: myTickets.length },
+      { label: "Late / out nights", value: String(nights.length), raw: nights.length, tone: nights.length ? "warning" : undefined },
+    ],
+    sections: [
+      {
+        title: "Statement of account",
+        note: "Each month's rent (less any advance rent), fees and late fee, what was received, and what is left.",
+        columns: [
+          { key: "period", label: "Month" },
+          { key: "rent", label: "Rent", align: "right" },
+          { key: "fees", label: "Fees", align: "right" },
+          { key: "total", label: "Total", align: "right" },
+          { key: "received", label: "Received", align: "right" },
+          { key: "balance", label: "Balance", align: "right" },
+          { key: "status", label: "Status", chip: true },
+        ],
+        rows: statement.map(({ period, bill }) => ({
+          period,
+          rent_raw: bill.rent,
+          rent: peso(bill.rent),
+          fees_raw: bill.feeTotal,
+          fees: peso(bill.feeTotal),
+          total_raw: bill.total,
+          total: peso(bill.total),
+          received_raw: bill.received,
+          received: peso(bill.received),
+          balance_raw: bill.balance,
+          balance: peso(bill.balance),
+          status: bill.coveredByAdvance ? "Advance" : bill.settled ? "Paid" : bill.pending ? "Pending" : bill.total > 0 ? (bill.received > 0 ? "Partial" : "Unpaid") : "—",
+        })),
+        totals: { period: "Total", rent: "", fees: "", total: peso(billed), received: peso(received), balance: peso(balance), status: "" },
+        empty: "No months in this period.",
+      },
+      {
+        title: "Payments",
+        columns: [
+          { key: "date", label: "Date" },
+          { key: "period", label: "For" },
+          { key: "method", label: "Method" },
+          { key: "ref", label: "Reference" },
+          { key: "amount", label: "Amount", align: "right" },
+          { key: "status", label: "Status", chip: true },
+        ],
+        rows: paid.map((p) => ({
+          date_raw: ymd(p.on),
+          date: fmtDate(p.on),
+          period: p.periodMonth || "—",
+          method: p.paymentMethod || "—",
+          ref: p.referenceNumber || p.receiptNo || "—",
+          amount_raw: num(p.amount),
+          amount: peso(p.amount),
+          status: cap(String(p.status || "Pending").toLowerCase()),
+        })),
+        totals: { date: "Total", amount: peso(sumAmount(paid.filter((p) => ["paid", "partial"].includes(String(p.status || "").toLowerCase())))) },
+        empty: "No payments in this period.",
+      },
+      {
+        title: "Fees and deposit",
+        columns: [
+          { key: "label", label: "Fee" },
+          { key: "when", label: "When" },
+          { key: "amount", label: "Amount", align: "right" },
+          { key: "note", label: "Note" },
+        ],
+        rows: myCharges.map((c) => ({
+          label: c.label || feeTypeLabel(c.type),
+          when: describeRepeat(c),
+          amount_raw: num(c.amount),
+          amount: peso(c.amount),
+          note: c.type === "deposit" ? (c.depositStatus ? depositOutcomeLabel(c.depositStatus) : "Held") : c.note || "—",
+        })),
+        empty: "No extra fees or deposit.",
+      },
+      {
+        title: "Repairs",
+        columns: [
+          { key: "title", label: "Request" },
+          { key: "submitted", label: "Submitted" },
+          { key: "status", label: "Status", chip: true },
+          { key: "rating", label: "Rating" },
+        ],
+        rows: myTickets.map((t) => ({
+          title: t.title || "Untitled request",
+          submitted_raw: ymd(t.created),
+          submitted: fmtDate(t.created),
+          status: t.status,
+          rating_raw: t.review?.rating || "",
+          rating: t.review?.rating ? stars(t.review.rating) : "—",
+        })),
+        empty: "No repair requests in this period.",
+      },
+      {
+        title: "Curfew",
+        columns: [
+          { key: "night", label: "Night" },
+          { key: "status", label: "Status", chip: true },
+        ],
+        rows: nights.map((n) => ({ night_raw: n.night, night: fmtDate(startOfDay(n.night)), status: n.status === "out" ? "Out" : "Late" })),
+        empty: "No late or out nights in this period.",
       },
     ],
   };
@@ -1431,6 +1621,9 @@ export default function OwnerReports() {
 
   const [tab, setTab] = useState("all");
   const [propertyId, setPropertyId] = useState("all");
+  // Per-tenant report: which tenant (panel revisions)
+  const [reportTenantId, setReportTenantId] = useState("");
+  const billing = useOwnerBilling(uid);
   const [preset, setPreset] = useState("month");
   const [range, setRange] = useState(() => presetRange("month"));
 
@@ -1491,9 +1684,20 @@ export default function OwnerReports() {
     if (tab === "journal") return wrapSingle(buildJournal(args), "Cash receipts journal", true);
     if (tab === "maintenance") return wrapSingle(buildMaintenance(args), "Maintenance report");
     if (tab === "curfew") return wrapSingle(buildCurfew(args), "Curfew report");
+    if (tab === "tenant") {
+      const tenant = args.tenants.find((x) => (x.uid || x.id) === reportTenantId) || null;
+      return wrapSingle(buildTenantStatement({ ...args, tenant, billing }), tenant ? `Tenant report: ${tenantName(tenant)}` : "Tenant report", true);
+    }
     return wrapSingle(buildPayments(args), "Payments report", true);
-  }, [loading, data, tab, activePropertyId, range, rangeValid, selectedProperty]);
+  }, [loading, data, tab, activePropertyId, range, rangeValid, selectedProperty, reportTenantId, billing]);
 
+  const reportTenants = useMemo(
+    () =>
+      data.tenants
+        .filter((x) => activePropertyId === "all" || propOf(x) === activePropertyId)
+        .sort((a, b) => tenantName(a).localeCompare(tenantName(b))),
+    [data.tenants, activePropertyId]
+  );
   const needsDates = tab !== "occupancy";
   const rangeLabel = needsDates ? `${fmtDate(toDate(range.from))} to ${fmtDate(toDate(range.to))}` : `As of ${fmtDate(new Date())}`;
   const propertyLabel = selectedProperty ? selectedProperty.name : "All properties";
@@ -1607,7 +1811,7 @@ export default function OwnerReports() {
           sx={{
             position: "relative",
             display: { xs: "flex", sm: "grid" },
-            gridTemplateColumns: { sm: "repeat(3, minmax(0, 1fr))", lg: "repeat(6, minmax(0, 1fr))" },
+            gridTemplateColumns: { sm: "repeat(4, minmax(0, 1fr))", lg: "repeat(7, minmax(0, 1fr))" },
             gap: 1,
             overflowX: { xs: "auto", sm: "visible" },
             mx: { xs: -2, sm: 0 },
@@ -1663,14 +1867,28 @@ export default function OwnerReports() {
         {/* Filters */}
         <Box sx={{ position: "relative", mt: 2, pt: 2, borderTop: "1px solid", borderColor: "divider" }}>
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: needsDates ? "minmax(0, 1.4fr) repeat(2, minmax(0, 1fr))" : "minmax(0, 1fr)", md: needsDates ? "minmax(0, 1.4fr) repeat(2, minmax(0, 1fr))" : "minmax(0, 0.5fr)" } }}>
-            <TextField select size="small" label="Property" value={activePropertyId} onChange={(e) => setPropertyId(e.target.value)} fullWidth sx={fieldSx}>
-              <MenuItem value="all">All properties</MenuItem>
-              {data.properties.map((p) => (
-                <MenuItem key={p.id} value={p.id}>
-                  {p.name}
-                </MenuItem>
-              ))}
-            </TextField>
+            <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: tab === "tenant" ? { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" } : "minmax(0, 1fr)" }}>
+              <TextField select size="small" label="Property" value={activePropertyId} onChange={(e) => setPropertyId(e.target.value)} fullWidth sx={fieldSx}>
+                <MenuItem value="all">All properties</MenuItem>
+                {data.properties.map((p) => (
+                  <MenuItem key={p.id} value={p.id}>
+                    {p.name}
+                  </MenuItem>
+                ))}
+              </TextField>
+              {tab === "tenant" && (
+                <TextField select size="small" label="Tenant" value={reportTenants.some((x) => (x.uid || x.id) === reportTenantId) ? reportTenantId : ""} onChange={(e) => setReportTenantId(e.target.value)} fullWidth sx={fieldSx}>
+                  {reportTenants.length === 0 && <MenuItem value="" disabled>No tenants</MenuItem>}
+                  {reportTenants.map((x) => (
+                    <MenuItem key={x.uid || x.id} value={x.uid || x.id}>
+                      {tenantName(x)}
+                      {x.roomNumber || x.roomId ? ` · Room ${x.roomNumber || x.roomId}` : ""}
+                      {tenantState(x) === "inactive" ? " (former)" : ""}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              )}
+            </Box>
             {needsDates && (
               <Box sx={{ display: "contents", "@media (max-width:599.95px)": { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1.5 } }}>
                 <TextField label="From" type="date" size="small" value={range.from} onChange={setDate("from")} slotProps={{ inputLabel: { shrink: true } }} error={!rangeValid} fullWidth sx={fieldSx} />

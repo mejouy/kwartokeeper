@@ -33,6 +33,7 @@ import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
 import { holdsBed } from "../../../utils/occupancy";
 import { withoutRemoved } from "../../../utils/accountState";
 import { t } from "../../../i18n";
+import { customBedRates, rateRangeText } from "../../../utils/bedRates";
 
 const INK = "#202020";
 const ORANGE = "#ff4500";
@@ -706,7 +707,7 @@ export default function PropertyProfile() {
         {[
           ["Beds", capacityOf(selectedRoom)],
           ["Occupied", selectedTenants.length],
-          ["Rate / bed", selectedRoom.monthlyRatePerBed ? peso(selectedRoom.monthlyRatePerBed) : "—"],
+          ["Rate / bed", selectedRoom.monthlyRatePerBed ? (customBedRates(selectedRoom).length ? rateRangeText(selectedRoom) : peso(selectedRoom.monthlyRatePerBed)) : "—"],
         ].map(([label, value]) => (
           <Box key={label} sx={{ p: 1.25, borderRadius: R.sm, bgcolor: (t) => alpha(t.palette.background.paper, 0.45), minWidth: 0 }}>
             <Typography variant="caption" color="text.secondary" noWrap component="div" sx={{ fontWeight: 600 }}>{label}</Typography>

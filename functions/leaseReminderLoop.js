@@ -16,14 +16,21 @@ const isInactive = (record) =>
   );
 
 async function getPropertyCaretakers(db, propertyId, ownerId) {
+  // All of the owner's caretakers, then the ones looking after this property:
+  // the one they work on now, or any of theirs when the owner's caretaker rule
+  // allows several properties (assignedPropertyIds)
   const snapshot = await db
     .collection("caretakers")
     .where("ownerUid", "==", ownerId)
-    .where("assignedPropertyId", "==", propertyId)
     .get();
 
   return snapshot.docs
     .map((document) => ({ id: document.id, ...document.data() }))
+    .filter(
+      (caretaker) =>
+        caretaker.assignedPropertyId === propertyId ||
+        (Array.isArray(caretaker.assignedPropertyIds) && caretaker.assignedPropertyIds.includes(propertyId)),
+    )
     .filter((caretaker) => !isInactive(caretaker));
 }
 

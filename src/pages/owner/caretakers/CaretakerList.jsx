@@ -13,6 +13,8 @@ import {
   InputBase,
   IconButton,
   Tooltip,
+  MenuItem,
+  TextField,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import PersonAddAltOutlinedIcon from "@mui/icons-material/PersonAddAltOutlined";
@@ -34,6 +36,7 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../../config/firebase";
 import { useAuth } from "../../../context/AuthContext";
 import { withoutRemoved } from "../../../utils/accountState";
+import { ASSIGNMENT_MODES, assignmentConflicts, modeOf, propertyIdsOf, saveAssignmentMode, useAssignmentMode } from "../../../utils/caretakerAssignment";
 import { t } from "../../../i18n";
 
 const HEAD = '"Inter", sans-serif';
@@ -136,6 +139,7 @@ function CaretakerCard({ caretaker, onOpen }) {
           <ApartmentOutlinedIcon sx={{ fontSize: 17, color: caretaker.assignedPropertyId ? "text.secondary" : "warning.main" }} />
           <Typography variant="body2" sx={{ fontWeight: 600 }} noWrap>
             {caretaker.assignedPropertyId ? caretaker.propertyName || t("Unknown property") : t("No property assigned")}
+            {propertyIdsOf(caretaker).length > 1 ? ` +${propertyIdsOf(caretaker).length - 1}` : ""}
           </Typography>
         </Box>
         <StatusPill pending={pending} />
@@ -240,6 +244,23 @@ export default function CaretakerList() {
     };
   }, [currentUser?.uid]);
 
+  // How caretakers are assigned (owner's rule; default one caretaker ↔ one property)
+  const assignmentMode = useAssignmentMode(currentUser?.uid);
+  const [savingMode, setSavingMode] = useState(false);
+  const conflicts = useMemo(() => assignmentConflicts(assignmentMode, caretakers), [assignmentMode, caretakers]);
+  const changeMode = async (mode) => {
+    if (!currentUser?.uid || mode === assignmentMode) return;
+    setSavingMode(true);
+    try {
+      await saveAssignmentMode(currentUser.uid, mode);
+    } catch (err) {
+      console.error("Couldn't save the caretaker rule:", err);
+      setError("Couldn't save the caretaker rule. Please try again.");
+    } finally {
+      setSavingMode(false);
+    }
+  };
+
   const counts = useMemo(() => {
     const pending = caretakers.filter(isPending).length;
     return { all: caretakers.length, pending, active: caretakers.length - pending };
@@ -247,7 +268,7 @@ export default function CaretakerList() {
 
   // Active properties nobody is looking after
   const uncovered = useMemo(() => {
-    const covered = new Set(caretakers.map((c) => c.assignedPropertyId).filter(Boolean));
+    const covered = new Set(caretakers.flatMap(propertyIdsOf));
     return properties.filter(
       (p) => !covered.has(p.id) && !["inactive", "archived", "deactivated"].includes(String(p.status || "Active").trim().toLowerCase())
     );
@@ -327,6 +348,41 @@ export default function CaretakerList() {
       {error && (
         <Alert severity="error" sx={{ mb: 2, borderRadius: R.md }}>
           {error}
+        </Alert>
+      )}
+
+      {/* How caretakers are assigned to properties (panel revisions) */}
+      {!loading && !error && (
+        <Paper elevation={0} sx={{ ...panelSx, p: { xs: 2, sm: 2.5 }, mb: { xs: 2, sm: 2.5 }, display: "flex", flexDirection: { xs: "column", md: "row" }, gap: 2, alignItems: { md: "center" } }}>
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography sx={{ fontWeight: 800 }}>{t("Caretaker assignment")}</Typography>
+            <Typography variant="body2" color="text.secondary">
+              {t(modeOf(assignmentMode).hint)}
+            </Typography>
+          </Box>
+          <TextField
+            select
+            size="small"
+            value={assignmentMode}
+            disabled={savingMode}
+            onChange={(e) => changeMode(e.target.value)}
+            slotProps={{ htmlInput: { "aria-label": t("Caretaker assignment") } }}
+            sx={{ minWidth: { md: 300 } }}
+          >
+            {ASSIGNMENT_MODES.map((m) => (
+              <MenuItem key={m.key} value={m.key}>
+                {t(m.label)}
+                {m.key === "one_to_one" ? ` ${t("(default)")}` : ""}
+              </MenuItem>
+            ))}
+          </TextField>
+        </Paper>
+      )}
+      {!loading && !error && conflicts.length > 0 && (
+        <Alert severity="info" sx={{ mb: { xs: 2, sm: 2.5 }, borderRadius: R.md }}>
+          {t("Already set up before this rule:")}{" "}
+          {conflicts.map((c) => `${c.caretaker.name || c.caretaker.fullName || "A caretaker"} ${c.problem}`).join("; ")}.{" "}
+          {t("They keep working as they are. Edit them to follow the rule, or choose a rule that allows it.")}
         </Alert>
       )}
 

@@ -85,26 +85,29 @@ async function notifyUsers(userIds, payload, { includeActor = false } = {}) {
   );
 }
 
-// Active caretakers assigned to a property who may handle reports.
+// Active caretakers assigned to a property who may handle reports: those
+// working on it now (assignedPropertyId) and, when the owner's caretaker rule
+// allows several properties, those who also look after it (assignedPropertyIds).
 export async function getCaretakerUids(propertyId, { permission } = {}) {
   if (!propertyId) return [];
-  try {
-    const snapshot = await getDocs(
-      query(
-        collection(db, "users"),
-        where("role", "==", "caretaker"),
-        where("assignedPropertyId", "==", propertyId),
-      ),
-    );
-    return snapshot.docs
-      .map((document) => ({ uid: document.id, ...document.data() }))
-      .filter(isActive)
-      .filter((user) => !permission || user.permissions?.[permission] === true)
-      .map((user) => user.uid);
-  } catch (error) {
-    console.warn("Could not look up caretakers:", error?.code || error);
-    return [];
-  }
+  const users = collection(db, "users");
+  const read = (q) =>
+    getDocs(q)
+      .then((snapshot) => snapshot.docs.map((document) => ({ uid: document.id, ...document.data() })))
+      .catch((error) => {
+        console.warn("Could not look up caretakers:", error?.code || error);
+        return [];
+      });
+  const [working, alsoTheirs] = await Promise.all([
+    read(query(users, where("role", "==", "caretaker"), where("assignedPropertyId", "==", propertyId))),
+    // Needs the (role, assignedPropertyIds) index in firestore.indexes.json
+    read(query(users, where("role", "==", "caretaker"), where("assignedPropertyIds", "array-contains", propertyId))),
+  ]);
+  const byUid = new Map([...working, ...alsoTheirs].map((user) => [user.uid, user]));
+  return [...byUid.values()]
+    .filter(isActive)
+    .filter((user) => !permission || user.permissions?.[permission] === true)
+    .map((user) => user.uid);
 }
 
 // Reads the ticket fields we need (matches the maintenance_tickets documents).
@@ -257,6 +260,118 @@ export async function notifyMaintenanceFollowUp(ticket, actorRole = "tenant") {
     });
   } catch (error) {
     console.warn("notifyMaintenanceFollowUp failed:", error);
+  }
+}
+
+/**
+ * The caretaker or the owner changed a request's priority (its category).
+ * Notifies the owner, the property's caretakers and the tenant.
+ * `change` = { fromTier, toTier, reason }
+ */
+export async function notifyMaintenancePriorityChanged(ticket, change = {}, actorRole) {
+  try {
+    const t = readTicket(ticket);
+    // propertyId lets a caretaker notify the tenant (see canNotify in firestore.rules)
+    const extra = { ticketId: t.ticketId, propertyId: t.propertyId };
+    const reason = change.reason ? ` Reason: ${change.reason}` : "";
+    const caretakers = await getCaretakerUids(t.propertyId, {
+      permission: "handleReports",
+    });
+
+    await notifyUsers([t.ownerUid, ...caretakers], {
+      kind: "maintenance_update",
+      type: "info",
+      title: "Priority Changed",
+      message: `"${t.title}"${t.roomText} is now ${change.toTier} priority (was ${change.fromTier}).${reason}`,
+      ownerId: t.ownerUid,
+      actorRole,
+      extra,
+    });
+
+    await notifyUsers([t.tenantUid], {
+      kind: "notice",
+      type: "info",
+      title: "Repair priority updated",
+      message: `Your request "${t.title}" was checked and is now ${change.toTier} priority.${reason}`,
+      ownerId: t.ownerUid,
+      actorRole,
+      extra,
+    });
+  } catch (error) {
+    console.warn("notifyMaintenancePriorityChanged failed:", error);
+  }
+}
+
+/**
+ * The tenant confirmed that a resolved request is fixed (maybe with a rating).
+ * Notifies the owner and the property's caretakers.
+ */
+export async function notifyMaintenanceConfirmed(ticket, review = null) {
+  try {
+    const t = readTicket(ticket);
+    const caretakers = await getCaretakerUids(t.propertyId, {
+      permission: "handleReports",
+    });
+    const rating = review?.rating ? ` and rated the service ${review.rating}/5` : "";
+    await notifyUsers([t.ownerUid, ...caretakers], {
+      kind: "maintenance_update",
+      type: "success",
+      title: "Fix Confirmed",
+      message: `${t.tenantName || "The tenant"} confirmed "${t.title}"${t.roomText} is fixed${rating}.`,
+      ownerId: t.ownerUid,
+      actorRole: "tenant",
+      extra: { ticketId: t.ticketId },
+    });
+  } catch (error) {
+    console.warn("notifyMaintenanceConfirmed failed:", error);
+  }
+}
+
+/**
+ * The tenant says a resolved request is not fixed yet; it is back to Pending.
+ * Notifies the owner and the property's caretakers.
+ */
+export async function notifyMaintenanceReopened(ticket, reason = "") {
+  try {
+    const t = readTicket(ticket);
+    const caretakers = await getCaretakerUids(t.propertyId, {
+      permission: "handleReports",
+    });
+    await notifyUsers([t.ownerUid, ...caretakers], {
+      kind: "maintenance_urgent",
+      type: "warning",
+      title: "Repair Reopened",
+      message: `${t.tenantName || "The tenant"} says "${t.title}"${t.roomText} is not fixed yet.${reason ? ` ${reason}` : ""}`,
+      ownerId: t.ownerUid,
+      actorRole: "tenant",
+      extra: { ticketId: t.ticketId },
+    });
+  } catch (error) {
+    console.warn("notifyMaintenanceReopened failed:", error);
+  }
+}
+
+/**
+ * The tenant rated the service after confirming the fix.
+ * Notifies the owner and the property's caretakers.
+ */
+export async function notifyMaintenanceReviewed(ticket, review = {}) {
+  try {
+    const t = readTicket(ticket);
+    const caretakers = await getCaretakerUids(t.propertyId, {
+      permission: "handleReports",
+    });
+    await notifyUsers([t.ownerUid, ...caretakers], {
+      kind: "maintenance_update",
+      type: "info",
+      title: "New Service Rating",
+      message: `${t.tenantName || "The tenant"} rated the repair of "${t.title}"${t.roomText} ${review.rating}/5.${review.comment ? ` "${review.comment}"` : ""}`,
+      ownerId: t.ownerUid,
+      actorRole: "tenant",
+      extra: { ticketId: t.ticketId },
+    });
+  } catch (error) {
+    console.warn("notifyMaintenanceReviewed failed:", error);
   }
 }
 

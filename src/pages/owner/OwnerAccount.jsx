@@ -36,6 +36,8 @@ import { downloadOwnerBackup } from "../../utils/backup";
 import ReceiptLongOutlinedIcon from "@mui/icons-material/ReceiptLongOutlined";
 import StorefrontOutlinedIcon from "@mui/icons-material/StorefrontOutlined";
 import ShieldOutlinedIcon from "@mui/icons-material/ShieldOutlined";
+import RequestQuoteOutlinedIcon from "@mui/icons-material/RequestQuoteOutlined";
+import OwnerBillingRules from "./OwnerBillingRules";
 import UploadFileIcon from "@mui/icons-material/UploadFile";
 import Visibility from "@mui/icons-material/Visibility";
 import VisibilityOff from "@mui/icons-material/VisibilityOff";
@@ -82,6 +84,7 @@ const VAT_OPTIONS = [
 const SECTIONS = [
   { id: "profile", label: t("Profile"), Icon: PersonOutlineIcon },
   { id: "business", label: t("Business & receipts"), Icon: StorefrontOutlinedIcon },
+  { id: "billing", label: t("Billing rules"), Icon: RequestQuoteOutlinedIcon },
   { id: "security", label: t("Sign-in & security"), Icon: ShieldOutlinedIcon },
   { id: "data", label: t("Your data"), Icon: BackupOutlinedIcon },
   { id: "verification", label: t("Verification"), Icon: VerifiedUserOutlinedIcon },
@@ -863,6 +866,9 @@ export default function OwnerAccount() {
               </Box>
             </Section>
           </Box>
+
+          {/* ───── Billing rules (due dates, own fee types, late fee, move-in payments) ───── */}
+          <OwnerBillingRules ownerUid={user.uid} Section={Section} SaveButton={SaveButton} icon={RequestQuoteOutlinedIcon} notify={notify} />
 
           {/* ───── Sign-in & security ───── */}
           {hasPassword ? (
