@@ -155,11 +155,9 @@ Push notifications on Android need `android/app/google-services.json` from Fireb
 4. Make the first admin: create the user in Authentication, then in Firestore create `users/{uid}` with `role: "admin"`.
 5. Cloudinary: the cloud name and unsigned upload preset are in `src/utils/cloudinary.js`.
 6. Host the web app. This project is on **Vercel** (project `kwartokeeper-app`, live at https://kwartokeeper-app.vercel.app):
-   pushes to `dev` make a preview deployment; production is deployed with
-
-   ```bash
-   npx vercel --prod
-   ```
+   pushes to `dev` make a preview deployment, and pushing to `main` deploys production automatically.
+   Deploy production from `main` only (merge `dev` into `main`, then push), so settings kept there, such as the
+   page routing in `vercel.json`, are always included.
 
    The `VITE_FIREBASE_*` values from section 4 must also be set in the Vercel project's environment variables.
    Deploy the database rules (step 3) whenever `firestore.rules` changes, together with the app.
