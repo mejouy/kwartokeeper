@@ -792,7 +792,9 @@ export default function RegisterTenant() {
           bgcolor: "background.default",
         }}
       >
-        <Box sx={{ flex: 1, minHeight: 0, overflowY: { xs: "auto", md: "visible" }, display: "flex", justifyContent: "center", px: { xs: 3, md: 6 }, pt: { xs: 4, md: 6 } }}>
+        {/* Phones: this part scrolls above the buttons. Laptops: the whole column scrolls, so this part
+            keeps its full height (squeezed, its fields spilled out behind the sticky buttons) */}
+        <Box sx={{ flex: { xs: "1 1 0", md: "1 0 auto" }, minHeight: { xs: 0, md: "auto" }, overflowY: { xs: "auto", md: "visible" }, display: "flex", justifyContent: "center", px: { xs: 3, md: 6 }, pt: { xs: 4, md: 6 } }}>
           <Box sx={{ width: "100%", maxWidth: 760 }}>
             {alertMessage && (
               <Alert severity="error" sx={{ mb: 3 }}>
@@ -1109,6 +1111,8 @@ export default function RegisterTenant() {
           sx={{
             position: { xs: "static", md: "sticky" },
             bottom: { md: 0 },
+            // Above the fields scrolling under it (their floating labels sit on a layer of their own)
+            zIndex: 2,
             bgcolor: "background.default",
             display: "flex",
             justifyContent: "center",
@@ -1117,7 +1121,8 @@ export default function RegisterTenant() {
             pt: 2,
           }}
         >
-          <Box sx={{ width: "100%", maxWidth: 760, display: "flex", justifyContent: "space-between", gap: 2, pt: 2, borderTop: "1px solid", borderColor: "divider" }}>
+          {/* Same width as the form fields above (700 wide, less their 16px sides) */}
+          <Box sx={{ width: "100%", maxWidth: { xs: 760, sm: 668 }, display: "flex", justifyContent: "space-between", gap: 2, pt: 2, borderTop: "1px solid", borderColor: "divider" }}>
             <Button variant="outlined" onClick={handleBack} disabled={loading} sx={{ py: 1.5, px: 3, fontWeight: 600 }}>
               {step === 0 ? t("Cancel") : t("Back")}
             </Button>

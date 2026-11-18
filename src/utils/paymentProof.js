@@ -17,7 +17,6 @@ export const REF_RULES = {
   GCash: { test: (r) => /^\d{13}$/.test(r), hint: "GCash reference numbers have 13 digits." },
   Maya: { test: (r) => /^[A-Z0-9]{6,20}$/.test(r), hint: "Maya reference numbers are 6 to 20 letters and numbers." },
   "QR Ph": { test: (r) => /^[A-Z0-9]{6,30}$/.test(r), hint: "Reference numbers are 6 to 30 letters and numbers." },
-  "Bank transfer": { test: (r) => /^[A-Z0-9]{6,30}$/.test(r), hint: "Reference numbers are 6 to 30 letters and numbers." },
 };
 
 /** "" when the reference looks right for the method, else what is off. */

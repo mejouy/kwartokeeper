@@ -2,10 +2,13 @@
 //
 // Owner payments, in two tabs:
 //   "Rent"              — who has paid, what needs review, record a payment
-//   "Payment accounts"  — where tenants send rent (GCash / Maya / QR Ph, each with a QR image,
-//                          and bank transfer). Each method can have more than one account
-//                          (panel revisions: "add more payment accounts"): the first one plus
-//                          paymentMethods[method].more = [{ id, accountName, accountNumber, bankName, qrUrl }]
+//   "Payment accounts"  — where tenants send rent. Every account is a QR code the owner
+//                          uploads (tenants scan it to pay): GCash, Maya, QR Ph, and other
+//                          e-wallets or QR payment gateways the owner names (GrabPay,
+//                          GrabPay...). Bank transfers are outside the system's scope.
+//                          Each method can have more than one account (panel revisions:
+//                          "support multiple payment accounts/gateways"): the first one plus
+//                          paymentMethods[method].more = [{ id, accountName, accountNumber, providerName, qrUrl }]
 //
 // The accounts are saved on the property document (properties/{id}.paymentMethods
 // and .paymentNote). The tenant dashboard reads them from there.
@@ -65,7 +68,6 @@ import SaveOutlinedIcon from "@mui/icons-material/SaveOutlined";
 import SmartphoneOutlinedIcon from "@mui/icons-material/SmartphoneOutlined";
 import VisibilityOutlinedIcon from "@mui/icons-material/VisibilityOutlined";
 import AccountBalanceWalletOutlinedIcon from "@mui/icons-material/AccountBalanceWalletOutlined";
-import AccountBalanceOutlinedIcon from "@mui/icons-material/AccountBalanceOutlined";
 import CheckCircleIcon from "@mui/icons-material/CheckCircle";
 import PendingActionsOutlinedIcon from "@mui/icons-material/PendingActionsOutlined";
 import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
@@ -204,22 +206,23 @@ const METHOD_DEFS = [
     qrHint: "Upload your QR Ph code. Tenants can scan it from any bank or e-wallet app.",
   },
   {
-    key: "Bank",
-    label: tr("Bank transfer"),
-    kind: "bank",
-    icon: AccountBalanceOutlinedIcon,
-    qrHint: "Optional: your bank's QR code, if it has one.",
+    key: "Other",
+    label: tr("Other e-wallet or QR"),
+    kind: "other",
+    icon: QrCode2Icon,
+    qrHint: "Upload the QR code from that e-wallet or payment app (for example GrabPay or Coins.ph).",
   },
 ];
+const MAX_PROVIDER_NAME = 30;
 const MAX_EXTRA_ACCOUNTS = 4; // more accounts per method, after the first
 
-const emptyAccount = () => ({ id: Math.random().toString(36).slice(2, 9), accountName: "", accountNumber: "", bankName: "", qrUrl: "" });
-const emptyMethod = () => ({ enabled: false, accountName: "", accountNumber: "", bankName: "", qrUrl: "", more: [] });
+const emptyAccount = () => ({ id: Math.random().toString(36).slice(2, 9), accountName: "", accountNumber: "", providerName: "", qrUrl: "" });
+const emptyMethod = () => ({ enabled: false, accountName: "", accountNumber: "", providerName: "", qrUrl: "", more: [] });
 const readAccount = (r) => ({
   id: String(r?.id || Math.random().toString(36).slice(2, 9)),
   accountName: String(r?.accountName || ""),
   accountNumber: String(r?.accountNumber || ""),
-  bankName: String(r?.bankName || ""),
+  providerName: String(r?.providerName || ""),
   qrUrl: String(r?.qrUrl || ""),
 });
 
@@ -232,7 +235,7 @@ const normalizeMethods = (raw) => {
       enabled: Boolean(r.enabled),
       accountName: String(r.accountName || ""),
       accountNumber: String(r.accountNumber || ""),
-      bankName: String(r.bankName || ""),
+      providerName: String(r.providerName || ""),
       qrUrl: String(r.qrUrl || ""),
       more: (Array.isArray(r.more) ? r.more : []).map(readAccount),
     };
@@ -245,10 +248,8 @@ const draftFromProperty = (p) => ({
   note: String(p?.paymentNote || ""),
 });
 
-// A property counts as "set up" when at least one method is on and has something to pay to
-const methodUsable = (m) => Boolean(m?.enabled && (String(m.accountNumber || "").trim() || m.qrUrl));
-// Bank account numbers: digits, spaces and dashes, 6 to 20 digits
-const validBankNumber = (v) => /^[\d\s-]+$/.test(String(v || "").trim()) && String(v).replace(/\D/g, "").length >= 6 && String(v).replace(/\D/g, "").length <= 20;
+// A property counts as "set up" when at least one method is on and has a QR code to scan
+const methodUsable = (m) => Boolean(m?.enabled && m.qrUrl);
 const hasPaymentSetup = (p) => METHOD_DEFS.some((d) => methodUsable(p?.paymentMethods?.[d.key]));
 
 // Philippine mobile numbers: 09XXXXXXXXX (also accepts +63 9XXXXXXXXX)
@@ -274,22 +275,20 @@ const validateAccounts = (draft) => {
       if (!m.accountNumber.trim()) e.accountNumber = "Enter the mobile number.";
       else if (!normalizeMobile(m.accountNumber)) e.accountNumber = "Use a Philippine mobile number, like 0917 123 4567.";
     }
-    if (d.kind === "bank") {
-      if (!m.bankName.trim()) e.bankName = "Enter the bank, e.g. BPI or BDO.";
-      if (!m.accountNumber.trim()) e.accountNumber = "Enter the account number.";
-      else if (!validBankNumber(m.accountNumber)) e.accountNumber = "Use the account number's digits (6 to 20).";
+    if (d.kind === "other") {
+      if (!m.providerName.trim()) e.providerName = "Enter the e-wallet or payment app, e.g. GrabPay.";
+      else if (m.providerName.trim().length > MAX_PROVIDER_NAME) e.providerName = `Keep this under ${MAX_PROVIDER_NAME} characters.`;
     }
-    // Tenants pay by scanning, so every e-wallet and QR Ph account needs its QR image (a bank's is optional)
-    if (!m.qrUrl && d.kind !== "bank") e.qrUrl = d.kind === "qrph" ? "Upload your QR Ph code so tenants can scan it." : `Upload your ${d.label} QR code so tenants can scan it.`;
+    // Tenants pay by scanning, so every account needs its QR image
+    if (!m.qrUrl) e.qrUrl = d.kind === "qrph" ? "Upload your QR Ph code so tenants can scan it." : d.kind === "other" ? "Upload this account's QR code so tenants can scan it." : `Upload your ${d.label} QR code so tenants can scan it.`;
     // More accounts of the same method: a name, and a number or a QR to pay to
     m.more.forEach((a, i) => {
       const ae = {};
       if (!a.accountName.trim()) ae.accountName = "Enter the account name.";
       if (d.kind === "wallet" && a.accountNumber.trim() && !normalizeMobile(a.accountNumber)) ae.accountNumber = "Use a Philippine mobile number.";
       if (d.kind === "wallet" && !a.accountNumber.trim()) ae.accountNumber = "Enter the mobile number.";
-      if (d.kind === "bank" && !a.bankName.trim()) ae.bankName = "Enter the bank.";
-      if (d.kind === "bank" && !validBankNumber(a.accountNumber)) ae.accountNumber = "Use the account number's digits (6 to 20).";
-      if (d.kind === "qrph" && !a.qrUrl) ae.qrUrl = "Upload this account's QR Ph code.";
+      if (d.kind === "other" && !a.providerName.trim()) ae.providerName = "Enter the e-wallet or payment app.";
+      if (!a.qrUrl) ae.qrUrl = d.kind === "qrph" ? "Upload this account's QR Ph code." : "Upload this account's QR code.";
       if (Object.keys(ae).length) e[`more${i}`] = ae;
     });
     if (Object.keys(e).length) errors[d.key] = e;
@@ -304,16 +303,16 @@ const cleanMethods = (methods) => {
   METHOD_DEFS.forEach((d) => {
     const m = methods[d.key];
     const number = m.accountNumber.trim();
-    const tidy = (a) => (d.kind === "wallet" ? normalizeMobile(a.accountNumber.trim()) || a.accountNumber.trim() : d.kind === "bank" ? a.accountNumber.trim() : "");
+    const tidy = (a) => (d.kind === "wallet" ? normalizeMobile(a.accountNumber.trim()) || a.accountNumber.trim() : "");
     out[d.key] = {
       enabled: Boolean(m.enabled),
       accountName: m.accountName.trim(),
-      accountNumber: d.kind === "wallet" ? normalizeMobile(number) || number : d.kind === "bank" ? number : "",
-      ...(d.kind === "bank" ? { bankName: m.bankName.trim() } : {}),
+      accountNumber: d.kind === "wallet" ? normalizeMobile(number) || number : "",
+      ...(d.kind === "other" ? { providerName: m.providerName.trim().slice(0, MAX_PROVIDER_NAME) } : {}),
       qrUrl: m.qrUrl || "",
       more: m.more
         .filter((a) => a.accountName.trim())
-        .map((a) => ({ id: a.id, accountName: a.accountName.trim(), accountNumber: tidy(a), ...(d.kind === "bank" ? { bankName: a.bankName.trim() } : {}), qrUrl: a.qrUrl || "" })),
+        .map((a) => ({ id: a.id, accountName: a.accountName.trim(), accountNumber: tidy(a), ...(d.kind === "other" ? { providerName: a.providerName.trim().slice(0, MAX_PROVIDER_NAME) } : {}), qrUrl: a.qrUrl || "" })),
     };
   });
   return out;
@@ -359,9 +358,9 @@ function MethodPreviewCard({ def, m }) {
           {prettyMobile(normalizeMobile(m.accountNumber) || m.accountNumber) || "—"}
         </Typography>
       )}
-      {def.kind === "bank" && (
+      {def.kind === "other" && (
         <Typography variant="body2" color="text.secondary">
-          {[m.bankName, m.accountNumber].filter(Boolean).join(" · ") || "—"}
+          {m.providerName || "—"}
         </Typography>
       )}
       {(m.more || []).filter((a) => a.accountName.trim()).length > 0 && (
@@ -423,8 +422,8 @@ function ExtraAccounts({ def, accounts, errors, uploadingKey, onChange, onPickQr
               </Button>
             </Box>
             <TextField size="small" required label={tr("Account name")} value={a.accountName} onChange={(ev) => set(a.id, { accountName: ev.target.value })} error={Boolean(e.accountName)} helperText={e.accountName || ""} fullWidth slotProps={{ htmlInput: { maxLength: 60 } }} />
-            {def.kind === "bank" && (
-              <TextField size="small" required label={tr("Bank")} value={a.bankName} onChange={(ev) => set(a.id, { bankName: ev.target.value })} error={Boolean(e.bankName)} helperText={e.bankName || ""} fullWidth slotProps={{ htmlInput: { maxLength: 40 } }} />
+            {def.kind === "other" && (
+              <TextField size="small" required label={tr("E-wallet or payment app")} placeholder={tr("e.g. GrabPay")} value={a.providerName} onChange={(ev) => set(a.id, { providerName: ev.target.value })} error={Boolean(e.providerName)} helperText={e.providerName || ""} fullWidth slotProps={{ htmlInput: { maxLength: MAX_PROVIDER_NAME } }} />
             )}
             {def.kind !== "qrph" && (
               <TextField
@@ -626,7 +625,7 @@ function PaymentAccountsPanel({ properties, showToast }) {
         <Box sx={{ flex: "1 1 260px", minWidth: 0 }}>
           <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800, fontSize: "1.1rem", lineHeight: 1.3 }}>{tr("Where tenants send rent")}</Typography>
           <Typography variant="body2" color="text.secondary">
-            {tr("Tenants see these accounts when they tap")}{" "}<strong>{tr("Pay rent")}</strong>{tr(". Upload the QR code from your own GCash or Maya app, or a QR Ph code from your bank.")}
+            {tr("Tenants see these accounts when they tap")}{" "}<strong>{tr("Pay rent")}</strong>{tr(". Upload the QR code from your own GCash or Maya app, a QR Ph code, or the QR of another e-wallet or payment app you use (e.g. GrabPay). Tenants scan it to pay.")}
           </Typography>
           <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: 0.5 }}>
             <Box component="span" sx={{ color: "error.main" }}>*</Box>{" "}{tr("Required for each method you turn on.")}
@@ -719,18 +718,25 @@ function PaymentAccountsPanel({ properties, showToast }) {
                       slotProps={{ htmlInput: { inputMode: "tel", maxLength: 25 } }}
                     />
                   )}
-                  {def.kind === "bank" && (
-                    <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(0, 1fr) minmax(0, 1.3fr)" }, gap: 2 }}>
-                      <TextField required label={tr("Bank")} placeholder={tr("e.g. BPI")} value={m.bankName} onChange={(ev) => setMethod(def.key, { bankName: ev.target.value })} error={Boolean(e.bankName)} helperText={e.bankName || ""} fullWidth slotProps={{ htmlInput: { maxLength: 40 } }} />
-                      <TextField required label={tr("Account number")} value={m.accountNumber} onChange={(ev) => setMethod(def.key, { accountNumber: ev.target.value })} error={Boolean(e.accountNumber)} helperText={e.accountNumber || ""} fullWidth slotProps={{ htmlInput: { inputMode: "numeric", maxLength: 30 } }} />
-                    </Box>
+                  {def.kind === "other" && (
+                    <TextField
+                      required
+                      label={tr("E-wallet or payment app")}
+                      placeholder={tr("e.g. GrabPay")}
+                      value={m.providerName}
+                      onChange={(ev) => setMethod(def.key, { providerName: ev.target.value })}
+                      error={Boolean(e.providerName)}
+                      helperText={e.providerName || tr("Tenants see this name when they pay.")}
+                      fullWidth
+                      slotProps={{ htmlInput: { maxLength: MAX_PROVIDER_NAME } }}
+                    />
                   )}
 
                   {/* QR image */}
                   <Box>
                     <Typography variant="body2" sx={{ fontWeight: 700, mb: 0.5 }}>
                       {tr("QR code")}{" "}
-                      {def.kind !== "bank" && <Box component="span" aria-hidden="true" sx={{ color: "error.main" }}>*</Box>}
+                      <Box component="span" aria-hidden="true" sx={{ color: "error.main" }}>*</Box>
                     </Typography>
                     <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1 }}>
                       {def.qrHint}

@@ -840,9 +840,9 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
       propertyName: tenantInfo.propertyName,
       roomNumber: tenantInfo.roomNumber,
       amount: months.length > 1 ? monthDue(periodMonth) : amountNum,
-      paymentMethod: activePayMethod?.method === "Bank" ? "Bank transfer" : activePayMethod?.method || payMethodKey,
+      paymentMethod: activePayMethod?.method || payMethodKey,
       // Which of the owner's accounts it was sent to (owners can have several)
-      ...(activePayMethod ? { paymentAccount: { name: activePayMethod.accountName, number: activePayMethod.accountNumber, ...(activePayMethod.bankName ? { bank: activePayMethod.bankName } : {}) } } : {}),
+      ...(activePayMethod ? { paymentAccount: { name: activePayMethod.accountName, number: activePayMethod.accountNumber } } : {}),
       periodMonth,
       // What the month was billed at (rent + fees), for the owner's review and the receipt
       bill: snapshotOfBill(billFor(periodMonth)),
@@ -984,7 +984,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
   const payMethodKey = activePayMethod?.key || selectedPaymentMethod || "GCash";
 
   // Checks before sending (panel revisions): never block, only warn. The owner sees them too.
-  const payMethodName = activePayMethod?.method === "Bank" ? "Bank transfer" : activePayMethod?.method || payMethodKey;
+  const payMethodName = activePayMethod?.method || payMethodKey;
   const dueForPayment = multiMonth ? totalDue : monthDue(sortedPayMonths[0] || currentPeriod);
   const proofWarnings = (() => {
     const list = [];
@@ -1531,7 +1531,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                       <Box sx={{ ...row, justifyContent: "center", gap: 1, mb: 1 }}>
                         <QrCode2Icon color="primary" />
                         <Typography sx={{ fontWeight: 800 }}>
-                          {activePayMethod.kind === "wallet" ? `Scan with ${activePayMethod.methodLabel || activePayMethod.label}` : activePayMethod.kind === "bank" ? t("Send by bank transfer") : t("Scan with any bank or e-wallet app")}
+                          {activePayMethod.kind === "qrph" ? t("Scan with any bank or e-wallet app") : `Scan with ${activePayMethod.methodLabel || activePayMethod.label}`}
                         </Typography>
                       </Box>
 
@@ -1560,7 +1560,7 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                                 {t("Save QR to my phone")}
                               </Button>
                               <Typography variant="caption" color="text.secondary" component="div" sx={{ mb: 1.25 }}>
-                                {t("Paying from this phone? Save the QR, then in your")}{" "}{activePayMethod.kind === "wallet" ? activePayMethod.methodLabel || activePayMethod.label : t("bank or e-wallet")}{" "}{t("app choose")}{" "}<strong>{t("Pay QR → Upload from gallery")}</strong>.
+                                {t("Paying from this phone? Save the QR, then in your")}{" "}{activePayMethod.kind === "qrph" ? t("bank or e-wallet") : activePayMethod.methodLabel || activePayMethod.label}{" "}{t("app choose")}{" "}<strong>{t("Pay QR → Upload from gallery")}</strong>.
                               </Typography>
                             </Box>
                           )}
@@ -1576,16 +1576,6 @@ export default function TenantDashboard({ activeTab = "overview", onNavigateTab 
                             {prettyMobile(activePayMethod.accountNumber)}
                           </Typography>
                           <IconButton size="small" aria-label={t("Copy number")} onClick={() => copyText(activePayMethod.accountNumber, "Number copied.")}>
-                            <ContentCopyIcon sx={{ fontSize: 16 }} />
-                          </IconButton>
-                        </Box>
-                      )}
-                      {activePayMethod.kind === "bank" && activePayMethod.accountNumber && (
-                        <Box sx={{ ...row, justifyContent: "center", gap: 0.5 }}>
-                          <Typography variant="body2" color="text.secondary">
-                            {[activePayMethod.bankName, activePayMethod.accountNumber].filter(Boolean).join(" · ")}
-                          </Typography>
-                          <IconButton size="small" aria-label={t("Copy account number")} onClick={() => copyText(activePayMethod.accountNumber, "Account number copied.")}>
                             <ContentCopyIcon sx={{ fontSize: 16 }} />
                           </IconButton>
                         </Box>

@@ -73,7 +73,8 @@ export const PAY_METHOD_DEFS = [
   { key: "GCash", label: "GCash", kind: "wallet" },
   { key: "Maya", label: tr("Maya"), kind: "wallet" },
   { key: "QR Ph", label: tr("QR Ph"), kind: "qrph" },
-  { key: "Bank", label: tr("Bank transfer"), kind: "bank" },
+  // Other e-wallets / QR payment gateways the owner names (GrabPay, Coins.ph...)
+  { key: "Other", label: tr("Other e-wallet"), kind: "other" },
 ];
 
 // Every account the owner switched on AND gave something to pay to: the first
@@ -83,22 +84,30 @@ export const readPayMethods = (raw) =>
   PAY_METHOD_DEFS.flatMap((d) => {
     const m = raw?.[d.key] || {};
     if (!m.enabled) return [];
-    const one = (a, i) => ({
-      ...d,
-      key: i === 0 ? d.key : `${d.key}#${a?.id || i}`,
-      method: d.key,
-      methodLabel: d.label,
-      enabled: true,
-      accountName: String(a?.accountName || ""),
-      accountNumber: String(a?.accountNumber || ""),
-      bankName: String(a?.bankName || ""),
-      qrUrl: String(a?.qrUrl || ""),
-    });
-    const usable = [one(m, 0), ...(Array.isArray(m.more) ? m.more : []).map((a, i) => one(a, i + 1))].filter((a) => a.accountNumber.trim() || a.qrUrl);
+    const one = (a, i) => {
+      // An "other" gateway goes by the name the owner gave it, and payments are saved under it
+      const provider = d.kind === "other" ? String(a?.providerName || "").trim() : "";
+      return {
+        ...d,
+        key: i === 0 ? d.key : `${d.key}#${a?.id || i}`,
+        method: provider || d.key,
+        methodLabel: provider || d.label,
+        enabled: true,
+        accountName: String(a?.accountName || ""),
+        accountNumber: String(a?.accountNumber || ""),
+        qrUrl: String(a?.qrUrl || ""),
+      };
+    };
+    // Tenants pay by scanning, so an account is usable once it has its QR code
+    const usable = [one(m, 0), ...(Array.isArray(m.more) ? m.more : []).map((a, i) => one(a, i + 1))].filter((a) => a.qrUrl);
     // With more than one account, each chip says which one (last digits of the number, or the name)
     return usable.map((a) => ({
       ...a,
-      label: usable.length > 1 ? `${d.label} · ${a.accountNumber ? `…${a.accountNumber.replace(/\D/g, "").slice(-4)}` : a.accountName}` : d.label,
+      label: d.kind === "other"
+        ? a.methodLabel
+        : usable.length > 1
+        ? `${d.label} · ${a.accountNumber ? `…${a.accountNumber.replace(/\D/g, "").slice(-4)}` : a.accountName}`
+        : d.label,
     }));
   });
 

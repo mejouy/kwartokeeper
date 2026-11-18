@@ -52,7 +52,7 @@ export default function CaretakerCurfewHistoryView({ curfewHistory: history, his
                     </Typography>
                   </Box>
                   <Box sx={{ display: "flex", gap: 0.75, mt: 0.75, flexWrap: "wrap" }}>
-                    <Pill label={`${count("present")} in`} tone="success" />
+                    {count("present") > 0 && <Pill label={`${count("present")} in`} tone="success" />}
                     {count("late") > 0 && <Pill label={`${count("late")} late`} tone="warning" />}
                     {count("out") > 0 && <Pill label={`${count("out")} out`} tone="error" />}
                   </Box>

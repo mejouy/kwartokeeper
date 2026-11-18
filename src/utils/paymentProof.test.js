@@ -12,7 +12,9 @@ describe("reference numbers", () => {
     expect(checkReference("GCash", "1023 456 789012")).toBe("");
     expect(checkReference("GCash", "12345")).toMatch(/13 digits/);
     expect(checkReference("Maya", "A1B2C3D4E5F6")).toBe("");
-    expect(checkReference("Bank transfer", "x")).not.toBe("");
+    // Another e-wallet the owner added (no fixed format): only a too-short reference is flagged
+    expect(checkReference("GrabPay", "x")).not.toBe("");
+    expect(checkReference("GrabPay", "SP12345678")).toBe("");
     expect(checkReference("GCash", "")).not.toBe("");
   });
 
