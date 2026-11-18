@@ -1,6 +1,6 @@
 # KwartoKeeper — Technical Manual
 
-KwartoKeeper is a boarding-house and dormitory management system. Owners manage properties, rooms and beds, tenants, rent and fees, repairs and curfew; caretakers run the day-to-day work at a property; tenants pay rent, report repairs and read their house rules and contract. Admins approve owner accounts.
+KwartoKeeper is a boarding-house and dormitory management system. Owners manage properties, rooms and beds, tenants, rent and fees, repairs and curfew; caretakers run the day-to-day work at a property; tenants pay rent, report repairs, and see their house rules and the pictures of their signed lease contract. Admins approve owner accounts.
 
 It runs as a web app, an Android app (Capacitor) and a Windows desktop app (Electron), all built from the same React code, on Firebase (Authentication and Cloud Firestore).
 
@@ -31,8 +31,8 @@ It runs as a web app, an Android app (Capacitor) and a Windows desktop app (Elec
 |---|---|---|---|
 | **Admin** | Created in Firebase | Overview, Owners, Announcements, Settings | Approve or suspend owners, post system announcements, turn on owner auto-approval |
 | **Owner** | Self sign-up, then admin approval | Overview, Properties, Tenants, Payments, Maintenance, Caretakers, Announcements, Reports, Account | Everything for their own properties |
-| **Caretaker** | Invited by an owner (temporary password) | Overview, Tenants, Repairs, Payments, Rooms, Curfew | Only what the owner allowed: manage tenants, log occupancy/curfew, handle repairs, view financials, change room layout |
-| **Tenant** | Registered by an owner (email link to set a password) | Overview, Payments, Repairs, My room & rules | Pay rent (with proof), report and follow repairs, confirm fixes and rate the service, read and agree to the contract |
+| **Caretaker** | Invited by an owner (temporary password) | Overview, Tenants, Repairs, Payments, Rooms, Curfew | Only what the owner allowed: manage tenants, log occupancy/curfew, handle repairs, view financials, change rooms, beds and rates. Can be assigned several properties and switches between them; the owner can set them inactive |
+| **Tenant** | Registered by an owner (email link to set a password) | Overview, Payments, Repairs, My room & rules | Pay rent by scanning the owner's QR codes (with proof), report and follow repairs, confirm fixes with a note and rate the service, view the signed contract pictures |
 
 ## 2. Tech stack
 
@@ -43,10 +43,11 @@ It runs as a web app, an Android app (Capacitor) and a Windows desktop app (Elec
 | Files (photos, documents, QR codes, receipts) | Cloudinary unsigned uploads (`src/utils/cloudinary.js`) |
 | Android app | Capacitor 8 (`android/`, `capacitor.config.json`), push through `@capacitor-firebase/messaging` |
 | Desktop app | Electron (`main-electron.js`, `npm run build:exe`) |
-| PDFs | jsPDF + jspdf-autotable (reports, contracts) |
+| PDFs | jsPDF + jspdf-autotable (reports) |
 | Receipt reading (OCR) | tesseract.js, runs on the device |
 | Server tasks | Firebase Cloud Functions (`functions/src`) or the free local loops (`functions/*.js`) |
 | Tests | Vitest (logic), Firebase Rules Unit Testing on the Firestore emulator (security rules) |
+| Hosting | Vercel (web app); Firebase for the database rules and indexes |
 
 ## 3. Project structure
 
@@ -61,7 +62,8 @@ src/
     caretaker/              caretaker dashboard and its tabs (caretakerParts.jsx = shared pieces)
     tenant/                 tenant dashboard and its tabs (tenantParts.jsx = shared pieces)
     admin/, auth/, onboarding/
-  components/               pieces shared across roles (Fees, DepositPanel, RepairWorkflow, ContractCard...)
+  components/               pieces shared across roles (Fees, DepositPanel, RepairWorkflow, BedLayout, RoomBeds,
+                            BedRatesDialog, LeaseFiles, PropertyBillingEditor, Toast, BrandLoader, FoldList...)
   services/                 notificationService (who gets told what), caretakerService, propertyService, activityLog
   utils/                    plain logic, most of it unit-tested (*.test.js next to the file)
   i18n/                     English text is the key; Filipino in fil*.js
@@ -81,11 +83,13 @@ Key logic files:
 | `utils/maintenanceWorkflow.js` | Changing priority, resolution notes, tenant confirmation, reopening, ratings |
 | `utils/charges.js` | Fees (incl. advance rent and security deposit) and one month's bill |
 | `utils/tenantRent.js` | Due dates, overdue status, late fee, advance credit, `billForMonth` used by every screen |
-| `utils/billingSettings.js` | The owner's billing rules (due day, own fee types, late fee, move-in payments) |
+| `utils/billingSettings.js` | The owner's billing rules (due day, own fee types, late fee, move-in payments) and each property's own rules |
 | `utils/paymentProof.js` | Reference number checks, duplicate references, amount checks, receipt OCR |
-| `utils/bedRates.js` | Separate rates per bed |
-| `utils/caretakerAssignment.js` | The owner's caretaker assignment rule (1:1, 1:many, many:1, many:many) |
-| `utils/contract.js` | Rental contract template, placeholders, agreement status, PDF |
+| `utils/bedRates.js` | Bed types (single / double deck upper and lower), rates per kind of bed and per bed, bed names (Bed A Upper…), per-room rate lines |
+| `utils/roomGenerator.js` | Rooms made by the property setup wizard (room numbers, double decks per room, bunk rates) |
+| `utils/caretakerAssignment.js` | The caretaker assignment rule (default many:many), active/inactive caretakers, switching property |
+| `utils/leaseFiles.js` | Pictures / PDF of a tenant's signed lease contract |
+| `utils/maintenancePrioritization.js` | Also the list orders: most urgent, oldest, newest, by room, in progress first |
 
 ## 4. Setting up a development copy
 
@@ -150,7 +154,15 @@ Push notifications on Android need `android/app/google-services.json` from Fireb
 
 4. Make the first admin: create the user in Authentication, then in Firestore create `users/{uid}` with `role: "admin"`.
 5. Cloudinary: the cloud name and unsigned upload preset are in `src/utils/cloudinary.js`.
-6. Host the web app anywhere that serves static files (Firebase Hosting, Netlify, Vercel) from `dist/`.
+6. Host the web app. This project is on **Vercel** (project `kwartokeeper-app`, live at https://kwartokeeper-app.vercel.app):
+   pushes to `dev` make a preview deployment; production is deployed with
+
+   ```bash
+   npx vercel --prod
+   ```
+
+   The `VITE_FIREBASE_*` values from section 4 must also be set in the Vercel project's environment variables.
+   Deploy the database rules (step 3) whenever `firestore.rules` changes, together with the app.
 
 The receipt reader (OCR) downloads its language data from the internet the first time it runs on a device, so tenants need a connection when attaching a receipt.
 
@@ -177,13 +189,13 @@ All collections are in Cloud Firestore. Main fields only.
 
 | Collection | Holds |
 |---|---|
-| `users/{uid}` | Everyone's profile: `role` (admin/owner/caretaker/tenant), `ownerUid`, `status`. Tenants: `propertyId`, `roomId`, `bedId`, `monthlyRent`, `rentDueDay`, lease dates, `lateFeeWaived[]`, `contractAgreement`. Caretakers: `assignedPropertyId` (working on now), `assignedPropertyIds[]`, `assignedPropertyNames`, `permissions`. Owners: `billingSettings`, `caretakerAssignmentMode`, receipt counter |
+| `users/{uid}` | Everyone's profile: `role` (admin/owner/caretaker/tenant), `ownerUid`, `status`. Tenants: `propertyId`, `roomId`, `bedId` (saved as "Bed 1"…; shown as Bed A Upper…), `monthlyRent`, `rentDueDay`, lease dates, `lateFeeWaived[]`, `leaseFiles[]` (`url`, `name`, `type`, `uploadedAt`). Caretakers: `assignedPropertyId` (working on now), `assignedPropertyIds[]`, `assignedPropertyNames`, `permissions`, `status` (Active/Inactive). Owners: `billingSettings` (incl. `propertyRules{propertyId: …}`), `caretakerAssignmentMode`, receipt counter |
 | `tenants/{uid}` | Owner-side tenant record (same fields as the tenant's profile) |
 | `caretakers/{uid}` | Owner-side caretaker record |
-| `properties/{id}` | `ownerUid`, address, `rooms[]` (`roomName`, `floor`, `capacity`, `monthlyRatePerBed`, `bedRates{}`), `rules[]`, `ruleFiles[]`, `curfew`, `paymentMethods{}` (each with `more[]` accounts), `contract` |
+| `properties/{id}` | `ownerUid`, address, `rooms[]` (`roomName`, `floor`, `capacity`, `monthlyRatePerBed`, `bedTypes{}`, `bedTypeRates{}` (upper/lower), `bedRates{}` (own rate per bed)), `rules[]`, `ruleFiles[]`, `curfew`, `paymentMethods{}`: GCash, Maya, QR Ph and Other (an owner-named e-wallet, `providerName`), each a QR code (`qrUrl`) with `more[]` accounts |
 | `payments/{id}` | `tenantId`, `ownerUid`, `propertyId`, `periodMonth`, `amount`, `paymentMethod`, `paymentAccount`, `referenceNumber`, `proofUrl`, `proofCheck`, `status` (Pending/Paid/Partial/Rejected), receipt number, `bill` snapshot |
 | `charges/{id}` | Fees: `tenantId`, `type` (electricity, water, …, `advance`, `deposit`, `custom-…`), `amount`, `repeat` (once/monthly), `period`, `coversPeriods[]` (advance), `depositStatus` |
-| `maintenance_tickets/{id}` | `tenantUid`, `propertyId`, `title`, `category` (safety/utility/routine), `originalCategory`, `priorityChanges[]`, `status`, `followUps[]`, `remarks`, `resolutionNotes`, `resolvedBy…`, `tenantConfirmed`, `reopenCount`, `reopenReason`, `review{rating, comment, at}` |
+| `maintenance_tickets/{id}` | `tenantUid`, `propertyId`, `title`, `category` (safety/utility/routine), `originalCategory`, `priorityChanges[]`, `status`, `followUps[]`, `remarks`, `resolutionNotes`, `resolvedBy…`, `tenantConfirmed`, `tenantNote`, `reopenCount`, `reopenReason`, `review{rating, comment, at}` |
 | `occupancy_logs/{propertyId_date}` | One night's curfew sheet: `entries{tenantId: {status}}` |
 | `curfew_records`, `notifications`, `announcements`, `owner_announcements`, `audit_logs`, `settings` | Curfew marks, in-app/push notices, announcements, caretaker activity, global settings |
 
@@ -199,6 +211,8 @@ Repair requests are ranked with the Analytic Hierarchy Process (`src/utils/maint
 
 Pairwise comparison matrix: Safety vs Utility = 5, Safety vs Routine = 8, Utility vs Routine = 4 (consistency ratio 0.081 < 0.10). Requests are sorted by tier, then by how long they have waited (oldest first).
 
+Owners and caretakers can also choose how their list is ordered (**Sort by**: most urgent first, the default; oldest first; newest first; by room; in progress first). Each person's choice is remembered on their device.
+
 A caretaker or owner can **change the priority** after checking a request. This changes its category, so the priority still comes from the AHP weights; the tenant's original category and every change (who, when, why) are kept on the request.
 
 ## 10. Billing rules
@@ -210,6 +224,8 @@ Owner → Account → **Billing rules**:
 - **Late fee**: fixed amount or % of rent, added once a month when rent is still unpaid N days after the due date. Rent sent on time is never charged, even if checked later. The owner can waive it for a month on the tenant's profile.
 - **Move-in payments**: advance rent and security deposit, in months of rent, suggested in *Register tenant*.
 
+**Per property** (Property → **Billing** tab): a property can follow the usual rules or have its own due date for new tenants, late fee and move-in payments. They are saved with the owner's rules (`billingSettings.propertyRules`), so tenants and caretakers of that property read them like the usual ones; fee types stay one list for every property. `billingForProperty` (in `utils/tenantRent.js`) picks the rules for a tenant's property.
+
 Every screen (owner, caretaker, tenant, reports) computes a month's bill with the same function, `billForMonth` in `utils/tenantRent.js`: rent, less advance rent already paid for that month, plus that month's fees and any late fee, less what was received.
 
 Security deposits are held while the tenant stays and settled from the tenant's profile: refunded, used for unpaid rent or fees, or kept for damages.
@@ -220,8 +236,9 @@ Security deposits are held while the tenant stays and settled from the tenant's 
 
 - Owners only see and change their own properties, tenants, caretakers, payments and fees.
 - Caretakers only reach the property they are working on, and only with the permissions their owner gave them. A caretaker with several properties switches between the ones the owner assigned; they cannot add properties themselves.
-- Tenants can never mark a payment as paid, change their own rent, room, due day or late-fee waivers.
-- Repairs: marking a request resolved needs resolution notes. Only the tenant can confirm a fix, reopen it with a reason, or rate it (once, 1–5). Owners and caretakers cannot write the tenant's answer.
+- A caretaker the owner set to **inactive** keeps their own profile but gets none of a caretaker's access.
+- Tenants can never mark a payment as paid, change their own rent, room, due day, late-fee waivers or the pictures of their signed contract.
+- Repairs: marking a request resolved needs resolution notes. Only the tenant can confirm a fix (with an optional note, up to 500 characters), reopen it with a reason, or rate it (once, 1–5). Owners and caretakers cannot write the tenant's answer.
 
 Rules tests in `tests/rules/firestore.rules.test.mjs` run the app's real reads and writes for every role, plus the attacks the rules must stop.
 
@@ -230,7 +247,7 @@ Rules tests in `tests/rules/firestore.rules.test.mjs` run the app's real reads a
 ```bash
 npm test             # unit tests: billing, late fee, advance rent, proof checks, AHP, workflows, translations...
 npm run test:rules   # security rules on the Firestore emulator (needs Java 21+ and the Firebase CLI)
-npm run lint
+npm run lint         # also blocks accidental use of browser globals like `history` or `status`
 npm run build
 ```
 
@@ -240,18 +257,18 @@ System changes made after the final defense, by panel suggestion:
 
 | Suggestion | What changed | Where |
 |---|---|---|
-| Edit priority in caretaker | Caretaker (and owner) can change a request's priority with a reason; logged and shown to the tenant | `components/RepairWorkflow.jsx`, `utils/maintenanceWorkflow.js` |
-| Notes when resolved | Resolving needs resolution notes; the tenant sees how it was fixed | same; enforced in `firestore.rules` |
+| Edit priority in caretaker | Caretaker and owner can change a request's priority with a reason (logged, shown to the tenant), and choose the list's order | `components/RepairWorkflow.jsx`, `utils/maintenanceWorkflow.js`, `utils/maintenancePrioritization.js` |
+| Notes when resolved | Resolving needs resolution notes; the tenant sees how it was fixed and can add their own note when confirming | same; enforced in `firestore.rules` |
 | Tenant confirms it's resolved | "Yes, it's fixed" or "Not fixed yet" (reopens with a reason) | tenant Repairs tab |
-| Review of the service | 1–5 stars and a comment after confirming; average in the Maintenance report | tenant Repairs tab, Reports |
+| Review of the service | 1–5 stars after confirming; average in the Maintenance and Per caretaker reports | tenant Repairs tab, Reports |
 | Check finances (DP) | Advance rent and security deposit as optional move-in fees; deposit tracking | `utils/charges.js`, `components/DepositPanel.jsx`, Register tenant |
-| Separate bed rates | Each bed can have its own rate | Property → room → *Set rates per bed* |
+| Separate bed rates, bed types | Single beds and double decks (upper/lower) per room, set in the setup wizard or per bed; rates per kind of bed and per bed; shown on the room maps of owner and caretaker | `utils/bedRates.js`, `components/BedRatesDialog.jsx`, `components/RoomBeds.jsx` |
 | Proof of payment validation + OCR | Reference format, repeated references, amount vs bill, and receipt reading compared with what was typed; flags for the owner | `utils/paymentProof.js`, Payments |
-| More payment accounts | Several accounts per method, plus bank transfer | Payments → Payment accounts |
-| Reports, individual reports | Per-tenant report (statement of account, payments, fees, repairs, curfew); repair confirmations and ratings | Reports → *Per tenant* |
-| Caretaker assignment | Owner chooses 1:1 (default), 1:many, many:1 or many:many | Caretakers page |
-| Contract (rules and regulations) | Owner writes a contract per property; tenants agree in the app; PDF download | Property → *Rental contract* |
-| Editable singilan | Due day per tenant, own fee types with usual amounts, automatic late fee | Account → *Billing rules* |
+| More payment accounts / gateways | Several QR accounts per method: GCash, Maya, QR Ph, and other e-wallets the owner names. No bank transfers (outside the scope) | Payments → Payment accounts |
+| Reports, individual reports | Per tenant (statement of account, payments, fees, repairs, curfew), per caretaker (cash, repairs, curfew checks, activity) and per room (beds, tenants, rent, repairs) | Reports |
+| Caretaker assignment | A caretaker can have several properties and a property several caretakers (default; stricter rules can be chosen); owner sets caretakers active or inactive | Caretakers |
+| Contract | Signed in person; the owner uploads pictures of it at registration or on the tenant's profile (e.g. at renewal); the tenant can view them | `components/LeaseFiles.jsx` |
+| Editable singilan | Due day per tenant, own fee types with usual amounts, automatic late fee; each property can have its own rules | Account → *Billing rules*, Property → *Billing* |
 | Technical manual | This README | `README.md` |
 
 ## 14. Troubleshooting
@@ -259,6 +276,8 @@ System changes made after the final defense, by panel suggestion:
 | Problem | Fix |
 |---|---|
 | "Missing or insufficient permissions" after an update | Deploy the latest rules and indexes: `firebase deploy --only firestore:rules,firestore:indexes`, and update the app on phones (rebuild the APK). |
+| A caretaker sees "Your caretaker account is inactive" | The owner set them inactive (Caretakers → their profile → Set as active). |
+| A tenant's confirmation note won't save | The deployed rules are older than the app: deploy `firestore.rules`. |
 | A caretaker with several properties isn't notified for one of them | The `users (role, assignedPropertyIds)` index is still building or wasn't deployed. |
 | Receipt "couldn't be read" | The device was offline the first time, or the image is blurry. The payment still goes through; the owner checks it by eye. |
 | No push notifications | `localPushListener.js` isn't running (free plan), or `google-services.json` is missing from the Android build. |
