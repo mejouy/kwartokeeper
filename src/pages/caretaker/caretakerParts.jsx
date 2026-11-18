@@ -18,6 +18,7 @@ import SwapVertOutlinedIcon from "@mui/icons-material/SwapVertOutlined";
 import { deleteField, Timestamp } from "firebase/firestore";
 import { auth } from "../../config/firebase";
 import { RepairOutcome } from "../../components/RepairWorkflow";
+import { RoomBedStrip } from "../../components/RoomBeds";
 import { proofFindings } from "../../utils/paymentProof";
 // Translation is "tr" here: this file also uses "t" for tenants and the theme
 import { t as tr } from "../../i18n";
@@ -633,10 +634,13 @@ export const ROOM_STATUS = {
 };
 export const roomStatusOf = (capacity, taken) => (taken === 0 ? "vacant" : Number(capacity) > 0 && taken >= Number(capacity) ? "full" : "partial");
 
-export function RoomTile({ room, taken, selected, onClick }) {
-  const status = roomStatusOf(room.capacity, taken);
-  const style = ROOM_STATUS[status];
+export function RoomTile({ room, roomTenants = [], selected, onClick }) {
   const capacity = Number(room.capacity) || 0;
+  const taken = Math.min(roomTenants.length, capacity || roomTenants.length);
+  const status = roomStatusOf(capacity, taken);
+  const style = ROOM_STATUS[status];
+  const free = Math.max(capacity - taken, 0);
+  const full = status === "full";
   return (
     <Box
       component="button"
@@ -644,35 +648,34 @@ export function RoomTile({ room, taken, selected, onClick }) {
       onClick={onClick}
       aria-pressed={selected}
       sx={{
-        height: 64,
         minWidth: 0,
-        borderRadius: 2,
-        border: "none",
-        outline: selected ? "2px solid" : "none",
-        outlineColor: "text.primary",
-        outlineOffset: 2,
-        bgcolor: style.fill,
         display: "flex",
         flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        cursor: "pointer",
-        gap: 0.25,
-        px: 0.5,
+        alignItems: "flex-start",
+        gap: 0.75,
+        p: 1.1,
+        textAlign: "left",
         fontFamily: "inherit",
-        transition: "transform 0.12s ease",
-        "&:hover": { transform: "scale(1.05)" },
-        "&:focus-visible": { outline: "2px solid", outlineColor: "text.primary", outlineOffset: 2 },
+        color: "text.primary",
+        cursor: "pointer",
+        borderRadius: "10px",
+        border: "1px solid",
+        borderColor: full ? "rgba(255,69,0,.35)" : "divider",
+        bgcolor: full ? "rgba(255,69,0,.06)" : "background.default",
+        boxShadow: selected ? (th) => `0 0 0 2px ${th.palette.background.paper}, 0 0 0 4px ${th.palette.text.primary}` : "none",
+        transform: selected ? "translateY(-2px)" : "none",
+        transition: "transform .12s ease, box-shadow .12s ease, border-color .12s ease",
+        "&:hover": { transform: "translateY(-2px)", borderColor: "primary.main" },
+        "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
       }}
     >
-      <Typography noWrap sx={{ fontWeight: 800, fontSize: "0.78rem", color: style.text, lineHeight: 1.1, maxWidth: "100%" }}>
+      <Typography noWrap sx={{ fontWeight: 800, fontSize: "0.82rem", lineHeight: 1.2, maxWidth: "100%" }}>
         {room.roomName}
       </Typography>
-      {capacity > 0 && (
-        <Typography sx={{ fontSize: "0.66rem", fontWeight: 600, color: style.text, opacity: status === "full" ? 1 : 0.8, lineHeight: 1 }}>
-          {taken}/{capacity}
-        </Typography>
-      )}
+      <RoomBedStrip room={room} roomTenants={roomTenants} />
+      <Typography variant="caption" sx={{ mt: "auto", fontWeight: 700, lineHeight: 1, color: full ? "primary.main" : free > 0 ? "success.main" : "text.secondary" }}>
+        {capacity === 0 ? tr("No beds") : full ? tr("Full") : tr("{n} free", { n: free })}
+      </Typography>
       {/* Read out after the visible text (voice control still matches what's on screen) */}
       <Box component="span" sx={visuallyHidden}>{`, ${style.label}, ${taken} of ${capacity} beds`}</Box>
     </Box>
@@ -710,7 +713,7 @@ export function TenantCard({ t, rentState, showRent, onClick }) {
           </Typography>
           <Typography variant="body2" color="text.secondary" noWrap>
             {t.roomNumber ? `Room ${t.roomNumber}` : tr("No room yet")}
-            {t.bedId ? ` · Bed ${t.bedId}` : ""}
+            {t.bedId ? ` · ${t.bedName || t.bedId}` : ""}
           </Typography>
           <Box sx={{ display: "flex", gap: 0.5, mt: 0.5, flexWrap: "wrap" }}>
             {t.inactive && <Pill label={t.status} />}
@@ -732,7 +735,7 @@ export function RequestCard({ t, busy, onStatus, onPriority, compact }) {
   // Newest update shows; the rest stay folded so busy requests don't get huge
   const shownUpdates = allUpdates ? updates : updates.slice(-1);
   return (
-    <Paper elevation={0} sx={{ ...cardSx, p: 1.75, minWidth: 0 }}>
+    <Paper elevation={0} sx={{ ...cardSx, p: { xs: 2, sm: 2.5 }, borderRadius: "18px", minWidth: 0, width: "100%", height: "100%", display: "flex", flexDirection: "column", borderLeft: "4px solid", borderLeftColor: (th) => (["Resolved", "Cancelled"].includes(status) || TIER_TONE[tier] === "default" || !th.palette[TIER_TONE[tier]] ? th.palette.divider : th.palette[TIER_TONE[tier]].main) }}>
       <Box sx={{ ...row, alignItems: "flex-start", justifyContent: "space-between", gap: 1, mb: 0.5 }}>
         <Box sx={{ minWidth: 0 }}>
           <Typography sx={{ fontWeight: 800, lineHeight: 1.25, overflowWrap: "anywhere" }}>{t.title || tr("Maintenance request")}</Typography>
@@ -753,7 +756,7 @@ export function RequestCard({ t, busy, onStatus, onPriority, compact }) {
 
       {t.photoUrl && !compact && (
         <Box component="a" href={t.photoUrl} target="_blank" rel="noopener noreferrer" sx={{ display: "block", mt: 1.25 }}>
-          <Box component="img" src={t.photoUrl} alt={tr("Photo attached to the request")} loading="lazy" sx={{ display: "block", width: "100%", maxHeight: 180, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider" }} />
+          <Box component="img" src={t.photoUrl} alt={tr("Photo attached to the request")} loading="lazy" sx={{ display: "block", width: 132, height: 99, objectFit: "cover", borderRadius: "10px", border: "1px solid", borderColor: "divider" }} />
         </Box>
       )}
 
@@ -792,8 +795,9 @@ export function RequestCard({ t, busy, onStatus, onPriority, compact }) {
       {/* Priority changes, a reopened request, how it was fixed, the tenant's answer */}
       <RepairOutcome ticket={t} compact={compact} />
 
+      <Box sx={{ flexGrow: 1 }} />
       {onPriority && !compact && !["Resolved", "Cancelled"].includes(status) && (
-        <Button size="small" startIcon={<SwapVertOutlinedIcon />} disabled={busy} onClick={() => onPriority(t)} sx={{ mt: 1, ml: -0.75, minHeight: 36, fontWeight: 700, textTransform: "none" }}>
+        <Button size="small" startIcon={<SwapVertOutlinedIcon />} disabled={busy} onClick={() => onPriority(t)} sx={{ mt: 1, ml: -0.75, alignSelf: "flex-start", minHeight: 36, fontWeight: 700, textTransform: "none" }}>
           {tr("Change priority")}
         </Button>
       )}
@@ -850,7 +854,7 @@ export function CheckRow({ t, entry, past, onSet, onNotice }) {
           {t.name}
         </Typography>
         <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-          {t.bedId ? `Bed ${t.bedId}` : `Room ${t.roomNumber}`}
+          {t.bedId ? t.bedName || t.bedId : `Room ${t.roomNumber}`}
           {status && timeOf(entry.at) ? ` · ${timeOf(entry.at)}` : ""}
           {entry?.noticeSent ? tr(" · notified") : ""}
         </Typography>

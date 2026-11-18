@@ -6,7 +6,6 @@ import {
   TextField,
   Switch,
   Alert,
-  Snackbar,
   CircularProgress,
   Skeleton,
   Dialog,
@@ -28,6 +27,7 @@ import { doc, getDoc, setDoc } from "firebase/firestore";
 import { auth, db } from "../../config/firebase";
 import { SETTINGS_DEFAULTS, normalizeSettings, forgetPlatformSettings } from "../../utils/platformSettings";
 import { HeaderCard, Pill } from "./adminUi";
+import Toast from "../../components/Toast";
 
 const HEAD = '"Inter", sans-serif';
 const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
@@ -348,17 +348,7 @@ export default function AdminSettings() {
         </DialogActions>
       </Dialog>
 
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={4000}
-        onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        sx={{ bottom: { xs: "calc(84px + env(safe-area-inset-bottom, 0px)) !important", md: 24 } }}
-      >
-        <Alert severity={snackbar.severity} variant="filled" sx={{ borderRadius: R.sm }}>
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
+      <Toast open={snackbar.open} message={snackbar.message} severity={snackbar.severity} onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))} />
     </Box>
   );
 }

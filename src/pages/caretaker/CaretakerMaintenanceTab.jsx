@@ -1,23 +1,45 @@
 // Caretaker area · Repairs: requests to handle.
 // Rendered by CaretakerDashboard.jsx, which owns the data and actions and passes them in.
-import { Box, Button, Paper, Typography } from "@mui/material";
+import { Box, Button, MenuItem, Paper, TextField, Typography } from "@mui/material";
+import { TICKET_SORTS } from "../../utils/maintenancePrioritization";
 import BuildOutlinedIcon from "@mui/icons-material/BuildOutlined";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import HistoryIcon from "@mui/icons-material/History";
 import { cardSx, LIST_PAGE, rise, EmptyState, FilterChips, RequestCard } from "./caretakerParts";
+import ScrollSentinel from "../../components/ScrollSentinel";
 import { t } from "../../i18n";
 
-export default function CaretakerMaintenanceTab({ activeTickets, archiveOpen, archiveShown, busyTicket, changeTicketStatus, openPriority, highTickets, progressTickets, rankedTickets, resolvedTickets, setArchiveOpen, setArchiveShown, setTicketFilter, setTicketsShown, shownTickets, ticketFilter, ticketsShown }) {
+export default function CaretakerMaintenanceTab({ ticketSort, setTicketSort, activeTickets, archiveOpen, archiveShown, busyTicket, changeTicketStatus, openPriority, highTickets, progressTickets, rankedTickets, resolvedTickets, setArchiveOpen, setArchiveShown, setTicketFilter, setTicketsShown, shownTickets, ticketFilter, ticketsShown }) {
   return (
     <>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        {t("Reports from residents, most urgent first. Update the status as you work on them.")}
+        {t("Reports from residents. Update the status as you work on them.")}
       </Typography>
+      {activeTickets.length > 1 && (
+        <TextField
+          select
+          size="small"
+          label={t("Sort by")}
+          value={ticketSort}
+          onChange={(e) => {
+            setTicketSort(e.target.value);
+            setTicketsShown(LIST_PAGE);
+          }}
+          sx={{ mb: 1.5, minWidth: 200, "& .MuiOutlinedInput-root": { borderRadius: 2.5, bgcolor: "background.default" } }}
+        >
+          {TICKET_SORTS.map((s) => (
+            <MenuItem key={s.key} value={s.key}>{t(s.label)}</MenuItem>
+          ))}
+        </TextField>
+      )}
       {activeTickets.length > 0 && (
         <FilterChips
           value={ticketFilter}
-          onChange={setTicketFilter}
+          onChange={(value) => {
+            setTicketFilter(value);
+            setTicketsShown(LIST_PAGE);
+          }}
           options={[
             { id: "open", label: t("Open"), n: activeTickets.length },
             { id: "high", label: t("High priority"), n: highTickets.length },
@@ -36,13 +58,20 @@ export default function CaretakerMaintenanceTab({ activeTickets, archiveOpen, ar
               <EmptyState icon={<CheckCircleOutlinedIcon sx={{ fontSize: 28, color: "primary.main" }} />} title={t("All sorted")} body={activeTickets.length === 0 ? "No open requests right now." : "Nothing in this filter."} />
             </Paper>
           ) : (
-            <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.5, sm: 2 } }}>
-              {shownTickets.slice(0, ticketsShown).map((t, i) => (
-                <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0 }}>
-                  <RequestCard t={t} busy={busyTicket === t.id} onStatus={changeTicketStatus} onPriority={openPriority} />
-                </Box>
-              ))}
-            </Box>
+            <>
+              <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: { xs: 1.5, sm: 2 }, alignItems: "stretch" }}>
+                {shownTickets.slice(0, ticketsShown).map((t, i) => (
+                  <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0, display: "flex" }}>
+                    <RequestCard t={t} busy={busyTicket === t.id} onStatus={changeTicketStatus} onPriority={openPriority} />
+                  </Box>
+                ))}
+              </Box>
+              <ScrollSentinel
+                enabled={ticketsShown < shownTickets.length}
+                resetKey={ticketFilter}
+                onVisible={() => setTicketsShown((n) => Math.min(n + LIST_PAGE, shownTickets.length))}
+              />
+            </>
           )}
           {shownTickets.length > LIST_PAGE && (
             <Box sx={{ textAlign: "center", mt: 1.5 }}>
@@ -67,13 +96,19 @@ export default function CaretakerMaintenanceTab({ activeTickets, archiveOpen, ar
                 </Box>
               </Button>
               {archiveOpen && (
-                <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.5, sm: 2 }, mt: 1.5 }}>
-                  {resolvedTickets.slice(0, archiveShown).map((t) => (
-                    <Box key={t.id} sx={{ minWidth: 0, opacity: 0.85 }}>
-                      <RequestCard t={t} busy={busyTicket === t.id} onStatus={changeTicketStatus} compact />
-                    </Box>
-                  ))}
-                </Box>
+                <>
+                  <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: { xs: 1.5, sm: 2 }, mt: 1.5, alignItems: "stretch" }}>
+                    {resolvedTickets.slice(0, archiveShown).map((t) => (
+                      <Box key={t.id} sx={{ minWidth: 0, opacity: 0.85, display: "flex" }}>
+                        <RequestCard t={t} busy={busyTicket === t.id} onStatus={changeTicketStatus} compact />
+                      </Box>
+                    ))}
+                  </Box>
+                  <ScrollSentinel
+                    enabled={archiveShown < resolvedTickets.length}
+                    onVisible={() => setArchiveShown((n) => Math.min(n + LIST_PAGE, resolvedTickets.length))}
+                  />
+                </>
               )}
               {archiveOpen && resolvedTickets.length > LIST_PAGE && (
                 <Box sx={{ textAlign: "center", mt: 1.5 }}>

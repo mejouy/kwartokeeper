@@ -5,10 +5,11 @@ import { alpha } from "@mui/material/styles";
 import AddIcon from "@mui/icons-material/Add";
 import GridViewOutlinedIcon from "@mui/icons-material/GridViewOutlined";
 import TouchAppOutlinedIcon from "@mui/icons-material/TouchAppOutlined";
-import { row, cardSx, ROOM_STATUS, RoomTile } from "./caretakerParts";
+import { row, cardSx, RoomTile } from "./caretakerParts";
+import { RoomBedLegend } from "../../components/RoomBeds";
 import { t } from "../../i18n";
 
-export default function CaretakerRoomsTab({ bedsTaken, isDesktop, occPct, openRoom, pickedRoom, pickedRoomId, roomBeds, roomPanel, rooms, roomsByFloor, setPickedRoomId, takenOf, vacantRooms }) {
+export default function CaretakerRoomsTab({ bedsTaken, isDesktop, occPct, openRoom, pickedRoom, pickedRoomId, roomBeds, roomPanel, rooms, roomsByFloor, setPickedRoomId, tenantsOf, vacantRooms }) {
   return (
     <>
       <Box sx={{ ...row, justifyContent: "space-between", gap: 1.5, mb: 2, flexWrap: "wrap" }}>
@@ -33,15 +34,10 @@ export default function CaretakerRoomsTab({ bedsTaken, isDesktop, occPct, openRo
             </Typography>
           ) : (
             <>
-              <Box sx={{ display: "flex", flexWrap: "wrap", columnGap: 2, rowGap: 0.75, mb: 2.5 }}>
-                {Object.values(ROOM_STATUS).map((st) => (
-                  <Box key={st.label} sx={{ ...row, gap: 0.75 }}>
-                    <Box sx={{ width: 12, height: 12, borderRadius: "4px", bgcolor: st.fill }} />
-                    <Typography variant="caption" color="text.secondary">
-                      {st.label}
-                    </Typography>
-                  </Box>
-                ))}
+              <Box sx={{ mb: 2.5 }}>
+                <RoomBedLegend
+                  extra={[[t("Full room"), <Box key="full" sx={{ width: 14, height: 12, borderRadius: "3px", bgcolor: "rgba(255,69,0,.12)", border: "1px solid rgba(255,69,0,.35)" }} />]]}
+                />
               </Box>
               <Box sx={{ display: "flex", flexDirection: "column", gap: 3 }}>
                 {roomsByFloor.map(([floor, list], fIdx) => (
@@ -54,9 +50,9 @@ export default function CaretakerRoomsTab({ bedsTaken, isDesktop, occPct, openRo
                         · {list.length} {list.length === 1 ? "room" : "rooms"}
                       </Typography>
                     </Typography>
-                    <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(72px, 1fr))", gap: 1.25 }}>
+                    <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(116px, 1fr))", gap: 1 }}>
                       {list.map((r) => (
-                        <RoomTile key={r.id || r.index} room={r} taken={takenOf(r)} selected={pickedRoomId === r.id} onClick={() => setPickedRoomId(r.id)} />
+                        <RoomTile key={r.id || r.index} room={r} roomTenants={tenantsOf(r)} selected={pickedRoomId === r.id} onClick={() => setPickedRoomId(r.id)} />
                       ))}
                     </Box>
                   </Box>
@@ -68,7 +64,7 @@ export default function CaretakerRoomsTab({ bedsTaken, isDesktop, occPct, openRo
 
         {/* Desktop: side card. Phones: bottom sheet below. */}
         {isDesktop && (
-          <Paper elevation={0} sx={{ ...cardSx, p: 3, position: "sticky", top: 96, minHeight: 280 }}>
+          <Paper elevation={0} sx={{ ...cardSx, p: 3, minHeight: 280, maxHeight: "calc(100dvh - 140px)", overflowY: "auto", overscrollBehavior: "contain" }}>
             {roomPanel || (
               <Box sx={{ minHeight: 232, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
                 <Box sx={{ width: 56, height: 56, borderRadius: "50%", mb: 1.5, ...row, justifyContent: "center", bgcolor: "rgba(255, 69, 0, 0.08)" }}>
@@ -76,7 +72,7 @@ export default function CaretakerRoomsTab({ bedsTaken, isDesktop, occPct, openRo
                 </Box>
                 <Typography sx={{ fontWeight: 700 }}>{t("Select a room")}</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
-                  {t("Tap any room on the map to see its tenants or change its rate.")}
+                  {t("Tap a room on the map to see who sleeps in each bed, or edit its beds and rates.")}
                 </Typography>
               </Box>
             )}

@@ -13,7 +13,6 @@ import {
   InputBase,
   MenuItem,
   Skeleton,
-  Snackbar,
   TextField,
   Typography,
   useMediaQuery,
@@ -53,6 +52,7 @@ import { normalizeStatus } from "../../utils/tenantRent";
 import { isRemovedAccount } from "../../utils/accountState";
 // Translation is "tr" here: this file also uses "t" for tenants and the theme
 import { t as tr } from "../../i18n";
+import Toast from "../../components/Toast";
 
 const HEAD = '"Inter", sans-serif';
 const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
@@ -1004,17 +1004,7 @@ export default function OwnerAnnouncements() {
         </Box>
       </Dialog>
 
-      <Snackbar
-        open={toast.open}
-        autoHideDuration={toast.severity === "success" ? 4000 : 8000}
-        onClose={() => setToast((t) => ({ ...t, open: false }))}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        sx={{ bottom: { xs: `calc(${BOTTOM_NAV_H}px + 16px + env(safe-area-inset-bottom)) !important`, sm: undefined } }}
-      >
-        <Alert severity={toast.severity} variant="filled" onClose={() => setToast((t) => ({ ...t, open: false }))} sx={{ borderRadius: R.sm }}>
-          {toast.message}
-        </Alert>
-      </Snackbar>
+      <Toast open={toast.open} message={toast.message} severity={toast.severity} onClose={() => setToast((t) => ({ ...t, open: false }))} bottom={`calc(${BOTTOM_NAV_H}px + 16px + env(safe-area-inset-bottom))`} />
     </Box>
   );
 }

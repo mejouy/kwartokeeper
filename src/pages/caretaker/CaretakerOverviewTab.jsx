@@ -1,6 +1,6 @@
 // Caretaker area · Home: tonight's curfew, what needs attention, quick actions.
 // Rendered by CaretakerDashboard.jsx, which owns the data and actions and passes them in.
-import { Box, Button, Chip, MenuItem, TextField, Typography } from "@mui/material";
+import { Box, Button, Chip, Typography } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 import HomeWorkOutlinedIcon from "@mui/icons-material/HomeWorkOutlined";
 import MeetingRoomOutlinedIcon from "@mui/icons-material/MeetingRoomOutlined";
@@ -18,7 +18,7 @@ import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import { RULES_PREVIEW, row, peso, firstName, greeting, rise, Pill, Panel, AttentionBanner, StatTile, QuickAction, RequestCard } from "./caretakerParts";
 import { t } from "../../i18n";
 
-export default function CaretakerOverviewTab({ myProperties = [], switchProperty, activeTenants, activeTickets, address, amenities, attention, attentionOpen, bedsUsed, canFinancials, canOccupancy, canReports, canTenantsTab, checkCounts, checkTenants, checkedCount, collected, coverUrl, curfewPhase, curfewTime, currentPeriod, goTab, hasCover, hasHouseRules, highTickets, minsLabel, minsUntil, occupiedRooms, openCurfewCheck, openDirectory, paidCount, previewFile, profile, property, propertyName, quickActions, rentTenants, ruleFiles, rules, rulesOpen, setAttentionOpen, setCoverFailed, setPreviewFile, setRulesOpen, totalBeds, totalRooms, uncheckedCount }) {
+export default function CaretakerOverviewTab({ activeTenants, activeTickets, address, amenities, attention, attentionOpen, bedsUsed, canFinancials, canOccupancy, canReports, canTenantsTab, checkCounts, checkTenants, checkedCount, collected, coverUrl, curfewPhase, curfewTime, currentPeriod, goTab, hasCover, hasHouseRules, highTickets, minsLabel, minsUntil, occupiedRooms, openCurfewCheck, openDirectory, paidCount, previewFile, profile, property, propertyName, quickActions, rentTenants, ruleFiles, rules, rulesOpen, setAttentionOpen, setCoverFailed, setPreviewFile, setRulesOpen, totalBeds, totalRooms, uncheckedCount }) {
   return (
     <>
       {/* Hero: the facility's cover photo */}
@@ -57,23 +57,6 @@ export default function CaretakerOverviewTab({ myProperties = [], switchProperty
             {propertyName}
             {address ? ` · ${address}` : ""}
           </Typography>
-          {/* Several properties (owner's caretaker rule): pick the one to work on */}
-          {myProperties.length > 1 && switchProperty && (
-            <TextField
-              select
-              size="small"
-              value={property?.id || ""}
-              onChange={(e) => switchProperty(e.target.value)}
-              slotProps={{ htmlInput: { "aria-label": t("Switch property") } }}
-              sx={{ mt: 1.25, minWidth: 220, "& .MuiOutlinedInput-root": { bgcolor: "rgba(255,255,255,0.92)", borderRadius: 2 } }}
-            >
-              {myProperties.map((p) => (
-                <MenuItem key={p.id} value={p.id}>
-                  {p.id === property?.id ? propertyName : p.name || t("Property")}
-                </MenuItem>
-              ))}
-            </TextField>
-          )}
         </Box>
       </Box>
 

@@ -36,7 +36,7 @@ import { collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "../../../config/firebase";
 import { useAuth } from "../../../context/AuthContext";
 import { withoutRemoved } from "../../../utils/accountState";
-import { ASSIGNMENT_MODES, assignmentConflicts, modeOf, propertyIdsOf, saveAssignmentMode, useAssignmentMode } from "../../../utils/caretakerAssignment";
+import { ASSIGNMENT_MODES, assignmentConflicts, isInactiveCaretaker, modeOf, propertyIdsOf, saveAssignmentMode, useAssignmentMode } from "../../../utils/caretakerAssignment";
 import { t } from "../../../i18n";
 
 const HEAD = '"Inter", sans-serif';
@@ -57,6 +57,7 @@ const FILTERS = [
   { value: "all", label: t("All") },
   { value: "active", label: t("Active") },
   { value: "pending", label: t("Not logged in yet") },
+  { value: "inactive", label: t("Inactive") },
 ];
 
 // A caretaker is "pending" until they log in and replace their temporary password
@@ -65,8 +66,8 @@ const grantedCount = (c) => PERMISSIONS.filter((p) => c.permissions?.[p.key]).le
 const initialsOf = (name) =>
   String(name || "?").split(" ").filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join("");
 
-function StatusPill({ pending }) {
-  const tone = pending ? "warning" : "success";
+function StatusPill({ pending, inactive }) {
+  const tone = inactive ? "grey" : pending ? "warning" : "success";
   return (
     <Box
       component="span"
@@ -79,11 +80,11 @@ function StatusPill({ pending }) {
         fontWeight: 700,
         whiteSpace: "nowrap",
         flexShrink: 0,
-        bgcolor: (t) => alpha(t.palette[tone].main, 0.12),
-        color: (t) => t.palette[tone].dark,
+        bgcolor: (th) => (tone === "grey" ? alpha(th.palette.text.primary, 0.08) : alpha(th.palette[tone].main, 0.12)),
+        color: (th) => (tone === "grey" ? th.palette.text.secondary : th.palette[tone].dark),
       }}
     >
-      {pending ? t("Not logged in yet") : t("Active")}
+      {inactive ? t("Inactive") : pending ? t("Not logged in yet") : t("Active")}
     </Box>
   );
 }
@@ -92,6 +93,7 @@ function StatusPill({ pending }) {
 function CaretakerCard({ caretaker, onOpen }) {
   const name = caretaker.name || caretaker.fullName || "Unnamed caretaker";
   const pending = isPending(caretaker);
+  const inactive = isInactiveCaretaker(caretaker);
   const count = grantedCount(caretaker);
 
   return (
@@ -119,7 +121,7 @@ function CaretakerCard({ caretaker, onOpen }) {
     >
       {/* Who */}
       <Box sx={{ ...row, gap: 1.5, width: "100%", minWidth: 0 }}>
-        <Avatar sx={{ width: 44, height: 44, fontFamily: HEAD, fontWeight: 800, fontSize: "0.95rem", bgcolor: pending ? "warning.main" : "primary.main", color: "#fff" }}>
+        <Avatar sx={{ width: 44, height: 44, fontFamily: HEAD, fontWeight: 800, fontSize: "0.95rem", bgcolor: inactive ? "grey.600" : pending ? "warning.main" : "primary.main", color: "#fff" }}>
           {initialsOf(name)}
         </Avatar>
         <Box sx={{ minWidth: 0, flex: 1 }}>
@@ -142,7 +144,7 @@ function CaretakerCard({ caretaker, onOpen }) {
             {propertyIdsOf(caretaker).length > 1 ? ` +${propertyIdsOf(caretaker).length - 1}` : ""}
           </Typography>
         </Box>
-        <StatusPill pending={pending} />
+        <StatusPill pending={pending} inactive={inactive} />
       </Box>
 
       {/* Phone */}
@@ -262,13 +264,14 @@ export default function CaretakerList() {
   };
 
   const counts = useMemo(() => {
-    const pending = caretakers.filter(isPending).length;
-    return { all: caretakers.length, pending, active: caretakers.length - pending };
+    const inactive = caretakers.filter(isInactiveCaretaker).length;
+    const pending = caretakers.filter((c) => isPending(c) && !isInactiveCaretaker(c)).length;
+    return { all: caretakers.length, pending, inactive, active: caretakers.length - pending - inactive };
   }, [caretakers]);
 
   // Active properties nobody is looking after
   const uncovered = useMemo(() => {
-    const covered = new Set(caretakers.flatMap(propertyIdsOf));
+    const covered = new Set(caretakers.filter((c) => !isInactiveCaretaker(c)).flatMap(propertyIdsOf));
     return properties.filter(
       (p) => !covered.has(p.id) && !["inactive", "archived", "deactivated"].includes(String(p.status || "Active").trim().toLowerCase())
     );
@@ -278,14 +281,16 @@ export default function CaretakerList() {
     const term = search.trim().toLowerCase();
     return caretakers
       .filter((c) => {
-        if (filter === "active" && isPending(c)) return false;
-        if (filter === "pending" && !isPending(c)) return false;
+        if (filter === "active" && (isPending(c) || isInactiveCaretaker(c))) return false;
+        if (filter === "pending" && (!isPending(c) || isInactiveCaretaker(c))) return false;
+        if (filter === "inactive" && !isInactiveCaretaker(c)) return false;
         if (!term) return true;
         return [c.name, c.fullName, c.email, c.phone, c.propertyName].some((v) => String(v || "").toLowerCase().includes(term));
       })
-      // by property, unassigned last, then by name
+      // inactive last; by property, unassigned last, then by name
       .sort(
         (a, b) =>
+          Number(isInactiveCaretaker(a)) - Number(isInactiveCaretaker(b)) ||
           Number(!a.assignedPropertyId) - Number(!b.assignedPropertyId) ||
           String(a.propertyName || "").localeCompare(String(b.propertyName || "")) ||
           String(a.name || "").localeCompare(String(b.name || ""))

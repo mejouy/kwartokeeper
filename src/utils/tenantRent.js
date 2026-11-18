@@ -150,7 +150,23 @@ const sentOn = (p) => toDate(p.paymentDate) || toDate(p.createdAt) || toDate(p.s
  * started before the lease did.
  * `payments` are the tenant's payments for that month.
  */
-export function lateFeeLine({ tenant, period, rent, payments = [], settings, today = new Date() }) {
+/**
+ * The billing rules for one property: the owner's usual rules, with that
+ * property's own rules on top when the owner set some (Property → Billing).
+ * Only the due date, late fee and move-in payments can differ per property;
+ * fee types stay the owner's. Safe to call twice.
+ */
+export const PROPERTY_RULE_KEYS = ["defaultDueMode", "defaultDueDay", "lateFee", "moveIn"];
+export function billingForProperty(settings, propertyId) {
+  const own = propertyId ? settings?.propertyRules?.[propertyId] : null;
+  if (!settings || !own) return settings;
+  const picked = Object.fromEntries(PROPERTY_RULE_KEYS.filter((k) => own[k] !== undefined).map((k) => [k, own[k]]));
+  return { ...settings, ...picked };
+}
+const propertyOfTenant = (t) => t?.propertyId || t?.assignedPropertyId || "";
+
+export function lateFeeLine({ tenant, period, rent, payments = [], settings: ownerSettings, today = new Date() }) {
+  const settings = billingForProperty(ownerSettings, propertyOfTenant(tenant));
   const rule = settings?.lateFee;
   if (!rule?.enabled || !(Number(rule.amount) > 0) || !(rent > 0)) return null;
   if (Array.isArray(tenant?.lateFeeWaived) && tenant.lateFeeWaived.includes(period)) return null;
@@ -205,7 +221,9 @@ export function advanceCreditFor({ tenant, period, charges = [], payments = [] }
  * monthBill() plus { baseRent, advanceCredit, lateFee, coveredByAdvance }.
  * `payments` are the tenant's payments (all months is fine; it picks the month).
  */
-export function billForMonth({ tenant, period, charges = [], payments = [], settings = null, today = new Date() }) {
+export function billForMonth({ tenant, period, charges = [], payments = [], settings: ownerSettings = null, today = new Date() }) {
+  // The tenant's property may have its own rules (late fee)
+  const settings = billingForProperty(ownerSettings, propertyOfTenant(tenant));
   const id = tenant?.id || tenant?.uid;
   const baseRent = round2(rentOf(tenant || {}));
   const key = String(period || "").toLowerCase();

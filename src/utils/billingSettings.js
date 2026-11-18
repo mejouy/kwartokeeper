@@ -10,12 +10,21 @@
 //   - moveIn: what Register Tenant suggests collecting at move-in: advance rent
 //     and a security deposit, in months of rent (both optional)
 //
+//   - propertyRules: a property's own due date, late fee and move-in payments,
+//     { [propertyId]: { propertyName, defaultDueMode, defaultDueDay, lateFee, moveIn } }.
+//     A property without an entry follows the owner's usual rules. Set from
+//     Property → Billing; bills pick the right rules with billingForProperty.
+//
 // Saved on the owner's own profile (users/{ownerUid}.billingSettings). Their
 // tenants and caretakers can already read that profile, so every screen works
 // out the same bill.
 import { useEffect, useState } from "react";
 import { doc, onSnapshot, updateDoc } from "firebase/firestore";
 import { db } from "../config/firebase";
+import { billingForProperty, PROPERTY_RULE_KEYS } from "./tenantRent";
+
+export { billingForProperty, PROPERTY_RULE_KEYS };
+export const MAX_PROPERTY_RULES = 200;
 
 export const MAX_FEE_TYPES = 12;
 export const MAX_GRACE_DAYS = 27;
@@ -46,6 +55,23 @@ export function cleanFeeType(raw, index = 0) {
     defaultAmount: Math.max(round2(raw?.defaultAmount), 0),
     repeat: raw?.repeat === "monthly" ? "monthly" : "once",
   };
+}
+
+// One property's rules, cleaned the same way as the owner's
+function normalizePropertyRules(raw) {
+  if (!raw || typeof raw !== "object") return {};
+  const out = {};
+  Object.entries(raw)
+    .slice(0, MAX_PROPERTY_RULES)
+    .forEach(([propertyId, rules]) => {
+      if (!propertyId || !rules || typeof rules !== "object") return;
+      const clean = normalizeBilling({ ...rules, propertyRules: null });
+      out[propertyId] = {
+        propertyName: String(rules.propertyName || "").slice(0, 80),
+        ...Object.fromEntries(PROPERTY_RULE_KEYS.map((k) => [k, clean[k]])),
+      };
+    });
+  return out;
 }
 
 /** Saved settings (or nothing) → complete settings, every value in range. */
@@ -83,7 +109,23 @@ export function normalizeBilling(raw) {
       advanceMonths: clamp(Math.round(num(moveIn.advanceMonths, 0)), 0, MAX_MOVE_IN_MONTHS),
       depositMonths: clamp(Math.round(num(moveIn.depositMonths, 0)), 0, MAX_MOVE_IN_MONTHS),
     },
+    propertyRules: normalizePropertyRules(s.propertyRules),
   };
+}
+
+/** Does this property have its own billing rules? */
+export const hasPropertyRules = (settings, propertyId) => Boolean(propertyId && settings?.propertyRules?.[propertyId]);
+
+/**
+ * The owner's settings with one property's rules set (rules) or removed
+ * (null: the property follows the usual rules again).
+ */
+export function withPropertyRules(settings, propertyId, rules, propertyName = "") {
+  const current = normalizeBilling(settings);
+  const propertyRules = { ...current.propertyRules };
+  if (rules) propertyRules[propertyId] = { ...rules, propertyName: propertyName || rules.propertyName || "" };
+  else delete propertyRules[propertyId];
+  return normalizeBilling({ ...current, propertyRules });
 }
 
 /** Problems with a draft before saving: { field: message } (empty when fine). */

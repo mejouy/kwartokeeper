@@ -31,7 +31,9 @@ import {
 } from "firebase/auth";
 import { doc, setDoc, collection, query, where, getDocs } from "firebase/firestore";
 import { auth, db, firebaseConfig } from "../../../config/firebase";
-import { uploadToCloudinary } from "../../../utils/cloudinary"; 
+import { uploadToCloudinary } from "../../../utils/cloudinary";
+import { LeaseFilesPicker } from "../../../components/LeaseFiles";
+import { uploadLeaseFiles } from "../../../utils/leaseFiles";
 import { addMonthsClamped } from "../../../utils/addMonthsClamped";
 import {
   getPropertyRoomOccupancy,
@@ -39,9 +41,9 @@ import {
 } from "../../../utils/reconcilePropertyOccupancy";
 import { isRoomUnderMaintenance, MAINTENANCE_ROOM_MESSAGE } from "../../../utils/roomStatus";
 import { findDuplicatePerson } from "../../../utils/duplicates";
-import { useOwnerBilling } from "../../../utils/billingSettings";
+import { billingForProperty, useOwnerBilling } from "../../../utils/billingSettings";
 import { addCharges, advanceCovers, periodOfDate } from "../../../utils/charges";
-import { bedRateOf } from "../../../utils/bedRates";
+import { bedNameOf, bedRateOf } from "../../../utils/bedRates";
 import { ordinalDay, resolveDueDay } from "../../../utils/tenantRent";
 import DueDayField from "../../../components/DueDayField";
 import { t } from "../../../i18n";
@@ -305,10 +307,13 @@ export default function RegisterTenant() {
     depositMonths: "",
   });
   // The owner's billing rules: default due day and move-in payments
-  const billing = useOwnerBilling(auth.currentUser?.uid);
+  const ownerBilling = useOwnerBilling(auth.currentUser?.uid);
+  // Due date and move-in payments follow the chosen property's billing rules (Property → Billing)
+  const billing = billingForProperty(ownerBilling, form.propertyId);
   const pick = (value, fallback) => (value === "" || value === null || value === undefined ? fallback : Number(value));
 
   const [idPhotoFile, setIdPhotoFile] = useState(null);
+  const [leasePicks, setLeasePicks] = useState([]); // optional pictures of the signed contract
   const idPreviewRef = useRef(null);
   const [properties, setProperties] = useState([]);
   const [rooms, setRooms] = useState([]);
@@ -554,6 +559,16 @@ export default function RegisterTenant() {
         }
       }
 
+      // Optional pictures of the signed contract (before the account, like the ID photo)
+      let leaseFiles = [];
+      if (leasePicks.length) {
+        try {
+          leaseFiles = await uploadLeaseFiles(leasePicks);
+        } catch {
+          throw new Error("Couldn't upload the contract pictures. Check your connection and try again, or remove them and add them later from the tenant's profile.");
+        }
+      }
+
       // Resolve Lease Duration (Standard vs Custom)
       const finalLeaseDuration =
         form.leaseDuration === "custom"
@@ -612,6 +627,7 @@ export default function RegisterTenant() {
         leaseEndDate,
         leaseEnd: leaseEndDate,
         leaseDuration: finalLeaseDuration,
+        ...(leaseFiles.length ? { leaseFiles } : {}),
         createdAt: new Date().toISOString(),
       };
 
@@ -677,7 +693,7 @@ export default function RegisterTenant() {
     ["Tenant", form.fullName.trim()],
     ["Email", form.email.trim()],
     ["ID", [idTypeLabel, form.idNumber].filter(Boolean).join(" · ")],
-    ["Room", [selectedProperty?.propertyName, form.roomId, form.bedId].filter(Boolean).join(" · ")],
+    ["Room", [selectedProperty?.propertyName, form.roomId, bedNameOf(selectedRoom, form.bedId)].filter(Boolean).join(" · ")],
     ["Monthly rent", monthlyRate ? `₱${monthlyRate.toLocaleString()}` : ""],
     ["Rent due", dueRule.mode === "lease" && !form.leaseStartDate ? "Same date as the lease start" : `Every ${ordinalDay(dueDay)} of the month${dueDay >= 29 ? " (or its last day, if shorter)" : ""}`],
     ["Move-in payments", monthlyRate > 0 ? [advanceMonthsShown > 0 && `₱${(monthlyRate * advanceMonthsShown).toLocaleString()} advance`, depositMonthsShown > 0 && `₱${(monthlyRate * depositMonthsShown).toLocaleString()} deposit`].filter(Boolean).join(" + ") : ""],
@@ -972,8 +988,8 @@ export default function RegisterTenant() {
                         <TextField select fullWidth value={form.bedId} onChange={handleChange("bedId")} disabled={!form.roomId} {...flag("bedId")}>
                           {bedOptions.map((bed) => (
                             <MenuItem key={bed} value={bed}>
-                              {bed}
-                              {Number(selectedRoom?.bedRates?.[bed]) > 0 ? ` · ₱${bedRateOf(selectedRoom, bed).toLocaleString()}` : ""}
+                              {bedNameOf(selectedRoom, bed)}
+                              {bedRateOf(selectedRoom, bed) !== (Number(selectedRoom?.monthlyRatePerBed) || 0) ? ` · ₱${bedRateOf(selectedRoom, bed).toLocaleString()}` : ""}
                             </MenuItem>
                           ))}
                         </TextField>
@@ -986,7 +1002,7 @@ export default function RegisterTenant() {
                           <Typography sx={{ fontFamily: '"Inter", sans-serif', fontWeight: 800 }}>
                             ₱{monthlyRate.toLocaleString()}
                             <Typography component="span" variant="body2" color="text.secondary" sx={{ fontWeight: 500 }}>
-                              {" "}{form.bedId && Number(selectedRoom?.bedRates?.[form.bedId]) > 0 ? t("for {bed}", { bed: form.bedId }) : t("per bed")}
+                              {" "}{form.bedId && Number(selectedRoom?.bedRates?.[form.bedId]) > 0 ? t("for {bed}", { bed: bedNameOf(selectedRoom, form.bedId) }) : t("per bed")}
                             </Typography>
                           </Typography>
                         </Box>
@@ -1023,6 +1039,10 @@ export default function RegisterTenant() {
                         />
                       </FormRow>
                     )}
+
+                    <FormRow label={t("Signed contract")} top>
+                      <LeaseFilesPicker files={leasePicks} onChange={setLeasePicks} disabled={loading} />
+                    </FormRow>
 
                     <FormRow label={t("Rent due day")}>
                       <DueDayField

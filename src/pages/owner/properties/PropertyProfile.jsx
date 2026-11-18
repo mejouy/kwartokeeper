@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { visuallyHidden } from "@mui/utils";
 import { useParams, useNavigate } from "react-router-dom";
 import {
@@ -19,7 +19,6 @@ import CloseIcon from "@mui/icons-material/Close";
 import SaveIcon from "@mui/icons-material/Save";
 import PlaceOutlinedIcon from "@mui/icons-material/PlaceOutlined";
 import TouchAppOutlinedIcon from "@mui/icons-material/TouchAppOutlined";
-import ChevronRightIcon from "@mui/icons-material/ChevronRight";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutlined";
 import MeetingRoomOutlinedIcon from "@mui/icons-material/MeetingRoomOutlined";
 import BedOutlinedIcon from "@mui/icons-material/BedOutlined";
@@ -33,7 +32,10 @@ import { formatPropertyAddress } from "../../../utils/formatPropertyAddress";
 import { holdsBed } from "../../../utils/occupancy";
 import { withoutRemoved } from "../../../utils/accountState";
 import { t } from "../../../i18n";
-import { customBedRates, rateRangeText } from "../../../utils/bedRates";
+import { bunkCountOf } from "../../../utils/bedRates";
+import { BedUnit } from "../../../components/BedLayout";
+import { RoomBedLegend, RoomBedList, RoomBedStrip, RoomRateList } from "../../../components/RoomBeds";
+import BedRatesDialog from "../../../components/BedRatesDialog";
 
 const INK = "#202020";
 const ORANGE = "#ff4500";
@@ -66,7 +68,6 @@ const formatDate = (value) => {
 const getMoveOutDate = (tenant) =>
   formatDate(tenant?.leaseEndDate || tenant?.moveOutDate || tenant?.leaseEnd || tenant?.endDate);
 
-const peso = (n) => `₱${Number(n || 0).toLocaleString()}`;
 
 // One rule for a room's bed count, used by the tiles, the panel and the totals
 const capacityOf = (room) => Number(room?.capacity || room?.beds || room?.totalBeds || 0);
@@ -96,7 +97,7 @@ const STATUS_STYLES = {
 const row = { display: "flex", alignItems: "center" };
 
 // Desktop details card: always this tall (and never taller than the viewport).
-const DETAILS_CARD_H = "min(500px, calc(100vh - 128px))";
+const DETAILS_CARD_MIN_H = 480;
 
 // Which active tenants live in a room
 const getRoomTenants = (room, tenants) => {
@@ -177,7 +178,7 @@ function CoverBanner({ property, coverPhotoUrl, occPct, onBack, onEdit }) {
           onClick={onEdit}
           sx={{ fontWeight: 700, borderRadius: R.sm, color: INK, bgcolor: "#fff", px: 2, "&:hover": { bgcolor: "#f3f3f3" } }}
         >
-          {t("Edit")}<Box component="span" sx={{ display: { xs: "none", sm: "inline" } }}>{" "}{t("property")}</Box>
+          {t("Edit")}<Box component="span" sx={{ display: { xs: "none", sm: "inline" }, ml: 0.5 }}>{t("property")}</Box>
         </Button>
       </Box>
 
@@ -235,45 +236,13 @@ function StatTiles({ items }) {
 
 /* ---------------------------------------------------------------------------
    Room map, drawn as the building: floors stacked top to bottom (highest
-   floor on top, ground floor on the street), each room a tile whose beds are
-   little squares — orange when taken, empty when free.
+   floor on top, ground floor on the street), each room a tile with bed spaces.
+   Double-deck upper/lower spaces are stacked rectangles.
    ------------------------------------------------------------------------- */
-const MAX_BED_SQUARES = 12; // a very big room shows "+N" instead of a wall of squares
-const tenantName = (t) => t?.name || t?.fullName || t?.email || "Tenant";
-
-function BedSquares({ capacity, roomTenants, maintenance }) {
-  const shown = Math.min(capacity, MAX_BED_SQUARES);
-  const cols = Math.min(Math.max(shown, 1), 4);
-  return (
-    <Box sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-      <Box sx={{ display: "grid", gridTemplateColumns: `repeat(${cols}, 14px)`, gap: "4px" }}>
-        {Array.from({ length: shown }).map((_, i) => {
-          const taken = !maintenance && i < roomTenants.length;
-          return (
-            <Box
-              key={i}
-              title={taken ? tenantName(roomTenants[i]) : maintenance ? "Unavailable" : "Free bed"}
-              sx={{
-                width: 14,
-                height: 14,
-                borderRadius: "4px",
-                boxSizing: "border-box",
-                bgcolor: taken ? ORANGE : maintenance ? (t) => alpha(t.palette.text.primary, 0.1) : "transparent",
-                border: taken || maintenance ? "none" : "1.5px solid",
-                borderColor: (t) => alpha(t.palette.text.primary, 0.28),
-              }}
-            />
-          );
-        })}
-      </Box>
-      {capacity > MAX_BED_SQUARES && (
-        <Typography variant="caption" sx={{ fontWeight: 700, color: "text.secondary" }}>
-          +{capacity - MAX_BED_SQUARES}
-        </Typography>
-      )}
-    </Box>
-  );
-}
+const layoutText = (bunks, singles) => [
+  bunks > 0 && (bunks === 1 ? t("1 double deck") : t("{n} double decks", { n: bunks })),
+  singles > 0 && (singles === 1 ? t("1 single bed") : t("{n} single beds", { n: singles })),
+].filter(Boolean).join(" · ");
 
 // One room on the building
 function RoomTile({ room, roomTenants, isSelected, onSelect, delay }) {
@@ -321,10 +290,10 @@ function RoomTile({ room, roomTenants, isSelected, onSelect, delay }) {
         </Typography>
         {maintenance && <HandymanOutlinedIcon sx={{ fontSize: 15, color: "text.secondary", flexShrink: 0 }} />}
       </Box>
-      {capacity > 0 && <BedSquares capacity={capacity} roomTenants={roomTenants} maintenance={maintenance} />}
+      <RoomBedStrip room={room} roomTenants={roomTenants} maintenance={maintenance} />
       <Typography
         variant="caption"
-        sx={{ fontWeight: 700, lineHeight: 1, color: maintenance ? "text.secondary" : full ? "primary.main" : free > 0 ? "success.main" : "text.secondary" }}
+        sx={{ mt: "auto", fontWeight: 700, lineHeight: 1, color: maintenance ? "text.secondary" : full ? "primary.main" : free > 0 ? "success.main" : "text.secondary" }}
       >
         {caption}
       </Typography>
@@ -376,26 +345,19 @@ function RoomMap({ rooms, tenants, selectedKey, onSelectRoom }) {
   return (
     <Box>
       {/* Legend */}
-      <Box sx={{ display: "flex", flexWrap: "wrap", columnGap: 2, rowGap: 0.75, mb: 2 }}>
-        {[
-          ["Bed taken", { bgcolor: ORANGE }],
-          ["Bed free", { border: "1.5px solid", borderColor: (t) => alpha(t.palette.text.primary, 0.28) }],
-          ["Full room", { bgcolor: "rgba(255,69,0,.12)", border: "1px solid rgba(255,69,0,.35)" }],
-          ["Maintenance", { bgcolor: (t) => alpha(t.palette.text.primary, 0.1) }],
-        ].map(([label, swatch]) => (
-          <Box key={label} sx={{ ...row, gap: 0.75 }}>
-            <Box sx={{ width: 12, height: 12, borderRadius: "3px", boxSizing: "border-box", ...swatch }} />
-            <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600 }}>
-              {label}
-            </Typography>
-          </Box>
-        ))}
+      <Box sx={{ mb: 2 }}>
+        <RoomBedLegend
+          extra={[
+            [t("Full room"), <Box key="d" sx={{ width: 14, height: 12, borderRadius: "3px", bgcolor: "rgba(255,69,0,.12)", border: "1px solid rgba(255,69,0,.35)" }} />],
+            [t("Maintenance"), <BedUnit key="e" size="xs" levels={[{ state: "off" }]} />],
+          ]}
+        />
       </Box>
 
       {/* Phone floor picker */}
       {!isDesktop && floors.length > 1 && (
         <Box sx={{ display: "flex", gap: 0.75, overflowX: "auto", pb: 1, mb: 1.5, mx: -0.5, px: 0.5, scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
-          {floors.map((f) => {
+          {[...floors].reverse().map((f) => {
             const on = f.key === activePhoneFloor;
             return (
               <Box
@@ -457,7 +419,7 @@ function RoomMap({ rooms, tenants, selectedKey, onSelectRoom }) {
                   {floor.freeBeds}{" "}{t("free")}
                 </Typography>
               </Box>
-              <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 1 }}>
+              <Box sx={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(116px, 1fr))", gap: 1 }}>
                 {floor.rooms.map(({ room, roomTenants }, idx) => (
                   <RoomTile
                     key={`${roomKey(room)}-${idx}`}
@@ -499,6 +461,8 @@ export default function PropertyProfile() {
   const [savingStatus, setSavingStatus] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState("");
+  const [bedEditorOpen, setBedEditorOpen] = useState(false);
+  const [bedsSaved, setBedsSaved] = useState(false);
 
   useEffect(() => {
     const fetchProperty = async () => {
@@ -581,15 +545,31 @@ export default function PropertyProfile() {
 
   // Picking a room also loads its saved status into the form (done here rather
   // than in an effect, so saving doesn't wipe the "updated" message).
+  const detailsRef = useRef(null);
   const selectRoom = (key) => {
     const room = rooms.find((r) => roomKey(r) === key);
     setSelectedKey(key);
+    // The details card stays put; if it's scrolled out of sight, show it once
+    const card = detailsRef.current;
+    if (card) {
+      const { top, bottom } = card.getBoundingClientRect();
+      if (top > window.innerHeight - 160 || bottom < 160) card.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
     setStatusMode(isMaintenance(room) ? "maintenance" : "operational");
     setMaintenanceNote(room?.maintenanceNote || "");
     setSaveSuccess(false);
     setSaveError("");
+    setBedsSaved(false);
   };
   const closeRoom = () => setSelectedKey(null);
+
+  // Bed layout and rates from the bed editor, saved straight to the property
+  const saveRoomBeds = async (beds) => {
+    const updatedRooms = rooms.map((r) => (roomKey(r) === selectedKey ? { ...r, ...beds } : r));
+    await updateDoc(doc(db, "properties", id), { rooms: updatedRooms });
+    setProperty((prev) => ({ ...prev, rooms: updatedRooms }));
+    setBedsSaved(true);
+  };
 
   // Totals for the stat tiles
   const overallMetrics = useMemo(() => {
@@ -675,6 +655,7 @@ export default function PropertyProfile() {
 
   // Has the owner changed anything in the status form yet?
   const selectedIsMaint = isMaintenance(selectedRoom);
+  const selectedBunks = selectedRoom ? bunkCountOf(selectedRoom, capacityOf(selectedRoom)) : 0;
   const statusDirty = selectedRoom
     ? (statusMode === "maintenance") !== selectedIsMaint ||
       (statusMode === "maintenance" && maintenanceNote.trim() !== (selectedRoom.maintenanceNote || "").trim())
@@ -703,77 +684,56 @@ export default function PropertyProfile() {
         </IconButton>
       </Box>
 
-      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 1, mt: 2 }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1, mt: 2 }}>
         {[
           ["Beds", capacityOf(selectedRoom)],
           ["Occupied", selectedTenants.length],
-          ["Rate / bed", selectedRoom.monthlyRatePerBed ? (customBedRates(selectedRoom).length ? rateRangeText(selectedRoom) : peso(selectedRoom.monthlyRatePerBed)) : "—"],
         ].map(([label, value]) => (
           <Box key={label} sx={{ p: 1.25, borderRadius: R.sm, bgcolor: (t) => alpha(t.palette.background.paper, 0.45), minWidth: 0 }}>
             <Typography variant="caption" color="text.secondary" noWrap component="div" sx={{ fontWeight: 600 }}>{label}</Typography>
             <Typography noWrap sx={{ fontFamily: HEAD, fontWeight: 800, fontSize: "1rem" }}>{value}</Typography>
           </Box>
         ))}
+        {/* Every rate this room charges, not just the room's default */}
+        <RoomRateList room={selectedRoom} sx={{ gridColumn: "1 / -1" }} />
       </Box>
 
-      {/* TENANTS — what owners check most, so it comes first */}
-      <Typography variant="subtitle2" sx={{ fontWeight: 800, mt: 3, mb: 1.25 }}>
-        {t("Tenants")}
-        <Typography component="span" variant="subtitle2" color="text.secondary" sx={{ fontWeight: 600 }}>
-          {" "}· {selectedTenants.length}{" "}{t("of")}{" "}{capacityOf(selectedRoom)}
+      {/* BEDS & TENANTS — what owners check most, so it comes first */}
+      <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mt: 3, mb: 1.25 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 800, minWidth: 0 }}>
+          {t("Beds & tenants")}
+          <Typography component="span" variant="subtitle2" color="text.secondary" sx={{ fontWeight: 600 }}>
+            {" "}· {selectedTenants.length}{" "}{t("of")}{" "}{capacityOf(selectedRoom)}
+          </Typography>
         </Typography>
-      </Typography>
-      {selectedTenants.length === 0 ? (
+        {capacityOf(selectedRoom) > 0 && (
+          <Button size="small" variant="outlined" startIcon={<EditIcon sx={{ fontSize: "16px !important" }} />} onClick={() => setBedEditorOpen(true)} sx={{ fontWeight: 700, textTransform: "none", flexShrink: 0, borderRadius: R.sm }}>
+            {t("Edit beds")}
+          </Button>
+        )}
+      </Box>
+      {selectedBunks > 0 && (
+        <Typography variant="caption" color="text.secondary" component="div" sx={{ mt: -0.75, mb: 1.25 }}>
+          {layoutText(selectedBunks, capacityOf(selectedRoom) - selectedBunks * 2)}
+        </Typography>
+      )}
+      {capacityOf(selectedRoom) === 0 ? (
         <Typography variant="body2" color="text.secondary" sx={{ p: 2, textAlign: "center", border: "1px dashed", borderColor: "divider", borderRadius: R.sm }}>
-          {t("No tenants assigned to this room.")}
+          {t("This room has no beds yet.")}
         </Typography>
       ) : (
-        <Box sx={{ display: "flex", flexDirection: "column", gap: 1 }}>
-          {selectedTenants.map((tenant) => {
-            const moveOut = getMoveOutDate(tenant);
-            const tenantId = tenant.uid || tenant.id;
-            const name = tenant.name || tenant.fullName || tenant.email || "Unnamed Tenant";
-            return (
-              <Box
-                key={tenantId}
-                component="button"
-                type="button"
-                onClick={() => navigate(`/owner/tenants/${tenantId}`)}
-                sx={{
-                  ...row,
-                  gap: 1.5,
-                  width: "100%",
-                  textAlign: "left",
-                  p: 1.25,
-                  fontFamily: "inherit",
-                  color: "inherit",
-                  bgcolor: "transparent",
-                  border: "1px solid",
-                  borderColor: "divider",
-                  borderRadius: R.sm,
-                  cursor: "pointer",
-                  transition: "background-color .15s, border-color .15s",
-                  "&:hover": { bgcolor: "action.hover", borderColor: "primary.main" },
-                  "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
-                }}
-              >
-                <Box sx={{ width: 36, height: 36, borderRadius: "50%", flexShrink: 0, ...row, justifyContent: "center", bgcolor: ORANGE, color: "#fff", fontFamily: HEAD, fontWeight: 800, fontSize: 14 }}>
-                  {name.toString().trim().charAt(0).toUpperCase()}
-                </Box>
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="body2" noWrap sx={{ fontWeight: 700 }}>
-                    {name}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" noWrap component="div">
-                    {(tenant.bedId || tenant.bedNumber) ? `Bed ${tenant.bedId || tenant.bedNumber} · ` : ""}
-                    {moveOut ? `Move-out ${moveOut}` : t("No scheduled move-out")}
-                  </Typography>
-                </Box>
-                <ChevronRightIcon sx={{ color: "text.disabled" }} />
-              </Box>
-            );
-          })}
-        </Box>
+        <RoomBedList
+          room={selectedRoom}
+          roomTenants={selectedTenants}
+          maintenance={selectedIsMaint}
+          moveOutOf={getMoveOutDate}
+          onOpenTenant={(tenant) => navigate(`/owner/tenants/${tenant.uid || tenant.id}`)}
+        />
+      )}
+      {bedsSaved && (
+        <Alert severity="success" icon={<CheckCircleOutlineIcon fontSize="inherit" />} onClose={() => setBedsSaved(false)} sx={{ mt: 1.25, borderRadius: R.sm }}>
+          {t("Beds updated.")}
+        </Alert>
       )}
 
       <Divider sx={{ my: 3 }} />
@@ -916,18 +876,18 @@ export default function PropertyProfile() {
           )}
         </Paper>
 
-        {/* Desktop: side card (sticks while the map scrolls). Phones use the bottom sheet below. */}
+        {/* Desktop: side card beside the map, as tall as the map and fixed in
+            place (it doesn't move as the page scrolls); long content scrolls
+            inside it. Phones use the bottom sheet below. */}
         {isDesktop && (
+          <Box ref={detailsRef} sx={{ position: "relative", alignSelf: "stretch", minHeight: DETAILS_CARD_MIN_H, scrollMarginTop: "96px" }}>
           <Paper
             elevation={0}
             sx={{
               ...cardSx,
+              position: "absolute",
+              inset: 0,
               p: 3,
-              position: "sticky",
-              top: 96,
-              // Fixed size: the card never grows or shrinks as you pick rooms,
-              // tenants or the maintenance box; long content scrolls inside.
-              height: DETAILS_CARD_H,
               overflowY: "auto",
               overscrollBehavior: "contain",
             }}
@@ -939,11 +899,12 @@ export default function PropertyProfile() {
                 </Box>
                 <Typography sx={{ fontFamily: HEAD, fontWeight: 800 }}>{t("Select a room")}</Typography>
                 <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5, maxWidth: 260 }}>
-                  {t("Tap any room on the map to see its tenants or change its status.")}
+                  {t("Tap a room on the map to see who sleeps in each bed, edit its beds and rates, or mark it for maintenance.")}
                 </Typography>
               </Box>
             )}
           </Paper>
+          </Box>
         )}
       </Box>
 
@@ -969,6 +930,15 @@ export default function PropertyProfile() {
           <Box sx={{ width: 40, height: 4, borderRadius: 2, bgcolor: "divider", mx: "auto", mb: 2 }} />
           {roomPanel}
         </Drawer>
+      )}
+
+      {bedEditorOpen && selectedRoom && (
+        <BedRatesDialog
+          room={selectedRoom}
+          saveLabel={t("Save")}
+          onClose={() => setBedEditorOpen(false)}
+          onSave={saveRoomBeds}
+        />
       )}
 
       {/* AMENITIES & HOUSE RULES */}

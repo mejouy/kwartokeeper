@@ -51,6 +51,7 @@ import { withoutRemoved } from "../../../utils/accountState";
 import { isActiveCharge } from "../../../utils/charges";
 // Translation is "tr" here: this file also uses "t" for tenants and the theme
 import { t as tr } from "../../../i18n";
+import { bedNameOf } from "../../../utils/bedRates";
 
 const HEAD = '"Inter", sans-serif';
 const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
@@ -393,7 +394,8 @@ export default function TenantList() {
   // =========================================================
   const renderRow = (r) => {
     const { t } = r;
-    const roomText = t.roomId ? `Room ${t.roomId}${t.bedId ? ` · ${String(t.bedId).startsWith("Bed") ? t.bedId : `Bed ${t.bedId}`}` : ""}` : "";
+    const tenantRoom = (r.property?.rooms || []).find((room) => room.roomName === t.roomId || room.roomNumber === t.roomId || room.id === t.roomId);
+    const roomText = t.roomId ? `Room ${t.roomId}${t.bedId ? ` · ${bedNameOf(tenantRoom, t.bedId)}` : ""}` : "";
     const contact = t.phone || t.email || "No contact details";
     const flagChips = (
       <>
@@ -448,7 +450,8 @@ export default function TenantList() {
           cursor: "pointer",
           px: { xs: 2, sm: 2.5 },
           py: 1.5,
-          opacity: r.status === "Inactive" ? 0.65 : 1,
+          // Inactive: a grey row and avatar, text stays readable
+          ...(r.status === "Inactive" && { bgcolor: (th) => alpha(th.palette.text.primary, 0.03) }),
           transition: "background-color .15s ease",
           "&:hover, &:focus-visible": { bgcolor: "action.hover", outline: "none" },
           "&:hover .kk-chev, &:focus-visible .kk-chev": { color: "primary.main", transform: "translateX(2px)" },
@@ -459,7 +462,7 @@ export default function TenantList() {
           <Avatar
             src={t.idPhotoUrl || undefined}
             alt=""
-            sx={{ width: 40, height: 40, fontFamily: HEAD, fontSize: "0.85rem", fontWeight: 800, bgcolor: r.status === "Inactive" ? "action.selected" : "primary.main", color: "#fff" }}
+            sx={{ width: 40, height: 40, fontFamily: HEAD, fontSize: "0.85rem", fontWeight: 800, bgcolor: r.status === "Inactive" ? "grey.600" : "primary.main", color: "#fff", ...(r.status === "Inactive" && { filter: "grayscale(1)" }) }}
           >
             {initialsOf(r.name)}
           </Avatar>

@@ -16,7 +16,7 @@
 import { useEffect, useState } from "react";
 import { Navigate } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
-import { Box, CircularProgress } from "@mui/material";
+import BrandLoader from "./BrandLoader";
 import { db } from "../config/firebase";
 import { useAuth } from "../context/AuthContext";
 
@@ -76,18 +76,7 @@ export default function RedirectIfAuthenticated({ children }) {
   }, []);
 
   if (checking) {
-    return (
-      <Box
-        sx={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          height: "100vh",
-        }}
-      >
-        <CircularProgress />
-      </Box>
-    );
+    return <BrandLoader />;
   }
 
   if (target) {

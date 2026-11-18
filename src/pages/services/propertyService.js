@@ -1,6 +1,7 @@
 // src/pages/services/propertyService.js
 import { auth, db } from "../../config/firebase";
 import { findDuplicateProperty } from "../../utils/duplicates";
+import { cleanBedTypeRates, cleanBedTypes } from "../../utils/bedRates";
 import {
   collection,
   addDoc,
@@ -189,6 +190,8 @@ export const saveProperty = async (
       capacity: Number(room.capacity) || 1,
       roomType: room.roomType || "Bedspace",
       monthlyRatePerBed: Number(room.rate || room.monthlyRatePerBed) || 0,
+      bedTypes: cleanBedTypes(room.bedTypes, room.capacity),
+      bedTypeRates: cleanBedTypeRates(room.bedTypeRates, room.rate || room.monthlyRatePerBed),
       occupiedBeds: 0,
     })),
 

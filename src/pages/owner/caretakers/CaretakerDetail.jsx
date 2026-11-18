@@ -10,8 +10,8 @@ import {
   Avatar,
   CircularProgress,
   Alert,
-  Snackbar,
   Dialog,
+  DialogTitle,
   DialogContent,
   DialogActions,
   TextField,
@@ -49,7 +49,8 @@ import { emailCaretakerResetLink } from "../../../services/caretakerService";
 import { isRemovedAccount, removedLabel } from "../../../utils/accountState";
 import CaretakerActivity from "./CaretakerActivity";
 import { t } from "../../../i18n";
-import { assignmentFields, modeOf, propertyIdsOf, takenProperties, useAssignmentMode, validateAssignment } from "../../../utils/caretakerAssignment";
+import { assignmentFields, caretakerStatusFields, isInactiveCaretaker, modeOf, propertyIdsOf, takenProperties, useAssignmentMode, validateAssignment } from "../../../utils/caretakerAssignment";
+import Toast from "../../../components/Toast";
 
 // Same wording as the Invite caretaker form
 const PERMISSIONS = [
@@ -95,8 +96,8 @@ function Pill({ label, tone }) {
         fontSize: 12.5,
         fontWeight: 700,
         whiteSpace: "nowrap",
-        bgcolor: (t) => alpha(t.palette[tone].main, 0.12),
-        color: (t) => t.palette[tone].dark,
+        bgcolor: (t) => (tone === "grey" ? alpha(t.palette.text.primary, 0.08) : alpha(t.palette[tone].main, 0.12)),
+        color: (t) => (tone === "grey" ? t.palette.text.secondary : t.palette[tone].dark),
       }}
     >
       {label}
@@ -157,6 +158,7 @@ export default function CaretakerDetail() {
   const [snackText, setSnackText] = useState("Caretaker details updated.");
   // New temporary password / reset link
   const [resetOpen, setResetOpen] = useState(false);
+  const [statusDlg, setStatusDlg] = useState({ open: false, saving: false, error: "" });
   const [resetBusy, setResetBusy] = useState(""); // "" | "password" | "email"
   const [resetError, setResetError] = useState("");
   const [ownerProperties, setOwnerProperties] = useState([]);
@@ -377,6 +379,29 @@ export default function CaretakerDetail() {
   // =========================================================
   const displayName = caretaker.name || caretaker.fullName || "Unnamed caretaker";
   const isPending = Boolean(caretaker.mustChangePassword);
+  const inactive = isInactiveCaretaker(caretaker);
+
+  // Active / inactive: saved on the account and on the caretakers record
+  const saveStatus = async (active) => {
+    const patch = caretakerStatusFields(active);
+    setStatusDlg((s) => ({ ...s, saving: true, error: "" }));
+    try {
+      await updateDoc(doc(db, "users", caretakerId), patch);
+      try {
+        const ref = doc(db, "caretakers", caretakerId);
+        if ((await getDoc(ref)).exists()) await updateDoc(ref, patch);
+      } catch (err) {
+        console.warn("Caretakers record not updated:", err?.code || err);
+      }
+      setCaretaker((prev) => ({ ...prev, ...patch }));
+      setStatusDlg({ open: false, saving: false, error: "" });
+      setSnackText(active ? `${displayName} is active again.` : `${displayName} is now inactive.`);
+      setSnackbar(true);
+    } catch (err) {
+      console.error("Couldn't change the caretaker's status:", err);
+      setStatusDlg((s) => ({ ...s, saving: false, error: "Couldn't save. Check your connection and try again." }));
+    }
+  };
   const addedOn = formatDate(caretaker.createdAt);
   const propertyMissing = Boolean(caretaker.assignedPropertyId) && !property;
 
@@ -427,7 +452,7 @@ export default function CaretakerDetail() {
 
         <Box sx={{ position: "relative", display: "flex", flexDirection: { xs: "column", sm: "row" }, alignItems: { sm: "center" }, justifyContent: "space-between", gap: 2, mb: 2.5 }}>
           <Box sx={{ display: "flex", alignItems: "center", gap: { xs: 1.75, sm: 2.25 }, minWidth: 0 }}>
-            <Avatar sx={{ width: { xs: 56, sm: 68 }, height: { xs: 56, sm: 68 }, bgcolor: isPending ? "warning.main" : "primary.main", color: "#fff", fontFamily: HEAD, fontWeight: 800, fontSize: { xs: "1.25rem", sm: "1.5rem" }, flexShrink: 0 }}>
+            <Avatar sx={{ width: { xs: 56, sm: 68 }, height: { xs: 56, sm: 68 }, bgcolor: inactive ? "grey.600" : isPending ? "warning.main" : "primary.main", color: "#fff", fontFamily: HEAD, fontWeight: 800, fontSize: { xs: "1.25rem", sm: "1.5rem" }, flexShrink: 0 }}>
               {initialsOf(displayName)}
             </Avatar>
             <Box sx={{ minWidth: 0 }}>
@@ -435,7 +460,7 @@ export default function CaretakerDetail() {
                 <Typography component="h1" sx={{ fontFamily: HEAD, fontWeight: 900, letterSpacing: "-0.02em", fontSize: { xs: "1.35rem", sm: "1.75rem" }, overflowWrap: "anywhere", lineHeight: 1.2 }}>
                   {displayName}
                 </Typography>
-                <Pill label={isPending ? "Not logged in yet" : "Active"} tone={isPending ? "warning" : "success"} />
+                <Pill label={inactive ? t("Inactive") : isPending ? t("Not logged in yet") : t("Active")} tone={inactive ? "grey" : isPending ? "warning" : "success"} />
               </Box>
               <Typography variant="body2" color="text.secondary" sx={{ mt: 0.25, overflowWrap: "anywhere" }}>
                 {t("Caretaker ·")}{" "}{[caretaker.phone, caretaker.email].filter(Boolean).join(" · ") || t("No contact details")}
@@ -509,6 +534,49 @@ export default function CaretakerDetail() {
           {displayName}{" "}{t("hasn't signed in yet. They log in with the email and temporary password from their invite, then set their own password.")}
         </Alert>
       )}
+
+      {/* ───── Active or inactive ───── */}
+      {!isRemovedAccount(caretaker) && (
+        <Box sx={{ ...panelSx, p: { xs: 2, sm: 2.5 }, mb: 2.5, display: "flex", flexWrap: "wrap", alignItems: "center", gap: 2, ...(inactive && { bgcolor: (th) => alpha(th.palette.text.primary, 0.04) }) }}>
+          <Box sx={{ flex: "1 1 260px", minWidth: 0 }}>
+            <Box sx={{ ...row, gap: 1 }}>
+              <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: inactive ? "grey.600" : "success.main" }} />
+              <Typography sx={{ fontFamily: HEAD, fontWeight: 800 }}>{inactive ? t("Inactive") : t("Active")}</Typography>
+            </Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 0.5 }}>
+              {inactive
+                ? t("They can't use the caretaker app. Their history is kept, and their properties don't count them as a caretaker.")
+                : t("They can sign in and work at the properties you gave them.")}
+            </Typography>
+          </Box>
+          <Button
+            variant={inactive ? "contained" : "outlined"}
+            color={inactive ? "primary" : "inherit"}
+            disableElevation
+            onClick={() => (inactive ? saveStatus(true) : setStatusDlg({ open: true, saving: false, error: "" }))}
+            disabled={statusDlg.saving}
+            sx={{ fontWeight: 700, borderRadius: R.sm, minHeight: 42, px: 2.5, flexShrink: 0, ...(inactive ? {} : { borderColor: "divider" }) }}
+          >
+            {inactive ? t("Set as active") : t("Set as inactive")}
+          </Button>
+        </Box>
+      )}
+
+      <Dialog open={statusDlg.open} onClose={() => !statusDlg.saving && setStatusDlg({ open: false, saving: false, error: "" })} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: R.lg } } }}>
+        <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>{t("Set {name} as inactive?", { name: displayName })}</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary">
+            {t("They'll be signed out of the caretaker app and can't see tenants, rooms or payments until you set them as active again. Nothing is deleted.")}
+          </Typography>
+          {statusDlg.error && <Alert severity="error" sx={{ mt: 2, borderRadius: R.sm }}>{statusDlg.error}</Alert>}
+        </DialogContent>
+        <DialogActions sx={{ p: 2 }}>
+          <Button onClick={() => setStatusDlg({ open: false, saving: false, error: "" })} disabled={statusDlg.saving} sx={{ fontWeight: 700 }}>{t("Cancel")}</Button>
+          <Button variant="contained" color="error" disableElevation onClick={() => saveStatus(false)} disabled={statusDlg.saving} sx={{ fontWeight: 700, borderRadius: R.sm }}>
+            {statusDlg.saving ? t("Saving…") : t("Set as inactive")}
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ───── What they can do ───── */}
       <Box sx={{ ...panelSx, p: { xs: 2, sm: 3 } }}>
@@ -740,11 +808,7 @@ export default function CaretakerDetail() {
         </DialogActions>
       </Dialog>
 
-      <Snackbar open={snackbar} autoHideDuration={3500} onClose={() => setSnackbar(false)} anchorOrigin={{ vertical: "bottom", horizontal: "center" }}>
-        <Alert severity="success" variant="filled" onClose={() => setSnackbar(false)} sx={{ width: "100%" }}>
-          {snackText}
-        </Alert>
-      </Snackbar>
+      <Toast open={snackbar} message={snackText} severity="success" onClose={() => setSnackbar(false)} />
 
       {/* ───── Reset password ───── */}
       <Dialog open={resetOpen} onClose={() => !resetBusy && setResetOpen(false)} fullWidth maxWidth="xs" slotProps={{ paper: { sx: { borderRadius: R.xl } } }}>

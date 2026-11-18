@@ -3,6 +3,7 @@
 // Pure functions for turning the owner's Step 3 choices into an actual
 // array of room objects. Kept separate from the component so the logic
 // is easy to unit-test and reuse (e.g. on the Success screen).
+import { groupBedSetup } from "./bedRates";
 
 /**
  * Generates a room name based on the selected naming pattern.
@@ -43,19 +44,25 @@ export function buildUniformRooms({
   capacityPerRoom,
   monthlyRate,
   namingPattern,
+  bedLayout,
+  bunksPerRoom,
+  upperRate,
+  lowerRate,
 }) {
+  const beds = { bedLayout, bunksPerRoom, upperRate, lowerRate };
   const rooms = [];
   let globalIndex = 1;
 
   for (let floor = 1; floor <= totalFloors; floor++) {
     for (let i = 1; i <= roomsPerFloor; i++) {
-      rooms.push({
+      const room = {
         roomName: generateRoomName(namingPattern, floor, i, globalIndex),
         floor,
         capacity: capacityPerRoom,
         monthlyRatePerBed: monthlyRate,
         occupiedBeds: 0,
-      });
+      };
+      rooms.push({ ...room, ...groupBedSetup(beds, capacityPerRoom, monthlyRate) });
       globalIndex++;
     }
   }
@@ -95,6 +102,7 @@ export function buildPerFloorRooms({ floorConfigs, namingPattern }) {
           monthlyRatePerBed: monthlyRate,
           roomType: group.roomType || "Bedspace",
           occupiedBeds: 0,
+          ...groupBedSetup(group, capacityPerRoom, monthlyRate),
         });
         roomIndexOnFloor++;
         globalIndex++;

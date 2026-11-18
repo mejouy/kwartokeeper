@@ -32,6 +32,12 @@ await env.withSecurityRulesDisabled(async (ctx) => {
     await put(`caretakers/${id}`, c);
   }
   await put("users/C3", { role: "caretaker", ownerUid: "O1", invitedBy: "O1", assignedPropertyId: "P1", permissions: {}, name: "C3" }); // no permissions
+  await put("users/C6", { role: "caretaker", ownerUid: "O1", assignedPropertyId: "P1", name: "C6" }); // older profile without permissions
+  await put("caretakers/C6", { role: "caretaker", ownerUid: "O1", assignedPropertyId: "P1", permissions: PERMS });
+  await put("users/C7", { role: "caretaker", ownerUid: "O1", assignedPropertyId: "P1", permissions: { viewFinancials: false }, name: "C7" });
+  await put("caretakers/C7", { role: "caretaker", ownerUid: "O1", assignedPropertyId: "P1", permissions: PERMS }); // stale legacy grant
+  // Set to inactive by the owner: keeps their profile, loses a caretaker's access
+  await put("users/C5", { role: "caretaker", ownerUid: "O1", invitedBy: "O1", assignedPropertyId: "P1", permissions: PERMS, name: "C5", status: "Inactive" });
   // Owner O1's caretaker rule allows several properties: C4 works on P1A now, also looks after P1
   await put("properties/P1A", { ownerUid: "O1", propertyName: "One-A" });
   await put("users/C4", { role: "caretaker", ownerUid: "O1", invitedBy: "O1", assignedPropertyId: "P1A", assignedPropertyIds: ["P1A", "P1"], permissions: PERMS, name: "C4" });
@@ -48,6 +54,7 @@ await env.withSecurityRulesDisabled(async (ctx) => {
   // Repair steps (panel revisions): waiting for the tenant, confirmed, rated, to reopen, still pending
   const fixed = { ownerUid: "O1", propertyId: "P1", tenantUid: "T1", status: "Resolved", resolutionNotes: "Fixed" };
   await put("maintenance_tickets/tk3", { ...fixed, title: "Sink" });
+  await put("maintenance_tickets/tk8", { ...fixed, title: "Tap" });
   await put("maintenance_tickets/tk4", { ...fixed, title: "Fan", tenantConfirmed: true });
   await put("maintenance_tickets/tk5", { ...fixed, title: "Light", tenantConfirmed: true, review: { rating: 5, comment: "", at: Timestamp.now() } });
   await put("maintenance_tickets/tk6", { ...fixed, title: "Shower" });
@@ -288,6 +295,14 @@ await check("legacy owner notifies", true, () => addDoc(collection(as("LEG"), "n
   await check("caretaker without layout: rooms", false, () => updateDoc(doc(db, "properties/P1"), { rooms: [] }));
   await check("caretaker without permissions: tenants", true, () => q(db, "users", eq("propertyId", "P1")));
 }
+{
+  const db = as("C6"); // legacy permissions remain supported when the user profile has no permission field
+  await check("legacy caretaker permissions: payments", true, () => q(db, "payments", eq("propertyId", "P1")));
+}
+{
+  const db = as("C7"); // an explicit user-profile revocation beats stale legacy grants
+  await check("revoked caretaker permissions: payments", false, () => q(db, "payments", eq("propertyId", "P1")));
+}
 
 
 // ---------------- Receipt numbers for caretaker cash ----------------
@@ -329,6 +344,21 @@ await check("legacy owner notifies", true, () => addDoc(collection(as("LEG"), "n
   await check("multi-property caretaker switches back", true, () => updateDoc(doc(db, "users/C4"), { assignedPropertyId: "P1A", activePropertyChangedAt: "again" }));
 }
 
+// ---------------- Caretaker C5 (inactive) ----------------
+{
+  const db = as("C5");
+  await check("inactive caretaker reads own profile", true, () => getDoc(doc(db, "users/C5")));
+  await check("inactive caretaker reads the property's tickets", false, () => q(db, "maintenance_tickets", eq("propertyId", "P1")));
+  await check("inactive caretaker reads a tenant", false, () => getDoc(doc(db, "users/T1")));
+  await check("inactive caretaker sets themselves active", false, () => updateDoc(doc(db, "users/C5"), { status: "Active" }));
+}
+{
+  await check("owner sets a caretaker inactive", true, () => updateDoc(doc(as("O1"), "users/C1"), { status: "Inactive" }));
+  await check("owner sets them active again", true, () => updateDoc(doc(as("O1"), "users/C1"), { status: "Active" }));
+  await check("owner adds lease pictures", true, () => updateDoc(doc(as("O1"), "users/T1"), { leaseFiles: [{ url: "https://x/y.jpg", name: "p1" }] }));
+  await check("tenant changes their own lease pictures", false, () => updateDoc(doc(as("T1"), "users/T1"), { leaseFiles: [] }));
+}
+
 // ---------------- Tenant T1 ----------------
 {
   const db = as("T1");
@@ -349,6 +379,8 @@ await check("legacy owner notifies", true, () => addDoc(collection(as("LEG"), "n
   await check("tenant follows up", true, () => updateDoc(doc(db, "maintenance_tickets/tk1"), { followUps: ["x"], updatedAt: new Date() }));
   // Repair steps: confirm, reopen, rate
   const reopen = (reason) => ({ status: "Pending", reopenCount: 1, reopenedAt: serverTimestamp(), reopenReason: reason, resolvedAt: deleteField(), updatedAt: serverTimestamp() });
+  await check("tenant confirms with a long note", false, () => updateDoc(doc(db, "maintenance_tickets/tk8"), { tenantConfirmed: true, tenantConfirmedAt: serverTimestamp(), tenantNote: "x".repeat(501) }));
+  await check("tenant confirms the fix with only a note", true, () => updateDoc(doc(db, "maintenance_tickets/tk8"), { tenantConfirmed: true, tenantConfirmedAt: serverTimestamp(), tenantNote: "No more leak.", updatedAt: serverTimestamp() }));
   await check("tenant rates 6 stars", false, () => updateDoc(doc(db, "maintenance_tickets/tk3"), { tenantConfirmed: true, tenantConfirmedAt: serverTimestamp(), review: { rating: 6, at: serverTimestamp() } }));
   await check("tenant confirms the fix with a rating", true, () => updateDoc(doc(db, "maintenance_tickets/tk3"), { tenantConfirmed: true, tenantConfirmedAt: serverTimestamp(), review: { rating: 4, comment: "Quick", at: serverTimestamp() }, updatedAt: serverTimestamp() }));
   await check("tenant rates twice", false, () => updateDoc(doc(db, "maintenance_tickets/tk3"), { review: { rating: 1, at: serverTimestamp() }, updatedAt: serverTimestamp() }));

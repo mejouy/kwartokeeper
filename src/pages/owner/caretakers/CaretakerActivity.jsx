@@ -14,6 +14,8 @@ import KeyOutlinedIcon from "@mui/icons-material/KeyOutlined";
 import { collection, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
 import { db } from "../../../config/firebase";
 import { ACTIVITY_CATEGORIES } from "../../../services/activityLog";
+import { FOLD_AT } from "../../../components/FoldList";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import { t } from "../../../i18n";
 
 const HEAD = '"Inter", sans-serif';
@@ -33,6 +35,7 @@ export default function CaretakerActivity({ ownerUid, caretakerId, panelSx }) {
   const [count, setCount] = useState(PAGE);
   const [state, setState] = useState({ key: "", entries: [], more: false, error: "" });
   const [category, setCategory] = useState("all");
+  const [expanded, setExpanded] = useState(false); // 5 or more entries: the latest few until opened
   const key = `${ownerUid}|${caretakerId}|${count}`;
 
   useEffect(() => {
@@ -72,9 +75,11 @@ export default function CaretakerActivity({ ownerUid, caretakerId, panelSx }) {
   const shown = useMemo(() => (category === "all" ? state.entries : state.entries.filter((e) => e.category === category)), [state.entries, category]);
   const usedCategories = useMemo(() => Object.keys(ACTIVITY_CATEGORIES).filter((c) => state.entries.some((e) => e.category === c)), [state.entries]);
 
-  // Group by day
+  // Group by day (folded to the latest few when the list is long)
+  const folded = !expanded && shown.length >= FOLD_AT;
+  const visible = folded ? shown.slice(0, 3) : shown;
   const groups = [];
-  shown.forEach((e) => {
+  visible.forEach((e) => {
     const d = toDate(e.at);
     const label = d ? dayLabel(d) : "Just now";
     if (!groups.length || groups[groups.length - 1].label !== label) groups.push({ label, items: [] });
@@ -148,7 +153,17 @@ export default function CaretakerActivity({ ownerUid, caretakerId, panelSx }) {
               })}
             </Box>
           ))}
-          {state.more && (
+          {folded && (
+            <Button fullWidth onClick={() => setExpanded(true)} endIcon={<ExpandMoreIcon />} sx={{ mt: 1.5, fontWeight: 700, borderRadius: "10px", border: "1px solid", borderColor: "divider", textTransform: "none" }}>
+              {t("Show all {n} entries", { n: `${shown.length}${state.more ? "+" : ""}` })}
+            </Button>
+          )}
+          {!folded && shown.length >= FOLD_AT && (
+            <Button size="small" onClick={() => setExpanded(false)} sx={{ mt: 1, fontWeight: 700, textTransform: "none" }}>
+              {t("Show fewer")}
+            </Button>
+          )}
+          {!folded && state.more && (
             <Button fullWidth onClick={() => setCount((c) => c + PAGE)} sx={{ mt: 1.5, fontWeight: 700, borderRadius: "10px", border: "1px solid", borderColor: "divider" }}>
               {t("Show older activity")}
             </Button>

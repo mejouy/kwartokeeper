@@ -15,7 +15,6 @@ import {
   MenuItem,
   Paper,
   Skeleton,
-  Snackbar,
   TextField,
   ToggleButton,
   ToggleButtonGroup,
@@ -54,10 +53,14 @@ import {
   notifyMaintenanceCancelled,
   notifyMaintenancePriorityChanged,
 } from "../../services/notificationService";
-import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
+import { rankMaintenanceRequests , sortTickets, TICKET_SORTS } from "../../utils/maintenancePrioritization";
+import { useStoredSort } from "../../utils/useStoredSort";
 import { categoryOf, priorityChangeEntry, priorityChangeFields } from "../../utils/maintenanceWorkflow";
 import { PriorityDialog, RepairOutcome, ResolveDialog } from "../../components/RepairWorkflow";
+import ScrollSentinel from "../../components/ScrollSentinel";
 import { t } from "../../i18n";
+import FoldList from "../../components/FoldList";
+import Toast from "../../components/Toast";
 
 const HEAD = '"Inter", sans-serif';
 const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
@@ -185,7 +188,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, onPriority, notify
   };
 
   return (
-    <Paper elevation={0} sx={{ ...cardSx, position: "relative", overflow: "hidden", p: { xs: 2, sm: 2.5 }, minWidth: 0 }}>
+    <Paper elevation={0} sx={{ ...cardSx, position: "relative", overflow: "hidden", p: { xs: 2, sm: 2.5 }, minWidth: 0, width: "100%", height: "100%", display: "flex", flexDirection: "column" }}>
       <Box aria-hidden sx={{ position: "absolute", left: 0, top: 14, bottom: 14, width: 4, borderRadius: "0 4px 4px 0", bgcolor: accent }} />
 
       {/* Title, priority and who/where */}
@@ -263,7 +266,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, onPriority, notify
             <ForumOutlinedIcon sx={{ fontSize: 15 }} />
             {followUps.length === 1 ? t("1 update from the tenant") : `${followUps.length} updates from the tenant`}
           </Typography>
-          {followUps.map((f, i) => (
+          <FoldList items={followUps} newestLast gap={0} noun={t("updates")} render={(f, i) => (
             <Box key={i} sx={{ mt: 0.75, display: "flex", gap: 1, alignItems: "flex-start" }}>
               <Box sx={{ minWidth: 0, flex: 1 }}>
                 {f.text && (
@@ -281,7 +284,7 @@ function TicketCard({ ticket, busy, onStatusChange, onCancel, onPriority, notify
                 </Box>
               )}
             </Box>
-          ))}
+          )} />
         </Box>
       )}
 
@@ -405,6 +408,8 @@ export default function MaintenancePage() {
   const [view, setView] = useState("active");
   const [propertyFilter, setPropertyFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useStoredSort("kk_owner_ticket_sort");
+  const [ticketsShown, setTicketsShown] = useState(6);
   const [busyId, setBusyId] = useState("");
   const [cancelTarget, setCancelTarget] = useState(null);
   const [cancelReason, setCancelReason] = useState("");
@@ -610,11 +615,11 @@ export default function MaintenancePage() {
     };
   }, [scoped, now]);
 
-  // Open work first (already in priority order), finished work after, newest first
+  // Open work first (in the chosen order), finished work after, newest first
   const orderedTickets = useMemo(() => {
     const closedTime = (t) => (toDate(t.resolvedAt) || toDate(t.cancelledAt) || toDate(t.updatedAt) || toDate(t.createdAt))?.getTime() || 0;
-    return [...scoped.filter((t) => !isClosed(t)), ...scoped.filter(isClosed).sort((a, b) => closedTime(b) - closedTime(a))];
-  }, [scoped]);
+    return [...sortTickets(scoped.filter((t) => !isClosed(t)), sort), ...scoped.filter(isClosed).sort((a, b) => closedTime(b) - closedTime(a))];
+  }, [scoped, sort]);
 
   const activeView = VIEWS.find((v) => v.key === view) || VIEWS[0];
   const visibleTickets = useMemo(() => {
@@ -632,6 +637,7 @@ export default function MaintenancePage() {
     setView("active");
     setSearch("");
     setPropertyFilter("all");
+    setTicketsShown(6);
   };
 
   if (loading) {
@@ -715,9 +721,18 @@ export default function MaintenancePage() {
             }}
           >
             <SearchIcon sx={{ color: "text.secondary" }} />
-            <InputBase fullWidth placeholder={t("Search title, tenant or room")} value={search} onChange={(e) => setSearch(e.target.value)} inputProps={{ "aria-label": "Search requests" }} />
+            <InputBase
+              fullWidth
+              placeholder={t("Search title, tenant or room")}
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setTicketsShown(6);
+              }}
+              inputProps={{ "aria-label": "Search requests" }}
+            />
             {search && (
-              <IconButton size="small" aria-label={t("Clear search")} onClick={() => setSearch("")}>
+              <IconButton size="small" aria-label={t("Clear search")} onClick={() => { setSearch(""); setTicketsShown(6); }}>
                 <CloseIcon fontSize="small" />
               </IconButton>
             )}
@@ -728,7 +743,10 @@ export default function MaintenancePage() {
               select
               size="small"
               value={propertyFilter}
-              onChange={(e) => setPropertyFilter(e.target.value)}
+              onChange={(e) => {
+                setPropertyFilter(e.target.value);
+                setTicketsShown(6);
+              }}
               slotProps={{ htmlInput: { "aria-label": "Filter by property" } }}
               sx={{ minWidth: { md: 190 }, "& .MuiOutlinedInput-root": { borderRadius: R.sm, height: 44, bgcolor: "background.default" } }}
             >
@@ -738,6 +756,22 @@ export default function MaintenancePage() {
               ))}
             </TextField>
           )}
+
+          <TextField
+            select
+            size="small"
+            label={t("Sort by")}
+            value={sort}
+            onChange={(e) => {
+              setSort(e.target.value);
+              setTicketsShown(6);
+            }}
+            sx={{ minWidth: { md: 190 }, "& .MuiOutlinedInput-root": { borderRadius: R.sm, height: 44, bgcolor: "background.default" } }}
+          >
+            {TICKET_SORTS.map((s) => (
+              <MenuItem key={s.key} value={s.key}>{t(s.label)}</MenuItem>
+            ))}
+          </TextField>
 
           {/* Segmented view filter with counts */}
           <Box
@@ -753,7 +787,10 @@ export default function MaintenancePage() {
                   component="button"
                   type="button"
                   aria-pressed={on}
-                  onClick={() => setView(v.key)}
+                  onClick={() => {
+                    setView(v.key);
+                    setTicketsShown(6);
+                  }}
                   sx={{
                     ...row,
                     gap: 0.6,
@@ -814,11 +851,32 @@ export default function MaintenancePage() {
               </Button>
             </Box>
           )}
-          <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 1.5 }}>
-            {visibleTickets.map((t) => (
-              <TicketCard key={t.id} ticket={t} busy={busyId === t.id} onStatusChange={handleStatusChange} onCancel={openCancel} onPriority={setPriorityTarget} notify={notify} />
+          <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: 1.5, alignItems: "stretch" }}>
+            {visibleTickets.slice(0, ticketsShown).map((t) => (
+              <Box key={t.id} sx={{ minWidth: 0, display: "flex" }}>
+                <TicketCard ticket={t} busy={busyId === t.id} onStatusChange={handleStatusChange} onCancel={openCancel} onPriority={setPriorityTarget} notify={notify} />
+              </Box>
             ))}
           </Box>
+          <ScrollSentinel
+            enabled={ticketsShown < visibleTickets.length}
+            resetKey={`${view}:${propertyFilter}:${search}`}
+            onVisible={() => setTicketsShown((n) => Math.min(n + 6, visibleTickets.length))}
+          />
+          {visibleTickets.length > 6 && (
+            <Box sx={{ display: "flex", justifyContent: "center", gap: 1, mt: 1 }}>
+              {ticketsShown < visibleTickets.length && (
+                <Button size="small" onClick={() => setTicketsShown((n) => Math.min(n + 6, visibleTickets.length))} sx={{ fontWeight: 700 }}>
+                  {t("Show more")}
+                </Button>
+              )}
+              {ticketsShown > 6 && (
+                <Button size="small" color="inherit" onClick={() => setTicketsShown(6)} sx={{ fontWeight: 700, color: "text.secondary" }}>
+                  {t("Show less")}
+                </Button>
+              )}
+            </Box>
+          )}
         </>
       )}
 
@@ -862,17 +920,7 @@ export default function MaintenancePage() {
         </DialogActions>
       </Dialog>
 
-      <Snackbar
-        open={toast.open}
-        autoHideDuration={3000}
-        onClose={() => setToast((t) => ({ ...t, open: false }))}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        sx={{ bottom: { xs: "calc(72px + env(safe-area-inset-bottom, 0px)) !important", sm: undefined } }}
-      >
-        <Alert severity={toast.severity} variant="filled" onClose={() => setToast((t) => ({ ...t, open: false }))} sx={{ width: "100%" }}>
-          {toast.message}
-        </Alert>
-      </Snackbar>
+      <Toast open={toast.open} message={toast.message} severity={toast.severity} onClose={() => setToast((t) => ({ ...t, open: false }))} />
     </Box>
   );
 }

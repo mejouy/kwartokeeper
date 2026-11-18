@@ -6,7 +6,7 @@ import HistoryIcon from "@mui/icons-material/History";
 import { row, cardSx, timeOf, NIGHT_PAGE, Pill, EmptyState } from "./caretakerParts";
 import { t } from "../../i18n";
 
-export default function CaretakerCurfewHistoryView({ historyLoading, loadHistory, nightsShown, openNight, setNightsShown, setOpenNight }) {
+export default function CaretakerCurfewHistoryView({ curfewHistory: history, historyLoading, loadHistory, nightsShown, openNight, setNightsShown, setOpenNight }) {
   return (
     <>
       <Box sx={{ ...row, justifyContent: "flex-end", mb: 1 }}>

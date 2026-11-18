@@ -46,8 +46,13 @@ import { chargesFor, describeRepeat, depositOutcomeLabel, feesTotal, feeTypeLabe
 import { feedbackState, feedbackSummary, stars } from "../../utils/maintenanceWorkflow";
 import { useOwnerBilling } from "../../utils/billingSettings";
 import PersonOutlineIcon from "@mui/icons-material/PersonOutlined";
+import BadgeOutlinedIcon from "@mui/icons-material/BadgeOutlined";
+import MeetingRoomOutlinedIcon from "@mui/icons-material/MeetingRoomOutlined";
 import { useAuth } from "../../context/AuthContext";
 import { withoutRemoved } from "../../utils/accountState";
+import { bedLabels, bedNameMap, bedRateOf, bedTypeOf, BED_TYPE_DOUBLE_DECK_LOWER, BED_TYPE_DOUBLE_DECK_UPPER } from "../../utils/bedRates";
+import { ACTIVITY_CATEGORIES } from "../../services/activityLog";
+import { isInactiveCaretaker, propertyIdsOf } from "../../utils/caretakerAssignment";
 
 // ------------------------------------------------------------
 // HELPERS
@@ -134,14 +139,21 @@ const presetRange = (id) => {
 };
 
 const REPORTS = [
-  { id: "all", label: "Full report", desc: "Everything in one document", Icon: AssessmentOutlinedIcon },
-  { id: "payments", label: "Payments", desc: "Rent by month, property, method", Icon: PaymentsOutlinedIcon },
-  { id: "journal", label: "Cash receipts", desc: "Numbered receipts, for the books", Icon: ReceiptLongOutlinedIcon },
-  { id: "occupancy", label: "Occupancy", desc: "Beds filled and open today", Icon: HomeWorkOutlinedIcon },
-  { id: "maintenance", label: "Maintenance", desc: "Repairs and time to fix", Icon: BuildOutlinedIcon },
-  { id: "curfew", label: "Curfew", desc: "Late and out nights", Icon: NightsStayOutlinedIcon },
+  { id: "all", group: "summary", label: "Full report", desc: "Everything in one document", Icon: AssessmentOutlinedIcon },
+  { id: "payments", group: "summary", label: "Payments", desc: "Rent by month, property, method", Icon: PaymentsOutlinedIcon },
+  { id: "journal", group: "summary", label: "Cash receipts", desc: "Numbered receipts, for the books", Icon: ReceiptLongOutlinedIcon },
+  { id: "occupancy", group: "summary", label: "Occupancy", desc: "Beds filled and open today", Icon: HomeWorkOutlinedIcon },
+  { id: "maintenance", group: "summary", label: "Maintenance", desc: "Repairs and time to fix", Icon: BuildOutlinedIcon },
+  { id: "curfew", group: "summary", label: "Curfew", desc: "Late and out nights", Icon: NightsStayOutlinedIcon },
   // Panel revisions: one tenant's own report (statement of account and everything about them)
-  { id: "tenant", label: "Per tenant", desc: "One tenant's bills, payments and records", Icon: PersonOutlineIcon },
+  { id: "tenant", group: "individual", label: "Per tenant", desc: "One tenant's bills, payments and records", Icon: PersonOutlineIcon },
+  // ...and one caretaker's work, and one room's history
+  { id: "caretaker", group: "individual", label: "Per caretaker", desc: "What one caretaker recorded and handled", Icon: BadgeOutlinedIcon },
+  { id: "room", group: "individual", label: "Per room", desc: "One room's beds, tenants, rent and repairs", Icon: MeetingRoomOutlinedIcon },
+];
+const REPORT_GROUPS = [
+  { id: "summary", label: "Whole property", cols: { sm: 3, lg: 6 } },
+  { id: "individual", label: "One tenant, caretaker or room", cols: { sm: 3, lg: 3 } },
 ];
 
 // ------------------------------------------------------------
@@ -709,6 +721,286 @@ function buildTenantStatement({ tenant, payments, charges, tickets, logs, range,
   };
 }
 
+// ---- One caretaker: what they recorded and handled in the period
+const caretakerName = (c) => c?.name || c?.fullName || c?.email || "Unnamed caretaker";
+const inRange = (d, range) => Boolean(d) && d >= startOfDay(range.from) && d <= endOfDay(range.to);
+
+function buildCaretakerReport({ caretaker, activity = [], payments, tickets, logs, properties, range }) {
+  if (!caretaker) {
+    return { id: "caretaker", title: "Per caretaker", headline: { label: "Choose a caretaker", value: "—", raw: "" }, tiles: [], sections: [] };
+  }
+  const id = caretaker.uid || caretaker.id;
+  const nameOfProperty = (pid) => properties.find((p) => p.id === pid)?.name || caretaker.assignedPropertyNames?.[pid] || "—";
+  const acts = activity
+    .filter((a) => a.actorUid === id)
+    .map((a) => ({ ...a, on: toDate(a.at) }))
+    .filter((a) => inRange(a.on, range))
+    .sort((a, b) => b.on - a.on);
+  const cash = payments
+    .filter((p) => p.recordedBy === id)
+    .map((p) => ({ ...p, on: toDate(p.paymentDate) || toDate(p.createdAt) }))
+    .filter((p) => inRange(p.on, range))
+    .sort((a, b) => b.on - a.on);
+  const fixed = tickets
+    .filter((t) => t.resolvedBy === id)
+    .map((t) => ({ ...t, on: toDate(t.resolvedAt) }))
+    .filter((t) => inRange(t.on, range))
+    .sort((a, b) => b.on - a.on);
+  const checkedNights = logs.filter((l) => l.recordedBy === id && /^\d{4}-\d{2}-\d{2}$/.test(String(l.date || "")) && l.date >= range.from && l.date <= range.to).length;
+  const rated = fixed.filter((t) => t.review?.rating);
+  const avgRating = rated.length ? rated.reduce((n, t) => n + t.review.rating, 0) / rated.length : 0;
+  const cashTotal = num(sumAmount(cash));
+  const byCategory = Object.entries(ACTIVITY_CATEGORIES)
+    .map(([key, label]) => ({ key, label, n: acts.filter((a) => a.category === key).length }))
+    .filter((c) => c.n > 0);
+  const inactive = isInactiveCaretaker(caretaker);
+
+  return {
+    id: "caretaker",
+    title: caretakerName(caretaker),
+    headline: {
+      label: "Actions recorded",
+      value: String(acts.length),
+      raw: acts.length,
+      hint: [propertyIdsOf(caretaker).map(nameOfProperty).join(", ") || "No property", inactive ? "Inactive" : ""].filter(Boolean).join(" · "),
+    },
+    tiles: [
+      { label: "Cash recorded", value: peso(cashTotal), raw: cashTotal, tone: cashTotal ? "success" : undefined },
+      { label: "Repairs resolved", value: String(fixed.length), raw: fixed.length },
+      { label: "Curfew nights checked", value: String(checkedNights), raw: checkedNights },
+      { label: "Average rating", value: rated.length ? `${avgRating.toFixed(1)} / 5` : "—", raw: rated.length ? num(avgRating) : "", hint: rated.length ? plural(rated.length, "rating", "ratings") : "No ratings yet" },
+    ],
+    sections: [
+      {
+        title: "Properties",
+        columns: [
+          { key: "name", label: "Property" },
+          { key: "now", label: "Working on now" },
+        ],
+        rows: propertyIdsOf(caretaker).map((pid) => ({ name: nameOfProperty(pid), now: pid === caretaker.assignedPropertyId ? "Yes" : "—" })),
+        empty: "No property assigned.",
+      },
+      {
+        title: "Activity by type",
+        columns: [
+          { key: "label", label: "Type" },
+          { key: "n", label: "Entries", align: "right" },
+        ],
+        rows: byCategory.map((c) => ({ label: c.label, n_raw: c.n, n: String(c.n) })),
+        totals: { label: "Total", n: String(acts.length) },
+        empty: "Nothing recorded in this period.",
+      },
+      {
+        title: "Cash they recorded",
+        columns: [
+          { key: "date", label: "Date" },
+          { key: "tenant", label: "Tenant" },
+          { key: "period", label: "For" },
+          { key: "receipt", label: "Receipt" },
+          { key: "amount", label: "Amount", align: "right" },
+        ],
+        rows: cash.map((p) => ({
+          date_raw: ymd(p.on),
+          date: fmtDate(p.on),
+          tenant: p.tenantName || "—",
+          period: p.periodMonth || "—",
+          receipt: p.receiptNo || "—",
+          amount_raw: num(p.amount),
+          amount: peso(p.amount),
+        })),
+        totals: { date: "Total", amount: peso(cashTotal) },
+        empty: "No cash recorded in this period.",
+      },
+      {
+        title: "Repairs they resolved",
+        columns: [
+          { key: "title", label: "Request" },
+          { key: "room", label: "Room" },
+          { key: "resolved", label: "Resolved" },
+          { key: "confirmed", label: "Tenant", chip: true },
+          { key: "rating", label: "Rating" },
+        ],
+        rows: fixed.map((t) => ({
+          title: t.title || "Untitled request",
+          room: t.roomNumber || "—",
+          resolved_raw: ymd(t.on),
+          resolved: fmtDate(t.on),
+          confirmed: t.tenantConfirmed ? "Confirmed" : "Waiting",
+          rating_raw: t.review?.rating || "",
+          rating: t.review?.rating ? stars(t.review.rating) : "—",
+        })),
+        empty: "No repairs resolved in this period.",
+      },
+      {
+        title: "All activity",
+        note: "Everything they recorded or changed, newest first. Entries can't be edited or deleted.",
+        columns: [
+          { key: "date", label: "When" },
+          { key: "type", label: "Type" },
+          { key: "summary", label: "What" },
+          { key: "property", label: "Property" },
+        ],
+        rows: acts.map((a) => ({
+          date_raw: a.on.toISOString(),
+          date: `${fmtDate(a.on)} ${a.on.toLocaleTimeString("en-PH", { hour: "numeric", minute: "2-digit" })}`,
+          type: ACTIVITY_CATEGORIES[a.category] || cap(a.category),
+          summary: a.summary || "—",
+          property: a.propertyName || nameOfProperty(a.propertyId),
+        })),
+        empty: "Nothing recorded in this period.",
+      },
+    ],
+  };
+}
+
+// ---- One room: its beds now, who stayed, rent received and repairs in the period
+const roomKeyOf = (propertyId, room) => `${propertyId}|${room.id || room.roomName}`;
+const inRoom = (x, room) => {
+  const r = String(x.roomId || x.roomNumber || x.room || "");
+  return r !== "" && (r === String(room.roomName) || r === String(room.id || ""));
+};
+
+function buildRoomReport({ property, room, tenants, payments, tickets, logs, range }) {
+  if (!property || !room) {
+    return { id: "room", title: "Per room", headline: { label: "Choose a room", value: "—", raw: "" }, tiles: [], sections: [] };
+  }
+  const capacity = Number(room.capacity) || 0;
+  const names = bedNameMap(room, capacity);
+  const here = (x) => propOf(x) === property.id && inRoom(x, room);
+  const roomTenants = tenants.filter(here);
+  const current = roomTenants.filter((t) => tenantState(t) !== "inactive");
+  const byBed = new Map(current.filter((t) => t.bedId).map((t) => [String(t.bedId), t]));
+  const ids = new Set(roomTenants.flatMap((t) => [t.uid, t.id]).filter(Boolean));
+  const roomPayments = payments
+    .filter((p) => (propOf(p) === property.id && inRoom(p, room)) || ids.has(p.tenantId))
+    .map((p) => ({ ...p, on: toDate(p.paymentDate) || toDate(p.createdAt) }))
+    .filter((p) => inRange(p.on, range))
+    .sort((a, b) => b.on - a.on);
+  const received = roomPayments.filter((p) => ["paid", "partial"].includes(String(p.status || "").toLowerCase()));
+  const receivedTotal = num(sumAmount(received));
+  const roomTickets = tickets
+    .filter((t) => (propOf(t) === property.id && inRoom(t, room)) || ids.has(t.tenantId || t.tenantUid))
+    .map((t) => ({ ...t, created: toDate(t.createdAt), status: ticketStatus(t.status) }))
+    .filter((t) => inRange(t.created, range))
+    .sort((a, b) => b.created - a.created);
+  const nights = [];
+  logs.forEach((l) => {
+    if (propOf(l) !== property.id) return;
+    const night = String(l.date || String(l.id || "").slice(-10)).slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(night) || night < range.from || night > range.to) return;
+    roomTenants.forEach((t) => {
+      const e = (l.entries || {})[t.uid] || (l.entries || {})[t.id];
+      if (e && (e.status === "late" || e.status === "out")) nights.push({ night, name: tenantName(t), status: e.status });
+    });
+  });
+  nights.sort((a, b) => (a.night < b.night ? 1 : -1));
+  const kind = (bed) => ({ [BED_TYPE_DOUBLE_DECK_UPPER]: "Double deck · upper", [BED_TYPE_DOUBLE_DECK_LOWER]: "Double deck · lower" }[bedTypeOf(room, bed)] || "Single bed");
+  const fullRent = num(bedLabels(capacity).reduce((n, b) => n + bedRateOf(room, b), 0));
+
+  return {
+    id: "room",
+    title: `Room ${room.roomName}`,
+    headline: { label: "Beds taken now", value: `${Math.min(current.length, capacity)} / ${capacity}`, raw: current.length, hint: `${property.name} · Floor ${room.floor || 1}${room.status === "maintenance" || room.underMaintenance ? " · Under maintenance" : ""}` },
+    tiles: [
+      { label: "Rent received", value: peso(receivedTotal), raw: receivedTotal, tone: receivedTotal ? "success" : undefined },
+      { label: "Rent when full", value: peso(fullRent), raw: fullRent, hint: "Every bed at its rate, per month" },
+      { label: "Repair requests", value: String(roomTickets.length), raw: roomTickets.length },
+      { label: "Late / out nights", value: String(nights.length), raw: nights.length, tone: nights.length ? "warning" : undefined },
+    ],
+    sections: [
+      {
+        title: "Beds now",
+        columns: [
+          { key: "bed", label: "Bed" },
+          { key: "kind", label: "Type" },
+          { key: "rate", label: "Rate", align: "right" },
+          { key: "tenant", label: "Tenant" },
+        ],
+        rows: bedLabels(capacity).map((b) => ({
+          bed: names[b] || b,
+          kind: kind(b),
+          rate_raw: bedRateOf(room, b),
+          rate: peso(bedRateOf(room, b)),
+          tenant: byBed.get(b) ? tenantName(byBed.get(b)) : "Free",
+        })),
+        empty: "This room has no beds.",
+      },
+      {
+        title: "Tenants",
+        note: "Everyone recorded in this room, current tenants first.",
+        columns: [
+          { key: "name", label: "Tenant" },
+          { key: "bed", label: "Bed" },
+          { key: "from", label: "Lease start" },
+          { key: "to", label: "Lease end" },
+          { key: "status", label: "Status", chip: true },
+        ],
+        rows: [...roomTenants]
+          .sort((a, b) => Number(tenantState(a) === "inactive") - Number(tenantState(b) === "inactive") || tenantName(a).localeCompare(tenantName(b)))
+          .map((t) => ({
+            name: tenantName(t),
+            bed: t.bedId ? names[t.bedId] || t.bedId : "—",
+            from: fmtDate(toDate(t.leaseStartDate || t.leaseStart)),
+            to: fmtDate(toDate(t.leaseEndDate || t.leaseEnd)),
+            status: tenantState(t) === "inactive" ? "Former" : normalizeStatus(t.status),
+          })),
+        empty: "No tenants recorded in this room.",
+      },
+      {
+        title: "Payments",
+        columns: [
+          { key: "date", label: "Date" },
+          { key: "tenant", label: "Tenant" },
+          { key: "period", label: "For" },
+          { key: "amount", label: "Amount", align: "right" },
+          { key: "status", label: "Status", chip: true },
+        ],
+        rows: roomPayments.map((p) => ({
+          date_raw: ymd(p.on),
+          date: fmtDate(p.on),
+          tenant: p.tenantName || "—",
+          period: p.periodMonth || "—",
+          amount_raw: num(p.amount),
+          amount: peso(p.amount),
+          status: cap(String(p.status || "Pending").toLowerCase()),
+        })),
+        totals: { date: "Received", amount: peso(receivedTotal) },
+        empty: "No payments in this period.",
+      },
+      {
+        title: "Repairs",
+        columns: [
+          { key: "title", label: "Request" },
+          { key: "tenant", label: "Reported by" },
+          { key: "submitted", label: "Submitted" },
+          { key: "status", label: "Status", chip: true },
+          { key: "rating", label: "Rating" },
+        ],
+        rows: roomTickets.map((t) => ({
+          title: t.title || "Untitled request",
+          tenant: t.tenantName || "—",
+          submitted_raw: ymd(t.created),
+          submitted: fmtDate(t.created),
+          status: t.status,
+          rating_raw: t.review?.rating || "",
+          rating: t.review?.rating ? stars(t.review.rating) : "—",
+        })),
+        empty: "No repair requests in this period.",
+      },
+      {
+        title: "Curfew",
+        columns: [
+          { key: "night", label: "Night" },
+          { key: "name", label: "Tenant" },
+          { key: "status", label: "Status", chip: true },
+        ],
+        rows: nights.map((n) => ({ night_raw: n.night, night: fmtDate(startOfDay(n.night)), name: n.name, status: n.status === "out" ? "Out" : "Late" })),
+        empty: "No late or out nights in this period.",
+      },
+    ],
+  };
+}
+
 function buildCurfew({ logs, range }) {
   // Only nights with a real date inside the range (a log without a date can't be placed in any period)
   const nights = logs
@@ -811,7 +1103,7 @@ const wrapSingle = (part, title, signoff = false) => ({ title, signoff, parts: [
 // DATA
 // ------------------------------------------------------------
 
-const EMPTY_DATA = { owner: {}, properties: [], tenants: [], payments: [], tickets: [], logs: [], charges: [] };
+const EMPTY_DATA = { owner: {}, properties: [], tenants: [], payments: [], tickets: [], logs: [], charges: [], caretakers: [], activity: [] };
 
 async function fetchReportData(uid) {
   let bad = 0;
@@ -835,16 +1127,18 @@ async function fetchReportData(uid) {
 
   const props = await safe(query(collection(db, "properties"), where("ownerUid", "==", uid)));
   const properties = props
-    .map((p) => ({ id: p.id, name: p.propertyName || p.name || "Unnamed property", capacity: propertyCapacity(p) }))
+    .map((p) => ({ id: p.id, name: p.propertyName || p.name || "Unnamed property", capacity: propertyCapacity(p), rooms: Array.isArray(p.rooms) ? p.rooms : [] }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  const [t1, u1, ownerPayments, ownerTickets, logs1, ownerCharges, ...perProperty] = await Promise.all([
+  const [t1, u1, ownerPayments, ownerTickets, logs1, ownerCharges, activity, ...perProperty] = await Promise.all([
     safe(query(collection(db, "tenants"), where("ownerUid", "==", uid))),
     safe(query(collection(db, "users"), where("ownerUid", "==", uid))),
     safe(query(collection(db, "payments"), where("ownerUid", "==", uid))),
     safe(query(collection(db, "maintenance_tickets"), where("ownerUid", "==", uid))),
     safe(query(collection(db, "occupancy_logs"), where("ownerUid", "==", uid))),
     safe(query(collection(db, "charges"), where("ownerUid", "==", uid))),
+    // What caretakers recorded (the per-caretaker report)
+    safe(query(collection(db, "audit_logs"), where("ownerUid", "==", uid))),
     // Per-property reads recover legacy records that lack ownerUid.
     ...properties.flatMap((p) => [
       safe(query(collection(db, "tenants"), where("propertyId", "==", p.id))),
@@ -909,7 +1203,9 @@ async function fetchReportData(uid) {
     };
   });
 
-  return { data: { owner, properties, tenants, payments, tickets, logs: [...logMap.values()], charges: ownerCharges.filter(isActiveCharge) }, failed: bad };
+  const caretakers = withoutRemoved(u1.filter((u) => u.role === "caretaker")).sort((a, b) => caretakerName(a).localeCompare(caretakerName(b)));
+
+  return { data: { owner, properties, tenants, payments, tickets, logs: [...logMap.values()], charges: ownerCharges.filter(isActiveCharge), caretakers, activity }, failed: bad };
 }
 
 // ------------------------------------------------------------
@@ -1623,6 +1919,9 @@ export default function OwnerReports() {
   const [propertyId, setPropertyId] = useState("all");
   // Per-tenant report: which tenant (panel revisions)
   const [reportTenantId, setReportTenantId] = useState("");
+  // Per-caretaker and per-room reports: which one
+  const [reportCaretakerId, setReportCaretakerId] = useState("");
+  const [reportRoomKey, setReportRoomKey] = useState("");
   const billing = useOwnerBilling(uid);
   const [preset, setPreset] = useState("month");
   const [range, setRange] = useState(() => presetRange("month"));
@@ -1684,12 +1983,37 @@ export default function OwnerReports() {
     if (tab === "journal") return wrapSingle(buildJournal(args), "Cash receipts journal", true);
     if (tab === "maintenance") return wrapSingle(buildMaintenance(args), "Maintenance report");
     if (tab === "curfew") return wrapSingle(buildCurfew(args), "Curfew report");
+    if (tab === "caretaker") {
+      const caretaker = data.caretakers.find((c) => (c.uid || c.id) === reportCaretakerId) || null;
+      return wrapSingle(buildCaretakerReport({ ...args, caretaker, activity: data.activity, properties: data.properties }), caretaker ? `Caretaker report: ${caretakerName(caretaker)}` : "Caretaker report", true);
+    }
+    if (tab === "room") {
+      const hit = data.properties.flatMap((p) => p.rooms.map((r) => ({ p, r }))).find(({ p, r }) => roomKeyOf(p.id, r) === reportRoomKey);
+      return wrapSingle(buildRoomReport({ ...args, tenants: data.tenants, property: hit?.p, room: hit?.r }), hit ? `Room report: ${hit.p.name} · Room ${hit.r.roomName}` : "Room report", true);
+    }
     if (tab === "tenant") {
       const tenant = args.tenants.find((x) => (x.uid || x.id) === reportTenantId) || null;
       return wrapSingle(buildTenantStatement({ ...args, tenant, billing }), tenant ? `Tenant report: ${tenantName(tenant)}` : "Tenant report", true);
     }
     return wrapSingle(buildPayments(args), "Payments report", true);
-  }, [loading, data, tab, activePropertyId, range, rangeValid, selectedProperty, reportTenantId, billing]);
+  }, [loading, data, tab, activePropertyId, range, rangeValid, selectedProperty, reportTenantId, reportCaretakerId, reportRoomKey, billing]);
+
+  // Choices for the per-caretaker and per-room reports (within the chosen property)
+  const reportCaretakers = useMemo(
+    () => data.caretakers.filter((c) => activePropertyId === "all" || propertyIdsOf(c).includes(activePropertyId)),
+    [data.caretakers, activePropertyId]
+  );
+  const reportRooms = useMemo(
+    () =>
+      data.properties
+        .filter((p) => activePropertyId === "all" || p.id === activePropertyId)
+        .flatMap((p) =>
+          [...p.rooms]
+            .sort((a, b) => (Number(a.floor) || 0) - (Number(b.floor) || 0) || String(a.roomName).localeCompare(String(b.roomName), undefined, { numeric: true }))
+            .map((r) => ({ key: roomKeyOf(p.id, r), label: `${activePropertyId === "all" ? `${p.name} · ` : ""}Room ${r.roomName}`, floor: r.floor }))
+        ),
+    [data.properties, activePropertyId]
+  );
 
   const reportTenants = useMemo(
     () =>
@@ -1804,70 +2128,86 @@ export default function OwnerReports() {
           </Button>
         </Box>
 
-        {/* Report picker: a scrolling row on phones, a grid from tablets up */}
-        <Box
-          role="tablist"
-          aria-label="Report"
-          sx={{
-            position: "relative",
-            display: { xs: "flex", sm: "grid" },
-            gridTemplateColumns: { sm: "repeat(4, minmax(0, 1fr))", lg: "repeat(7, minmax(0, 1fr))" },
-            gap: 1,
-            overflowX: { xs: "auto", sm: "visible" },
-            mx: { xs: -2, sm: 0 },
-            px: { xs: 2, sm: 0 },
-            pb: { xs: 0.5, sm: 0 },
-            scrollbarWidth: "none",
-            "&::-webkit-scrollbar": { display: "none" },
-          }}
-        >
-          {REPORTS.map(({ id, label, desc, Icon }) => {
-            const active = tab === id;
-            return (
+        {/* Report picker, in two groups: whole-property reports, then one tenant, caretaker or room.
+            Each group is a scrolling row on phones and a grid from tablets up; every card is the same height. */}
+        <Box role="tablist" aria-label="Report" sx={{ position: "relative", display: "flex", flexDirection: "column", gap: 1.75 }}>
+          {REPORT_GROUPS.map((g) => (
+            <Box key={g.id} role="presentation">
+              <Typography variant="caption" color="text.secondary" component="div" sx={{ fontWeight: 800, letterSpacing: ".06em", textTransform: "uppercase", mb: 0.75 }}>
+                {g.label}
+              </Typography>
               <Box
-                key={id}
-                component="button"
-                type="button"
-                role="tab"
-                aria-selected={active}
-                onClick={() => setTab(id)}
+                role="presentation"
                 sx={{
-                  flex: { xs: "0 0 152px", sm: "initial" },
-                  minWidth: 0,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "flex-start",
-                  gap: 0.75,
-                  p: 1.5,
-                  textAlign: "left",
-                  font: "inherit",
-                  cursor: "pointer",
-                  borderRadius: R.md,
-                  border: "1px solid",
-                  borderColor: active ? "primary.main" : "transparent",
-                  bgcolor: (t) => (active ? alpha(t.palette.primary.main, 0.07) : alpha(t.palette.background.paper, 0.55)),
-                  color: "text.primary",
-                  transition: "background-color .15s, border-color .15s",
-                  "&:hover": { bgcolor: (t) => (active ? alpha(t.palette.primary.main, 0.1) : alpha(t.palette.background.paper, 0.9)) },
-                  "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
+                  display: { xs: "flex", sm: "grid" },
+                  gridTemplateColumns: { sm: `repeat(${g.cols.sm}, minmax(0, 1fr))`, lg: `repeat(${g.cols.lg}, minmax(0, 1fr))` },
+                  gridAutoRows: "1fr",
+                  gap: 1,
+                  overflowX: { xs: "auto", sm: "visible" },
+                  mx: { xs: -2, sm: 0 },
+                  px: { xs: 2, sm: 0 },
+                  pb: { xs: 0.5, sm: 0 },
+                  scrollbarWidth: "none",
+                  "&::-webkit-scrollbar": { display: "none" },
                 }}
               >
-                <Box sx={{ width: 32, height: 32, borderRadius: R.sm, display: "grid", placeItems: "center", bgcolor: active ? "primary.main" : "#fff", color: active ? "#fff" : "primary.main" }}>
-                  <Icon sx={{ fontSize: 18 }} />
-                </Box>
-                <Box sx={{ minWidth: 0, width: 1 }}>
-                  <Typography sx={{ fontWeight: 800, fontSize: 14, lineHeight: 1.3 }} noWrap>{label}</Typography>
-                  <Typography variant="caption" color="text.secondary" sx={{ display: "block", lineHeight: 1.35 }}>{desc}</Typography>
-                </Box>
+                {REPORTS.filter((r) => r.group === g.id).map(({ id, label, desc, Icon }) => {
+                  const active = tab === id;
+                  return (
+                    <Box
+                      key={id}
+                      component="button"
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setTab(id)}
+                      sx={{
+                        flex: { xs: "0 0 200px", sm: "initial" },
+                        minWidth: 0,
+                        display: "flex",
+                        alignItems: "flex-start",
+                        gap: 1.25,
+                        p: 1.5,
+                        minHeight: 72,
+                        textAlign: "left",
+                        font: "inherit",
+                        cursor: "pointer",
+                        borderRadius: R.md,
+                        border: "1px solid",
+                        borderColor: active ? "primary.main" : "transparent",
+                        bgcolor: (t) => (active ? alpha(t.palette.primary.main, 0.07) : alpha(t.palette.background.paper, 0.55)),
+                        color: "text.primary",
+                        transition: "background-color .15s, border-color .15s",
+                        "&:hover": { bgcolor: (t) => (active ? alpha(t.palette.primary.main, 0.1) : alpha(t.palette.background.paper, 0.9)) },
+                        "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
+                      }}
+                    >
+                      <Box sx={{ width: 32, height: 32, flexShrink: 0, borderRadius: R.sm, display: "grid", placeItems: "center", bgcolor: active ? "primary.main" : "#fff", color: active ? "#fff" : "primary.main" }}>
+                        <Icon sx={{ fontSize: 18 }} />
+                      </Box>
+                      <Box sx={{ minWidth: 0, flex: 1 }}>
+                        <Typography sx={{ fontWeight: 800, fontSize: 14, lineHeight: 1.3 }} noWrap>{label}</Typography>
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                          title={desc}
+                          sx={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", lineHeight: 1.35, mt: 0.25 }}
+                        >
+                          {desc}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  );
+                })}
               </Box>
-            );
-          })}
+            </Box>
+          ))}
         </Box>
 
         {/* Filters */}
         <Box sx={{ position: "relative", mt: 2, pt: 2, borderTop: "1px solid", borderColor: "divider" }}>
           <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: needsDates ? "minmax(0, 1.4fr) repeat(2, minmax(0, 1fr))" : "minmax(0, 1fr)", md: needsDates ? "minmax(0, 1.4fr) repeat(2, minmax(0, 1fr))" : "minmax(0, 0.5fr)" } }}>
-            <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: tab === "tenant" ? { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" } : "minmax(0, 1fr)" }}>
+            <Box sx={{ display: "grid", gap: 1.5, gridTemplateColumns: ["tenant", "caretaker", "room"].includes(tab) ? { xs: "minmax(0, 1fr)", sm: "repeat(2, minmax(0, 1fr))" } : "minmax(0, 1fr)" }}>
               <TextField select size="small" label="Property" value={activePropertyId} onChange={(e) => setPropertyId(e.target.value)} fullWidth sx={fieldSx}>
                 <MenuItem value="all">All properties</MenuItem>
                 {data.properties.map((p) => (
@@ -1876,6 +2216,28 @@ export default function OwnerReports() {
                   </MenuItem>
                 ))}
               </TextField>
+              {tab === "caretaker" && (
+                <TextField select size="small" label="Caretaker" value={reportCaretakers.some((c) => (c.uid || c.id) === reportCaretakerId) ? reportCaretakerId : ""} onChange={(e) => setReportCaretakerId(e.target.value)} fullWidth sx={fieldSx}>
+                  {reportCaretakers.length === 0 && <MenuItem value="" disabled>No caretakers</MenuItem>}
+                  {reportCaretakers.map((c) => (
+                    <MenuItem key={c.uid || c.id} value={c.uid || c.id}>
+                      {caretakerName(c)}
+                      {isInactiveCaretaker(c) ? " (inactive)" : ""}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              )}
+              {tab === "room" && (
+                <TextField select size="small" label="Room" value={reportRooms.some((r) => r.key === reportRoomKey) ? reportRoomKey : ""} onChange={(e) => setReportRoomKey(e.target.value)} fullWidth sx={fieldSx}>
+                  {reportRooms.length === 0 && <MenuItem value="" disabled>No rooms</MenuItem>}
+                  {reportRooms.map((r) => (
+                    <MenuItem key={r.key} value={r.key}>
+                      {r.label}
+                      {r.floor ? ` · Floor ${r.floor}` : ""}
+                    </MenuItem>
+                  ))}
+                </TextField>
+              )}
               {tab === "tenant" && (
                 <TextField select size="small" label="Tenant" value={reportTenants.some((x) => (x.uid || x.id) === reportTenantId) ? reportTenantId : ""} onChange={(e) => setReportTenantId(e.target.value)} fullWidth sx={fieldSx}>
                   {reportTenants.length === 0 && <MenuItem value="" disabled>No tenants</MenuItem>}

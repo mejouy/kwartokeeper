@@ -95,7 +95,7 @@ export default function TenantOverviewTab({ activeTickets, aheadMonths, announce
           </Typography>
           <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.8)", mt: 0.75 }}>
             {tenantInfo.propertyName}{" "}{t("· Room")}{" "}{tenantInfo.roomNumber}
-            {tenantInfo.bedId && tenantInfo.bedId !== "N/A" ? ` · ${t("Bed {bed}", { bed: tenantInfo.bedId })}` : ""}
+            {tenantInfo.bedId && tenantInfo.bedId !== "N/A" ? ` · ${tenantInfo.bedName || tenantInfo.bedId}` : ""}
           </Typography>
         </Box>
 

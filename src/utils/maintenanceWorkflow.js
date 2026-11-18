@@ -122,6 +122,13 @@ export function validateReopenReason(reason) {
 }
 
 // The review as it is saved. `at` is filled in by the caller (server time).
+// The tenant's own note when they confirm a fix (panel revisions: tenants
+// "input completion/resolution notes once a concern is marked resolved").
+// Optional, saved even without a star rating.
+export const MAX_TENANT_NOTE = 500;
+export const tenantNoteOf = (ticket) => String(ticket?.tenantNote || "").trim();
+export const cleanTenantNote = (text) => String(text || "").trim().slice(0, MAX_TENANT_NOTE);
+
 export function reviewFields(rating, comment) {
   if (!isValidRating(rating)) return null;
   return { rating, comment: String(comment || "").trim().slice(0, MAX_REVIEW_COMMENT) };

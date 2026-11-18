@@ -38,8 +38,11 @@ service cloud.firestore {
       return userExists() && getUserData().role == 'tenant';
     }
 
+    // A caretaker the owner hasn't set to inactive (an inactive caretaker keeps
+    // their own profile, but gets none of a caretaker's access)
     function isCaretaker() {
-      return userExists() && getUserData().role == 'caretaker';
+      return userExists() && getUserData().role == 'caretaker' &&
+        !(getUserData().get('status', 'Active') in ['Inactive', 'inactive', 'INACTIVE', 'Archived', 'archived', 'Deactivated', 'deactivated']);
     }
 
     // Approved, not suspended (pending owners can set up properties, but not message people)
@@ -69,8 +72,10 @@ service cloud.firestore {
     // Checks if the user is a caretaker with a specific permission flag set to true
     function caretakerHasPermission(permKey) {
       return isCaretaker() && (
-        (getUserData().get('permissions', {}).get(permKey, false) == true) ||
-        (exists(/databases/$(database)/documents/caretakers/$(request.auth.uid)) &&
+        ('permissions' in getUserData() &&
+         getUserData().get('permissions', {}).get(permKey, false) == true) ||
+        (!('permissions' in getUserData()) &&
+         exists(/databases/$(database)/documents/caretakers/$(request.auth.uid)) &&
          getCaretakerData().get('permissions', {}).get(permKey, false) == true)
       );
     }
@@ -175,7 +180,9 @@ service cloud.firestore {
               // Billing set by the owner (panel revisions): due day and waived late fees
               'rentDueDay', 'rentDueMode', 'dueDay', 'lateFeeWaived',
               // A caretaker's list of properties is the owner's to set (they may only switch within it)
-              'assignedPropertyIds', 'assignedPropertyNames'];
+              'assignedPropertyIds', 'assignedPropertyNames',
+              // Pictures of the signed lease contract are the owner's to add or remove
+              'leaseFiles', 'leaseFilesUpdatedAt'];
     }
 
     // ===============================================================
@@ -572,8 +579,10 @@ service cloud.firestore {
       function tenantConfirmsFix() {
         let changed = request.resource.data.diff(resource.data).affectedKeys();
         return waitingForTenant() &&
-          changed.hasOnly(['tenantConfirmed', 'tenantConfirmedAt', 'review', 'updatedAt']) &&
+          changed.hasOnly(['tenantConfirmed', 'tenantConfirmedAt', 'review', 'tenantNote', 'updatedAt']) &&
           request.resource.data.tenantConfirmed == true &&
+          // Their own optional note on the fix
+          (!changed.hasAny(['tenantNote']) || (request.resource.data.tenantNote is string && request.resource.data.tenantNote.size() <= 500)) &&
           request.resource.data.tenantConfirmedAt == request.time &&
           (!changed.hasAny(['review']) || (!('review' in resource.data) && validReview(request.resource.data.review)));
       }

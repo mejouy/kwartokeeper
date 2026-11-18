@@ -8,7 +8,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useOutletContext } from "react-router-dom";
-import { Alert, Avatar, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Divider, Fab, IconButton, Paper, Skeleton, Snackbar, Switch, FormControlLabel, TextField, Typography, useMediaQuery } from "@mui/material";
+import { Alert, CircularProgress, Avatar, Box, Button, Chip, Dialog, DialogActions, DialogContent, DialogTitle, Fab, IconButton, Paper, Skeleton, Switch, FormControlLabel, TextField, Typography, useMediaQuery } from "@mui/material";
 import { alpha, useTheme } from "@mui/material/styles";
 import HomeWorkOutlinedIcon from "@mui/icons-material/HomeWorkOutlined";
 import PeopleAltOutlinedIcon from "@mui/icons-material/PeopleAltOutlined";
@@ -34,7 +34,8 @@ import { notifyMaintenanceStatusChanged, notifyMaintenancePriorityChanged, notif
 import { categoryOf, priorityChangeEntry, priorityChangeFields } from "../../utils/maintenanceWorkflow";
 import { PriorityDialog, ResolveDialog } from "../../components/RepairWorkflow";
 import { uploadToCloudinary } from "../../utils/cloudinary";
-import { rankMaintenanceRequests } from "../../utils/maintenancePrioritization";
+import { rankMaintenanceRequests, sortTickets } from "../../utils/maintenancePrioritization";
+import { useStoredSort } from "../../utils/useStoredSort";
 import { getPropertyCoverPhotoUrl } from "../../utils/getPropertyCoverPhotoUrl";
 import { normalizePayment } from "../../utils/normalizePayment";
 import { withoutRemoved } from "../../utils/accountState";
@@ -54,6 +55,10 @@ import CaretakerPaymentsTab from "./CaretakerPaymentsTab";
 import CaretakerRoomsTab from "./CaretakerRoomsTab";
 // Translation is "tr" here: this file also uses "t" for tenants and the theme
 import { t as tr } from "../../i18n";
+import { bedNameOf } from "../../utils/bedRates";
+import BedRatesDialog from "../../components/BedRatesDialog";
+import { RoomBedList, RoomRateList } from "../../components/RoomBeds";
+import Toast from "../../components/Toast";
 
 export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }) {
   const navigate = useNavigate();
@@ -88,9 +93,12 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const [reloadKey, setReloadKey] = useState(0);
   const [uid, setUid] = useState("");
   const [profile, setProfile] = useState({ name: "Caretaker", permissions: {}, ownerUid: "" });
+  const accountDataRef = useRef(null);
+  const loadGenerationRef = useRef(0);
   const [property, setProperty] = useState(null);
   // Every property this caretaker looks after (owner's caretaker rule), to switch between
   const [myProperties, setMyProperties] = useState([]);
+  const [switchingTo, setSwitchingTo] = useState(""); // property being switched to (the dashboard loads it in place)
   const [userTenants, setUserTenants] = useState([]);
   const [legacyTenants, setLegacyTenants] = useState([]);
   const [tickets, setTickets] = useState([]);
@@ -103,6 +111,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const [checkFilter, setCheckFilter] = useState("todo");
   const [checkSearch, setCheckSearch] = useState("");
   const [ticketFilter, setTicketFilter] = useState("open");
+  const [ticketSort, setTicketSort] = useStoredSort("kk_caretaker_ticket_sort");
   const [autoNotify, setAutoNotify] = useState(() => {
     try {
       return window.localStorage.getItem("kk_ct_autonotify") !== "off";
@@ -116,11 +125,12 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const [toast, setToast] = useState({ open: false, message: "", severity: "success", undo: null });
   const notify = (message, severity = "success", undo = null) => setToast({ open: true, message, severity, undo });
   const pendingNotices = useRef({}); // tenantId -> { timer, run }: automatic notices waiting out the undo window
-  const [history, setHistory] = useState({ loading: false, loaded: false, nights: [], error: false });
+  const [history, setHistory] = useState({ pid: "", loading: false, loaded: false, nights: [], error: false });
   const [openNight, setOpenNight] = useState("");
   const [cashProof, setCashProof] = useState(null);
   const cashPreviewRef = useRef(null);
   const [pickedRoomId, setPickedRoomId] = useState("");
+  const [bedEditorOpen, setBedEditorOpen] = useState(false);
   const [roomDlg, setRoomDlg] = useState({ open: false, id: "", roomName: "", floor: "1", capacity: "1", rate: "0", saving: false, error: "", confirmDelete: false });
   const [search, setSearch] = useState("");
   const [tenantFilter, setTenantFilter] = useState("active");
@@ -158,11 +168,33 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   // Waits for Firebase to restore the session (auth.currentUser is null for a
   // moment after a reload, which must not bounce people to the login page).
   useEffect(() => {
+    const generation = ++loadGenerationRef.current;
     let cancelled = false;
     let unsubs = [];
     const stop = () => {
       unsubs.forEach((u) => u());
       unsubs = [];
+    };
+
+    // Another property (or new permissions): forget the last property's data and load again
+    const reloadInPlace = () => {
+      if (cancelled) return;
+      loadGenerationRef.current += 1;
+      setLoading(true);
+      setLoadError("");
+      setListenError(false);
+      setUserTenants([]);
+      setLegacyTenants([]);
+      setTickets([]);
+      setPayments([]);
+      setCharges([]);
+      setHistory({ pid: "", loading: false, loaded: false, nights: [], error: false });
+      setOpenNight("");
+      setPickedRoomId("");
+      setSelectedTenantId("");
+      setBedEditorOpen(false);
+      setCoverFailed(false);
+      setReloadKey((k) => k + 1);
     };
 
     const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
@@ -172,70 +204,139 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         return;
       }
       try {
-        const [userSnap, caretakerSnap] = await Promise.all([getDoc(doc(db, "users", user.uid)), getDoc(doc(db, "caretakers", user.uid))]);
-        if (cancelled) return;
-        const data = { ...(userSnap.exists() ? userSnap.data() : {}), ...(caretakerSnap.exists() ? caretakerSnap.data() : {}) };
+        const cachedAccount = accountDataRef.current?.uid === user.uid && accountDataRef.current.refresh ? accountDataRef.current : null;
+        const [userSnap, caretakerSnap] = cachedAccount
+          ? [null, null]
+          : await Promise.all([getDoc(doc(db, "users", user.uid)), getDoc(doc(db, "caretakers", user.uid))]);
+        if (cancelled || generation !== loadGenerationRef.current) return;
+        const userExists = cachedAccount ? cachedAccount.userExists : userSnap.exists();
+        const caretakerExists = cachedAccount ? cachedAccount.caretakerExists : caretakerSnap.exists();
+        const userData = cachedAccount ? cachedAccount.userData : userExists ? userSnap.data() : {};
+        const caretakerData = cachedAccount ? cachedAccount.caretakerData : caretakerExists ? caretakerSnap.data() : {};
+        const data = { ...(caretakerExists ? caretakerData : {}), ...(userExists ? userData : {}) };
+        accountDataRef.current = {
+          uid: user.uid,
+          userExists,
+          userData,
+          caretakerExists,
+          caretakerData,
+          refresh: false,
+        };
         // Self-heal: the password was already changed (profile says so) but the older
         // caretaker record still asks for it. Clear it so both records agree.
-        if (userSnap.exists() && caretakerSnap.exists() && userSnap.data().mustChangePassword === false && caretakerSnap.data().mustChangePassword === true) {
+        if (userExists && caretakerExists && userData.mustChangePassword === false && caretakerData.mustChangePassword === true) {
           updateDoc(doc(db, "caretakers", user.uid), {
             mustChangePassword: false,
-            passwordChangedAt: userSnap.data().passwordChangedAt || new Date().toISOString(),
+            passwordChangedAt: userData.passwordChangedAt || new Date().toISOString(),
           }).catch((err) => console.warn("Couldn't sync the caretaker record:", err?.code || err));
         }
         const granted = data.permissions || {};
         // The property they work on now comes from their profile, which is also what the
         // database rules use (a caretaker with several properties switches it there)
-        const own = userSnap.exists() ? userSnap.data() : {};
+        const own = userExists ? userData : {};
         const propertyId = own.assignedPropertyId || data.assignedPropertyId || data.propertyId || "";
         setMyProperties(propertyIdsOf({ ...own, assignedPropertyId: propertyId }).map((id) => ({ id, name: own.assignedPropertyNames?.[id] || data.assignedPropertyNames?.[id] || "" })));
         setUid(user.uid);
         setProfile({ name: data.name || data.fullName || user.displayName || "Caretaker", permissions: granted, ownerUid: data.ownerUid || data.invitedBy || "" });
 
+        // Watch the account (also while no property is assigned yet): when the owner changes this
+        // caretaker's property or permissions, or the caretaker switches property, the dashboard
+        // loads again right here (a second or two), without reloading the whole app.
+        // Being set inactive reloads the app, so the sign-in check shows the right screen.
+        const accessKey = (d) => JSON.stringify([d.assignedPropertyId || d.propertyId || "", d.permissions || {}]);
+        const statusKey = (d) => String(d.status || "Active").toLowerCase();
+        // Compared with the same record the listener watches, so a mismatch with the older caretakers record can never cause a reload loop
+        const started = userExists ? userData : {};
+        unsubs.push(
+          onSnapshot(
+            doc(db, "users", user.uid),
+            { includeMetadataChanges: true },
+            (snap) => {
+              if (cancelled || generation !== loadGenerationRef.current || !snap.exists() || snap.metadata.hasPendingWrites) return;
+              const next = snap.data();
+              if (statusKey(next) !== statusKey(started)) {
+                window.location.reload();
+                return;
+              }
+              if (accessKey(next) !== accessKey(started)) {
+                const current = accountDataRef.current?.uid === user.uid ? accountDataRef.current : {};
+                accountDataRef.current = {
+                  ...current,
+                  uid: user.uid,
+                  userExists: true,
+                  userData: next,
+                  refresh: true,
+                };
+                reloadInPlace();
+              }
+            },
+            (err) => {
+              console.warn("Account updates unavailable:", err?.code || err);
+              if (!cancelled && generation === loadGenerationRef.current) {
+                setListenError(true);
+                setSwitchingTo("");
+              }
+            }
+          )
+        );
+
         if (!propertyId) {
           setProperty(null);
           return;
         }
-        const propSnap = await getDoc(doc(db, "properties", propertyId));
-        if (cancelled) return;
+        // One live read: its first answer loads the page, later ones keep rooms, rates,
+        // curfew time and house rules up to date when the owner changes them
+        const propSnap = await new Promise((resolve, reject) => {
+          let first = true;
+          unsubs.push(
+            onSnapshot(
+              doc(db, "properties", propertyId),
+              (snap) => {
+                if (first) {
+                  first = false;
+                  resolve(snap);
+                } else if (cancelled || generation !== loadGenerationRef.current) return;
+                else if (snap.exists()) setProperty({ id: snap.id, ...snap.data() });
+                else {
+                  setProperty(null);
+                  setLoadError("The facility assigned to this account could not be found. Please ask the owner to check the assignment.");
+                }
+              },
+              (err) => {
+                if (first) {
+                  first = false;
+                  if (cancelled || generation !== loadGenerationRef.current) resolve(null);
+                  else reject(err);
+                } else {
+                  if (cancelled || generation !== loadGenerationRef.current) return;
+                  console.warn("Property updates unavailable:", err?.code || err);
+                  setListenError(true);
+                }
+              }
+            )
+          );
+        });
+        if (cancelled || generation !== loadGenerationRef.current) return;
         if (!propSnap.exists()) {
           setProperty(null);
           setLoadError("The facility assigned to this account could not be found. Please ask the owner to check the assignment.");
           return;
         }
         setProperty({ id: propSnap.id, ...propSnap.data() });
-        // Live from here on: rooms, rates, curfew time and house rules the owner changes show right away
-        unsubs.push(
-          onSnapshot(
-            doc(db, "properties", propertyId),
-            (snap) => {
-              if (!cancelled && snap.exists()) setProperty({ id: snap.id, ...snap.data() });
-            },
-            (err) => console.warn("Property updates unavailable:", err?.code || err)
-          )
-        );
-        // The owner changed this caretaker's property or permissions: reload so every tab follows
-        const accessKey = (d) => JSON.stringify([d.assignedPropertyId || d.propertyId || "", d.permissions || {}]);
-        // Compared with the same record the listener watches, so a mismatch with the older caretakers record can never cause a reload loop
-        const startedWith = accessKey(userSnap.exists() ? userSnap.data() : {});
-        unsubs.push(
-          onSnapshot(
-            doc(db, "users", user.uid),
-            (snap) => {
-              if (!cancelled && snap.exists() && !snap.metadata.hasPendingWrites && accessKey(snap.data()) !== startedWith) window.location.reload();
-            },
-            (err) => console.warn("Account updates unavailable:", err?.code || err)
-          )
-        );
 
         const fail = (label) => (err) => {
+          if (cancelled || generation !== loadGenerationRef.current) return;
           console.error(`Caretaker ${label} listener failed:`, err);
-          if (!cancelled) setListenError(true);
+          setListenError(true);
         };
         unsubs.push(
           onSnapshot(
             query(collection(db, "users"), where("propertyId", "==", propertyId)),
-            (snap) => setUserTenants(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((t) => t.role === "tenant")),
+            (snap) => {
+              if (!cancelled && generation === loadGenerationRef.current) {
+                setUserTenants(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter((t) => t.role === "tenant"));
+              }
+            },
             fail("tenants")
           )
         );
@@ -243,15 +344,25 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         unsubs.push(
           onSnapshot(
             query(collection(db, "tenants"), where("propertyId", "==", propertyId)),
-            (snap) => setLegacyTenants(snap.docs.map((d) => ({ id: d.id, ...d.data() }))),
-            (err) => console.warn("Legacy tenants unavailable:", err?.code || err)
+            (snap) => {
+              if (!cancelled && generation === loadGenerationRef.current) {
+                setLegacyTenants(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+              }
+            },
+            (err) => {
+              if (!cancelled && generation === loadGenerationRef.current) console.warn("Legacy tenants unavailable:", err?.code || err);
+            }
           )
         );
         if (granted.handleReports === true) {
           unsubs.push(
             onSnapshot(
               query(collection(db, "maintenance_tickets"), where("propertyId", "==", propertyId)),
-              (snap) => setTickets(snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }))),
+              (snap) => {
+                if (!cancelled && generation === loadGenerationRef.current) {
+                  setTickets(snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) })));
+                }
+              },
               fail("maintenance")
             )
           );
@@ -260,7 +371,11 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           unsubs.push(
             onSnapshot(
               query(collection(db, "payments"), where("propertyId", "==", propertyId)),
-              (snap) => setPayments(snap.docs.map((d) => normalizePayment({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) }))),
+              (snap) => {
+                if (!cancelled && generation === loadGenerationRef.current) {
+                  setPayments(snap.docs.map((d) => normalizePayment({ id: d.id, ...d.data({ serverTimestamps: "estimate" }) })));
+                }
+              },
               fail("payments")
             )
           );
@@ -268,18 +383,27 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
             unsubs.push(
               onSnapshot(
                 query(collection(db, "charges"), where("ownerUid", "==", data.ownerUid), where("propertyId", "==", propertyId)),
-                (snap) => setCharges(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isActiveCharge)),
+                (snap) => {
+                  if (!cancelled && generation === loadGenerationRef.current) {
+                    setCharges(snap.docs.map((d) => ({ id: d.id, ...d.data() })).filter(isActiveCharge));
+                  }
+                },
                 // Fees are extra: not being able to read them must not break the page
-                (err) => console.warn("Fees unavailable:", err?.code || err)
+                (err) => {
+                  if (!cancelled && generation === loadGenerationRef.current) console.warn("Fees unavailable:", err?.code || err);
+                }
               )
             );
           }
         }
       } catch (err) {
         console.error("Failed to load caretaker dashboard:", err);
-        if (!cancelled) setLoadError("We couldn't load your facility. Check your connection and try again.");
+        if (!cancelled && generation === loadGenerationRef.current) setLoadError("We couldn't load your facility. Check your connection and try again.");
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && generation === loadGenerationRef.current) {
+          setLoading(false);
+          setSwitchingTo("");
+        }
       }
     });
 
@@ -331,6 +455,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
           name: t.name || t.fullName || "Tenant",
           roomNumber,
           bedId: t.bedId || t.bedNumber || t.bed || "",
+          bedName: bedNameOf(room, t.bedId || t.bedNumber || t.bed || ""),
           phone: t.phone || t.contactNumber || t.contact || t.phoneNumber || "",
           status,
           inactive: isInactiveStatus(status),
@@ -353,12 +478,14 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
 
   const filteredTenants = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return tenants.filter((t) => {
-      if (tenantFilter === "active" && t.inactive) return false;
-      if (tenantFilter === "inactive" && !t.inactive) return false;
-      if (!q) return true;
-      return t.name.toLowerCase().includes(q) || t.roomNumber.toLowerCase().includes(q);
-    });
+    return tenants
+      .filter((t) => {
+        if (tenantFilter === "active" && t.inactive) return false;
+        if (tenantFilter === "inactive" && !t.inactive) return false;
+        if (!q) return true;
+        return t.name.toLowerCase().includes(q) || t.roomNumber.toLowerCase().includes(q);
+      })
+      .sort((a, b) => Number(a.inactive) - Number(b.inactive) || a.roomNumber.localeCompare(b.roomNumber, undefined, { numeric: true }) || a.name.localeCompare(b.name));
   }, [tenants, search, tenantFilter]);
 
   // ---- derived: rent this month
@@ -416,7 +543,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const resolvedTickets = rankedTickets.filter((t) => ["Resolved", "Cancelled"].includes(t.status || "Pending"));
   const highTickets = activeTickets.filter((t) => t.priority?.tier === "High");
   const progressTickets = activeTickets.filter((t) => (t.status || "Pending") === "In Progress");
-  const shownTickets = ticketFilter === "high" ? highTickets : ticketFilter === "progress" ? progressTickets : activeTickets;
+  const shownTickets = sortTickets(ticketFilter === "high" ? highTickets : ticketFilter === "progress" ? progressTickets : activeTickets, ticketSort);
 
   // ---- derived: curfew + tonight's check
   // A curfew "night" starts at the curfew time and runs past midnight, so a check
@@ -939,46 +1066,51 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
   const viewOptions = [canTenants && "directory", canOccupancy && "curfew", canOccupancy && "history"].filter(Boolean);
   const tenantsViewNow = viewOptions.includes(tenantsView) ? tenantsView : viewOptions[0] || "directory";
 
-  // Past nights: one small read per night (no index needed), loaded when the history view opens
-  const fetchHistoryNights = async () => {
+  // Past nights: one small read per night (no index needed), loaded when the history view opens.
+  // Kept per property (history.pid), so after switching property the right nights load.
+  const fetchHistoryNights = async (pid) => {
     const [y, m, d] = nightKey.split("-").map(Number);
     const keys = Array.from({ length: HISTORY_NIGHTS }, (_, i) => localDateKey(new Date(y, m - 1, d - i)));
-    const snaps = await Promise.all(keys.map((k) => getDoc(doc(db, "occupancy_logs", `${property.id}_${k}`))));
+    const snaps = await Promise.all(keys.map((k) => getDoc(doc(db, "occupancy_logs", `${pid}_${k}`))));
     return snaps
       .map((snap, i) => (snap.exists() ? { key: keys[i], ...snap.data({ serverTimestamps: "estimate" }) } : null))
       .filter(Boolean);
   };
   // Refresh button
   const loadHistory = async () => {
-    if (!property?.id) return;
-    setHistory((h) => ({ ...h, loading: true, error: false }));
+    const pid = property?.id;
+    if (!pid) return;
+    setHistory((h) => ({ ...h, pid, loading: true, error: false }));
     try {
-      const nights = await fetchHistoryNights();
-      setHistory({ loading: false, loaded: true, nights, error: false });
+      const nights = await fetchHistoryNights(pid);
+      setHistory((h) => (h.pid === pid ? { pid, loading: false, loaded: true, nights, error: false } : h));
     } catch (err) {
       console.warn("Curfew history unavailable:", err?.code || err);
-      setHistory((h) => ({ ...h, loading: false, error: true }));
+      setHistory((h) => (h.pid === pid ? { ...h, loading: false, error: true } : h));
     }
   };
-  // First open of the history view
-  const historyWanted = tenantsViewNow === "history" && activeTab === "tenants" && Boolean(property?.id);
-  const historyLoading = history.loading || (historyWanted && !history.loaded && !history.error);
+  // What's loaded only counts for the property it was loaded for
+  const historyHere = history.pid === property?.id ? history : { pid: property?.id, loading: false, loaded: false, nights: [], error: false };
+  // First open of the history view (and again after switching property)
+  const historyWanted = tenantsViewNow === "history" && activeTab === "tenants" && Boolean(property?.id) && !loading;
+  const historyLoading = historyHere.loading || (historyWanted && !historyHere.loaded && !historyHere.error);
   useEffect(() => {
-    if (!historyWanted || history.loaded || history.error) return undefined;
+    const pid = property?.id;
+    if (!historyWanted || !pid || (history.pid === pid && (history.loaded || history.error))) return undefined;
     let active = true;
-    fetchHistoryNights()
+    fetchHistoryNights(pid)
       .then((nights) => {
-        if (active) setHistory({ loading: false, loaded: true, nights, error: false });
+        if (active) setHistory({ pid, loading: false, loaded: true, nights, error: false });
       })
       .catch((err) => {
         console.warn("Curfew history unavailable:", err?.code || err);
-        if (active) setHistory((h) => ({ ...h, loading: false, error: true }));
+        if (active) setHistory({ pid, loading: false, loaded: false, nights: [], error: true });
       });
     return () => {
       active = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [historyWanted, history.loaded, history.error, property?.id]);
+  }, [historyWanted, history.pid, history.loaded, history.error, property?.id]);
 
   const roomsByFloor = useMemo(() => {
     const m = new Map();
@@ -1087,23 +1219,23 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
 
   // Work on another of their properties: the dashboard reloads for it (see the account listener above)
   const switchProperty = async (id) => {
-    if (!uid || !id || id === property?.id) return;
+    if (!uid || !id || id === property?.id || switchingTo) return;
     if (!online) {
       notify("You're offline. Connect to the internet to switch property.", "warning");
       return;
     }
+    setSwitchingTo(id);
     try {
-      await switchActiveProperty(uid, id);
+      await switchActiveProperty(uid, id); // the account listener then loads that property in place
     } catch (err) {
       console.error("Couldn't switch property:", err);
       notify("Couldn't switch property. Please try again.", "error");
+      setSwitchingTo("");
     }
   };
 
   const overview = (
     <CaretakerOverviewTab
-      myProperties={myProperties}
-      switchProperty={switchProperty}
       activeTenants={activeTenants}
       activeTickets={activeTickets}
       address={address}
@@ -1209,6 +1341,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
 
   const historyView = (
     <CaretakerCurfewHistoryView
+      curfewHistory={historyHere}
       historyLoading={historyLoading}
       loadHistory={loadHistory}
       nightsShown={nightsShown}
@@ -1270,6 +1403,8 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       setTicketFilter={setTicketFilter}
       setTicketsShown={setTicketsShown}
       shownTickets={shownTickets}
+      ticketSort={ticketSort}
+      setTicketSort={setTicketSort}
       ticketFilter={ticketFilter}
       ticketsShown={ticketsShown}
     />
@@ -1379,6 +1514,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
     saveRooms(rooms.filter((r) => r.id !== roomDlg.id), `Removed ${editingRoom.roomName}.`, `Removed ${editingRoom.roomName}`);
   };
 
+  const tenantsOf = (r) => activeTenants.filter((t) => t.roomNumber === r.roomName || t.roomNumber === r.id);
   const takenOf = (r) => occupantsOf(r);
   const bedsTaken = rooms.reduce((n, r) => n + Math.min(takenOf(r), Number(r.capacity) || 0), 0);
   const vacantRooms = rooms.filter((r) => takenOf(r) === 0).length;
@@ -1396,38 +1532,38 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         <Pill label={ROOM_STATUS[pickedStatus].label} tone={pickedStatus === "full" ? "error" : pickedStatus === "partial" ? "warning" : "default"} />
       </Box>
       <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-        {tr("Floor")}{" "}{pickedRoom.floor || 1} · {pickedTenants.length}/{Number(pickedRoom.capacity) || 0}{" "}{tr("beds taken ·")}{" "}{peso(pickedRoom.monthlyRatePerBed)}{" "}{tr("per bed")}
+        {tr("Floor")}{" "}{pickedRoom.floor || 1} · {pickedTenants.length}/{Number(pickedRoom.capacity) || 0}{" "}{tr("beds taken")}
       </Typography>
-      <Divider sx={{ mb: 1.5 }} />
-      <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
-        TENANTS
-      </Typography>
-      {pickedTenants.length === 0 ? (
-        <Typography variant="body2" color="text.secondary" sx={{ py: 1.5 }}>
-          {tr("No one is assigned to this room.")}
+      <RoomRateList room={pickedRoom} sx={{ mb: 2 }} />
+      <Box sx={{ ...row, justifyContent: "space-between", gap: 1, mb: 1.25 }}>
+        <Typography variant="subtitle2" sx={{ fontWeight: 800 }}>
+          {tr("Beds & tenants")}
+          <Typography component="span" variant="subtitle2" color="text.secondary" sx={{ fontWeight: 600 }}>
+            {" "}· {pickedTenants.length}{" "}{tr("of")}{" "}{Number(pickedRoom.capacity) || 0}
+          </Typography>
         </Typography>
-      ) : (
-        <Box sx={{ mt: 0.5 }}>
-          {pickedTenants.map((t) => (
-            <Box key={t.id} sx={{ ...row, gap: 1.25, py: 1 }}>
-              <Avatar sx={{ width: 36, height: 36, fontSize: "0.85rem", fontWeight: 800, bgcolor: "rgba(255, 69, 0, 0.12)", color: "primary.main" }}>{initials(t.name)}</Avatar>
-              <Box sx={{ minWidth: 0, flex: 1 }}>
-                <Typography sx={{ fontWeight: 700, lineHeight: 1.25 }} noWrap>
-                  {t.name}
-                </Typography>
-                <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
-                  {t.bedId ? `Bed ${t.bedId}` : tr("No bed assigned")}
-                </Typography>
-              </Box>
-            </Box>
-          ))}
-        </Box>
-      )}
-      <Button fullWidth variant="contained" startIcon={<EditOutlinedIcon />} onClick={() => openRoom(pickedRoom)} sx={{ mt: 2, minHeight: 48, fontWeight: 800, borderRadius: 2.5, textTransform: "none" }}>
-        {tr("Edit room and rate")}
+        {Number(pickedRoom.capacity) > 0 && (
+          <Button size="small" variant="outlined" startIcon={<EditOutlinedIcon sx={{ fontSize: "16px !important" }} />} onClick={() => setBedEditorOpen(true)} sx={{ fontWeight: 700, textTransform: "none", flexShrink: 0, borderRadius: 2 }}>
+            {tr("Edit beds")}
+          </Button>
+        )}
+      </Box>
+      <RoomBedList room={pickedRoom} roomTenants={pickedTenants} />
+            <Button fullWidth variant="contained" startIcon={<EditOutlinedIcon />} onClick={() => openRoom(pickedRoom)} sx={{ mt: 2, minHeight: 48, fontWeight: 800, borderRadius: 2.5, textTransform: "none" }}>
+        {tr("Edit room name, floor and beds")}
       </Button>
     </Box>
   ) : null;
+
+  // Bed types and rates from the bed editor (same dialog the owner uses)
+  const saveRoomBeds = async (beds) => {
+    const next = rooms.map((r) => (r.id === pickedRoom.id ? { ...r, ...beds } : r));
+    const patch = { rooms: next, updatedAt: new Date() };
+    await updateDoc(doc(db, "properties", property.id), patch);
+    logAction("rooms", `Edited the beds and rates of ${pickedRoom.roomName}`, { action: "rooms.update" });
+    setProperty((p) => ({ ...p, ...patch }));
+    notify(`Saved the beds of ${pickedRoom.roomName}.`);
+  };
 
   const roomsTab = (
     <CaretakerRoomsTab
@@ -1442,7 +1578,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       rooms={rooms}
       roomsByFloor={roomsByFloor}
       setPickedRoomId={setPickedRoomId}
-      takenOf={takenOf}
+      tenantsOf={tenantsOf}
       vacantRooms={vacantRooms}
     />
   );
@@ -1481,6 +1617,56 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         >
           {tr("Some information couldn't be loaded.")}
         </Alert>
+      )}
+
+      {/* Several properties: which one they're working at, on every tab */}
+      {myProperties.length > 1 && (
+        <Box sx={{ mb: 2 }}>
+          <Typography variant="caption" color="text.secondary" component="div" sx={{ fontWeight: 700, mb: 0.75 }}>
+            {tr("Working at · {n} properties", { n: myProperties.length })}
+          </Typography>
+          <Box role="group" aria-label={tr("Switch property")} sx={{ display: "flex", gap: 0.75, overflowX: "auto", pb: 0.5, mx: -0.5, px: 0.5, scrollbarWidth: "none", "&::-webkit-scrollbar": { display: "none" } }}>
+            {myProperties.map((p, i) => {
+              const on = p.id === property?.id;
+              const busy = switchingTo === p.id;
+              return (
+                <Box
+                  key={p.id}
+                  component="button"
+                  type="button"
+                  aria-pressed={on}
+                  disabled={Boolean(switchingTo) && !busy}
+                  onClick={() => switchProperty(p.id)}
+                  sx={{
+                    ...row,
+                    gap: 0.75,
+                    flexShrink: 0,
+                    maxWidth: 240,
+                    px: 1.5,
+                    minHeight: 40,
+                    borderRadius: 99,
+                    border: "1px solid",
+                    borderColor: on ? "text.primary" : "divider",
+                    bgcolor: on ? "text.primary" : "background.default",
+                    color: on ? "background.default" : "text.primary",
+                    fontFamily: "inherit",
+                    fontWeight: 700,
+                    fontSize: 13.5,
+                    cursor: on ? "default" : "pointer",
+                    opacity: switchingTo && !busy ? 0.5 : 1,
+                    "&:hover": on ? {} : { borderColor: "primary.main" },
+                    "&:focus-visible": { outline: "2px solid", outlineColor: "primary.main", outlineOffset: 2 },
+                  }}
+                >
+                  {busy ? <CircularProgress size={14} color="inherit" /> : <Box sx={{ width: 8, height: 8, borderRadius: "50%", flexShrink: 0, bgcolor: on ? "success.light" : "text.disabled" }} />}
+                  <Box component="span" sx={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {on ? propertyName : p.name || tr("Property {n}", { n: i + 1 })}
+                  </Box>
+                </Box>
+              );
+            })}
+          </Box>
+        </Box>
       )}
 
       <TabErrorBoundary resetKey={activeTab}>{tabBody}</TabErrorBoundary>
@@ -1530,7 +1716,7 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
               <Facts
                 items={[
                   { label: tr("Room"), value: selectedTenant.roomNumber ? `Room ${selectedTenant.roomNumber}` : "Not assigned" },
-                  ...(selectedTenant.bedId ? [{ label: tr("Bed"), value: selectedTenant.bedId }] : []),
+                  ...(selectedTenant.bedId ? [{ label: tr("Bed"), value: selectedTenant.bedName || selectedTenant.bedId }] : []),
                   { label: tr("Phone"), value: selectedTenant.phone || "Not provided" },
                   ...(selectedTenant.email ? [{ label: tr("Email"), value: selectedTenant.email }] : []),
                   ...(fmtDate(selectedTenant.leaseStartDate) ? [{ label: tr("Lease start"), value: fmtDate(selectedTenant.leaseStartDate) }] : []),
@@ -1819,6 +2005,10 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
       </Dialog>
 
       {/* ===================== ROOM EDITOR ===================== */}
+      {bedEditorOpen && pickedRoom && (
+        <BedRatesDialog room={pickedRoom} saveLabel={tr("Save")} onClose={() => setBedEditorOpen(false)} onSave={saveRoomBeds} />
+      )}
+
       <Dialog open={roomDlg.open} onClose={() => !roomDlg.saving && setRoomDlg((d) => ({ ...d, open: false }))} fullWidth maxWidth="xs" slotProps={{ paper: { sx: { borderRadius: 3, bgcolor: "background.default", m: 2, width: "calc(100% - 32px)", maxHeight: "calc(100% - 32px)" } } }}>
         <DialogTitle sx={{ ...row, justifyContent: "space-between", fontWeight: 800 }}>
           {editingRoom ? `Edit ${editingRoom.roomName}` : tr("Add a room")}
@@ -1895,30 +2085,14 @@ export default function CaretakerDashboard({ activeTab: tabProp, onNavigateTab }
         </Box>
       </Dialog>
 
-      <Snackbar
+      <Toast
         open={toast.open}
-        autoHideDuration={toast.undo ? 6000 : 4000}
-        onClose={(e, reason) => {
-          if (reason !== "clickaway") setToast((t) => ({ ...t, open: false }));
-        }}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        sx={{ bottom: { xs: `${bottomOffset} !important`, sm: undefined } }}
-      >
-        <Alert
-          severity={toast.severity}
-          variant="filled"
-          sx={{ borderRadius: 2, width: "100%", alignItems: "center" }}
-          action={
-            toast.undo ? (
-              <Button color="inherit" size="small" onClick={toast.undo} sx={{ fontWeight: 800, minHeight: 36 }}>
-                {tr("Undo")}
-              </Button>
-            ) : undefined
-          }
-        >
-          {toast.message}
-        </Alert>
-      </Snackbar>
+        message={toast.message}
+        severity={toast.severity}
+        onClose={() => setToast((t) => ({ ...t, open: false }))}
+        action={toast.undo ? { label: tr("Undo"), onClick: toast.undo } : undefined}
+        bottom={bottomOffset}
+      />
     </Box>
   );
 }

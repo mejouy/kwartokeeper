@@ -16,7 +16,6 @@ import {
   InputAdornment,
   MenuItem,
   Skeleton,
-  Snackbar,
   TextField,
   Typography,
 } from "@mui/material";
@@ -55,6 +54,7 @@ import { formatReceiptNo } from "../../utils/receipt";
 import { resubmissionPatch } from "../../utils/ownerAccess";
 import FilePreviewDialog from "../../components/FilePreviewDialog";
 import { t } from "../../i18n";
+import Toast from "../../components/Toast";
 
 const HEAD = '"Inter", sans-serif';
 const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
@@ -1011,15 +1011,7 @@ export default function OwnerAccount() {
         </DialogActions>
       </Dialog>
 
-      <Snackbar
-        open={toast.open}
-        autoHideDuration={4000}
-        onClose={() => setToast((t) => ({ ...t, open: false }))}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        sx={{ bottom: { xs: "calc(80px + env(safe-area-inset-bottom)) !important", sm: undefined } }}
-      >
-        <Alert severity={toast.severity} variant="filled" sx={{ borderRadius: R.sm }}>{toast.message}</Alert>
-      </Snackbar>
+      <Toast open={toast.open} message={toast.message} severity={toast.severity} onClose={() => setToast((t) => ({ ...t, open: false }))} />
     </Box>
   );
 }

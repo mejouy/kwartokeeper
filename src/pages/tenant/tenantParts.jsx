@@ -27,6 +27,7 @@ import { CATEGORIES } from "../../utils/maintenancePrioritization";
 import { feedbackState, lastPriorityChange, stars } from "../../utils/maintenanceWorkflow";
 // Translation is "tr" here: TicketCard already calls its ticket "t"
 import { t as tr } from "../../i18n";
+import FoldList from "../../components/FoldList";
 
 /* ---------------------------------------------------------------------------
    Constants
@@ -249,7 +250,7 @@ export function StepTrack({ steps, current = 0, complete = false, failed = false
         const color = st === "error" ? "error.main" : st === "todo" ? "divider" : "primary.main";
         return (
           <React.Fragment key={`${label}-${i}`}>
-            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", width: 64, flexShrink: 0 }}>
+            <Box sx={{ display: "flex", flexDirection: "column", alignItems: "center", width: 76, flexShrink: 0 }}>
               <Box
                 sx={{
                   width: 22,
@@ -268,7 +269,7 @@ export function StepTrack({ steps, current = 0, complete = false, failed = false
                 {st === "error" && <CloseIcon sx={{ fontSize: 14 }} />}
                 {st === "active" && <Box sx={{ width: 8, height: 8, borderRadius: "50%", bgcolor: "primary.main" }} />}
               </Box>
-              <Typography variant="caption" sx={{ mt: 0.5, fontWeight: st === "active" || st === "error" ? 800 : 600, color: st === "todo" ? "text.secondary" : "text.primary", textAlign: "center", lineHeight: 1.2 }}>
+              <Typography variant="caption" sx={{ mt: 0.5, fontWeight: st === "active" || st === "error" ? 800 : 600, color: st === "todo" ? "text.secondary" : "text.primary", textAlign: "center", lineHeight: 1.2, whiteSpace: "nowrap" }}>
                 {label}
               </Typography>
             </Box>
@@ -415,6 +416,8 @@ export function PaymentRow({ p, onClick }) {
 
 // With many requests, each one is a short summary row (title, status, priority,
 // date) that opens to the full details. `collapsible` turns that on.
+const REPAIR_CATEGORY = { safety: "Safety", utility: "Utility", routine: "Routine" };
+
 export function TicketCard({ t, compact, onAction, collapsible = false, defaultOpen = true }) {
   const [open, setOpen] = useState(defaultOpen);
   const tier = t.priority?.tier || "Low";
@@ -441,7 +444,7 @@ export function TicketCard({ t, compact, onAction, collapsible = false, defaultO
       </Box>
       <Box sx={{ display: "flex", flexWrap: "wrap", gap: 0.75, mt: 1 }}>
         <Pill label={tr("{tier} priority", { tier: tr(tier) })} tone={TIER_TONE[tier]} />
-        {t.category && <Pill label={String(t.category)} />}
+        {t.category && <Pill label={tr(REPAIR_CATEGORY[t.category] || String(t.category))} />}
         {date && <Pill label={tr("Reported {date}", { date })} />}
         {collapsible && !open && hasNote && <Pill label={tr("Landlord replied")} tone="info" />}
         {answer === "awaiting" && <Pill label={tr("Confirm the fix")} tone="warning" />}
@@ -457,9 +460,14 @@ export function TicketCard({ t, compact, onAction, collapsible = false, defaultO
       sx={{
         ...cardSx,
         p: { xs: 2, sm: 2.5 },
+        borderRadius: "18px",
         borderLeft: "4px solid",
         borderLeftColor: (th) => (TIER_TONE[tier] === "default" ? th.palette.divider : th.palette[TIER_TONE[tier]].main),
         minWidth: 0,
+        width: "100%",
+        height: "100%",
+        display: "flex",
+        flexDirection: "column",
       }}
     >
       {collapsible ? (
@@ -492,7 +500,7 @@ export function TicketCard({ t, compact, onAction, collapsible = false, defaultO
       )}
       {t.photoUrl && details && (
         <Box component="a" href={t.photoUrl} target="_blank" rel="noopener noreferrer" sx={{ display: "inline-block", mt: 1.25 }}>
-          <Box component="img" src={t.photoUrl} alt={tr("Photo of the issue")} loading="lazy" sx={{ width: 96, height: 96, objectFit: "cover", borderRadius: 2, border: "1px solid", borderColor: "divider", display: "block" }} />
+          <Box component="img" src={t.photoUrl} alt={tr("Photo of the issue")} loading="lazy" sx={{ width: 132, height: 99, objectFit: "cover", borderRadius: "10px", border: "1px solid", borderColor: "divider", display: "block" }} />
         </Box>
       )}
       {priorityChange && details && (
@@ -540,6 +548,16 @@ export function TicketCard({ t, compact, onAction, collapsible = false, defaultO
           </Typography>
         </Box>
       )}
+      {t.tenantNote && details && (
+        <Box sx={{ mt: 1.5, p: 1.25, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
+            {tr("Your note on the fix")}
+          </Typography>
+          <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
+            {t.tenantNote}
+          </Typography>
+        </Box>
+      )}
       {answer === "reviewed" && details && (
         <Box sx={{ mt: 1.5 }}>
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
@@ -560,7 +578,7 @@ export function TicketCard({ t, compact, onAction, collapsible = false, defaultO
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800 }}>
             {tr("YOUR UPDATES")}
           </Typography>
-          {t.followUps.map((f, i) => (
+          <FoldList items={t.followUps} newestLast gap={0} noun={tr("updates")} render={(f, i) => (
             <Box key={i} sx={{ mt: 0.75, p: 1.25, borderRadius: 2, border: "1px solid", borderColor: "divider" }}>
               {f.text && (
                 <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
@@ -576,9 +594,10 @@ export function TicketCard({ t, compact, onAction, collapsible = false, defaultO
                 {fmtDate(f.at, { month: "short", day: "numeric" })}
               </Typography>
             </Box>
-          ))}
+          )} />
         </Box>
       )}
+      <Box sx={{ flexGrow: 1 }} />
       {/* Resolved: the tenant confirms the fix or says it isn't fixed yet, then can rate it */}
       {details && onAction && answer === "awaiting" && (
         <Box sx={{ mt: 1.5 }}>
@@ -685,7 +704,6 @@ export function FilterPills({ options, value, onChange }) {
 // One year of payments: a header with the year's total that opens to its rows
 export function PaymentYear({ year, list, defaultOpen, onPick }) {
   const [open, setOpen] = useState(defaultOpen);
-  const [shown, setShown] = useState(PAGE_SIZE);
   const paid = list.filter((p) => ["paid", "partial"].includes(String(p.status || "").toLowerCase())).reduce((s, p) => s + (Number(p.amount) || 0), 0);
   return (
     <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 3, overflow: "hidden" }}>
@@ -705,10 +723,8 @@ export function PaymentYear({ year, list, defaultOpen, onPick }) {
       </Box>
       {open && (
         <Box sx={{ p: 1.25, display: "flex", flexDirection: "column", gap: 1 }}>
-          {list.slice(0, shown).map((p) => (
-            <PaymentRow key={p.id} p={p} onClick={() => onPick(p)} />
-          ))}
-          <ShowMore shown={Math.min(shown, list.length)} total={list.length} step={PAGE_SIZE} onMore={() => setShown((n) => n + PAGE_SIZE)} onLess={() => setShown(PAGE_SIZE)} />
+          {/* 5 or more: the latest few, then "Show all" */}
+          <FoldList items={list} noun={tr("payments")} render={(p) => <PaymentRow key={p.id} p={p} onClick={() => onPick(p)} />} />
         </Box>
       )}
     </Box>

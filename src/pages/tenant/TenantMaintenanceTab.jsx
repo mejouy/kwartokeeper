@@ -8,6 +8,7 @@ import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 import CheckCircleOutlinedIcon from "@mui/icons-material/CheckCircleOutlined";
 import TaskAltOutlinedIcon from "@mui/icons-material/TaskAltOutlined";
 import { PAGE_SIZE, row, cardSx, rise, EmptyState, TicketCard, ShowMore, FilterPills } from "./tenantParts";
+import ScrollSentinel from "../../components/ScrollSentinel";
 import { t } from "../../i18n";
 
 export default function TenantMaintenanceTab({ activeTickets, confirmTickets = [], archiveOpen, archiveShown, isPhone, openRepair, openTicketDlg, rankedTickets, resolvedTickets, setArchiveOpen, setArchiveShown, setTicketFilter, setTicketsShown, shownTickets, ticketFilter, ticketsShown }) {
@@ -41,9 +42,9 @@ export default function TenantMaintenanceTab({ activeTickets, confirmTickets = [
                 <TaskAltOutlinedIcon fontSize="small" sx={{ color: "success.main" }} />
                 {t("Waiting for your answer · {n}", { n: confirmTickets.length })}
               </Typography>
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.25, sm: 1.5 }, alignItems: "start" }}>
+              <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: { xs: 1.25, sm: 1.5 }, alignItems: "stretch" }}>
                 {confirmTickets.map((t, i) => (
-                  <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0 }}>
+                  <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0, display: "flex" }}>
                     <TicketCard t={t} onAction={openTicketDlg} />
                   </Box>
                 ))}
@@ -71,14 +72,19 @@ export default function TenantMaintenanceTab({ activeTickets, confirmTickets = [
                   ]}
                 />
               )}
-              <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.25, sm: 1.5 }, alignItems: "start" }}>
+              <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: { xs: 1.25, sm: 1.5 }, alignItems: "stretch" }}>
                 {shownTickets.slice(0, ticketsShown).map((t, i) => (
-                  <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0 }}>
+                  <Box key={t.id} sx={{ ...rise(Math.min(i, 5)), minWidth: 0, display: "flex" }}>
                     {/* A few requests: open in full. Many: short rows that open on tap */}
                     <TicketCard t={t} onAction={openTicketDlg} collapsible={activeTickets.length > 2} defaultOpen={activeTickets.length <= 2} />
                   </Box>
                 ))}
               </Box>
+              <ScrollSentinel
+                enabled={ticketsShown < shownTickets.length}
+                resetKey={ticketFilter}
+                onVisible={() => setTicketsShown((n) => Math.min(n + PAGE_SIZE, shownTickets.length))}
+              />
               {shownTickets.length === 0 && (
                 <Typography variant="body2" color="text.secondary" sx={{ py: 2 }}>{t("No requests here.")}</Typography>
               )}
@@ -110,13 +116,17 @@ export default function TenantMaintenanceTab({ activeTickets, confirmTickets = [
               </Button>
               {archiveOpen && (
                 <>
-                  <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", lg: "repeat(2, minmax(0, 1fr))" }, gap: { xs: 1.25, sm: 1.5 }, mt: 1.5, alignItems: "start" }}>
+                  <Box sx={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr)", gap: { xs: 1.25, sm: 1.5 }, mt: 1.5, alignItems: "stretch" }}>
                     {resolvedTickets.slice(0, archiveShown).map((t) => (
-                      <Box key={t.id} sx={{ minWidth: 0, opacity: 0.85 }}>
+                      <Box key={t.id} sx={{ minWidth: 0, opacity: 0.85, display: "flex" }}>
                         <TicketCard t={t} onAction={openTicketDlg} collapsible defaultOpen={false} />
                       </Box>
                     ))}
                   </Box>
+                  <ScrollSentinel
+                    enabled={archiveShown < resolvedTickets.length}
+                    onVisible={() => setArchiveShown((n) => Math.min(n + PAGE_SIZE, resolvedTickets.length))}
+                  />
                   <ShowMore
                     shown={Math.min(archiveShown, resolvedTickets.length)}
                     total={resolvedTickets.length}

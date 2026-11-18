@@ -3,11 +3,13 @@ import { Navigate, useLocation } from "react-router-dom";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import { doc, getDoc } from "firebase/firestore";
 import { auth, db } from "../config/firebase"; // Adjust path to your firebase config
-import { Box, CircularProgress } from "@mui/material";
 import { ownerAccessOf, RESTRICTED_OWNER_PATHS } from "../utils/ownerAccess";
 import { loadPlatformSettings } from "../utils/platformSettings";
 import { SIGNED_OUT_REASON_KEY } from "../utils/accountState";
 import MaintenanceScreen from "./MaintenanceScreen";
+import BrandLoader from "./BrandLoader";
+import AccountInactive from "./AccountInactive";
+import { isInactiveCaretaker } from "../utils/caretakerAssignment";
 
 const ROLE_HOME_PATHS = {
   owner: "/owner",
@@ -72,11 +74,7 @@ export default function ProtectedRoute({ children, allowedRoles = [] }) {
 
   // 1. Show loading spinner while checking auth state
   if (loading) {
-    return (
-      <Box sx={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100vh" }}>
-        <CircularProgress />
-      </Box>
-    );
+    return <BrandLoader />;
   }
 
   // 2. If no user is logged in, redirect to login page
@@ -96,6 +94,11 @@ export default function ProtectedRoute({ children, allowedRoles = [] }) {
   const isSuspended = ownerAccess ? ownerAccess === "suspended" : userDoc?.status === "suspended";
   if (isSuspended && location.pathname !== "/suspended") {
     return <Navigate to="/suspended" replace />;
+  }
+
+  // A caretaker the owner set to inactive: explain, and let them sign out
+  if (userDoc?.role === "caretaker" && isInactiveCaretaker(userDoc)) {
+    return <AccountInactive />;
   }
 
   // Signed in with a temporary password (invited caretakers): choose their own first

@@ -18,7 +18,6 @@ import {
   TableRow,
   CircularProgress,
   Alert,
-  Snackbar,
   Dialog,
   DialogContent,
   DialogActions,
@@ -73,9 +72,12 @@ import { normalizeStatus, rentStatusOf, paymentPeriodOf, dueDayOf, dueRuleOf, re
 import DueDayField from "../../../components/DueDayField";
 import { useOwnerBilling } from "../../../utils/billingSettings";
 import { DepositPanel } from "../../../components/DepositPanel";
-import { bedRateOf } from "../../../utils/bedRates";
-import ContractCard from "../../../components/ContractCard";
-import { contractOf } from "../../../utils/contract";
+import { bedNameOf, bedRateOf } from "../../../utils/bedRates";
+import { LeaseFilesCard } from "../../../components/LeaseFiles";
+import { FOLD_AT } from "../../../components/FoldList";
+import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
+import GavelOutlinedIcon from "@mui/icons-material/GavelOutlined";
+import { leaseFilesOf } from "../../../utils/leaseFiles";
 import { isRemovedAccount, removedLabel } from "../../../utils/accountState";
 import { isActiveCharge } from "../../../utils/charges";
 import { findDuplicatePerson } from "../../../utils/duplicates";
@@ -83,6 +85,7 @@ import { AddFeeDialog, BillBreakdown, FeeList } from "../../../components/Fees";
 import BoltOutlinedIcon from "@mui/icons-material/BoltOutlined";
 import AddIcon from "@mui/icons-material/Add";
 import { t } from "../../../i18n";
+import Toast from "../../../components/Toast";
 
 // ---------------------------------------------------------------------------
 // Constants — lease codes deliberately match what RegisterTenant stores in
@@ -498,6 +501,7 @@ export default function TenantDetail() {
   const [payments, setPayments] = useState([]);
   const [curfewNights, setCurfewNights] = useState([]);
   const [showAllNights, setShowAllNights] = useState(false);
+  const [showAllPayments, setShowAllPayments] = useState(false);
   // "Today" for this month's rent status, fixed when the page opens
   const [today] = useState(() => new Date());
   const [loading, setLoading] = useState(true);
@@ -1149,7 +1153,7 @@ export default function TenantDetail() {
   );
   const monthlyRentValue =
     tenant.monthlyRent ?? tenant.rentAmount ?? tenant.roomMonthlyRate ?? tenant.monthlyRate ?? tenant.rent ?? assignedRoom?.monthlyRatePerBed ?? 0;
-  const bedText = tenant.bedId ? (String(tenant.bedId).startsWith("Bed") ? tenant.bedId : `Bed ${tenant.bedId}`) : null;
+  const bedText = tenant.bedId ? bedNameOf(assignedRoom, tenant.bedId) : null;
   const roomSub = [bedText, assignedRoom?.floor ? `Floor ${assignedRoom.floor}` : null].filter(Boolean).join(" · ") || "No bed assigned";
   const propertyAddress = property ? formatPropertyAddress(property) : "";
 
@@ -1157,6 +1161,8 @@ export default function TenantDetail() {
   const leaseTone = LEASE_TONES[lease.tone];
 
   const statusOfPayment = (p) => String(p.status || "").toLowerCase();
+  // 5 or more: the latest few until "Show all"
+  const shownPayments = sortedPayments.length >= FOLD_AT && !showAllPayments ? sortedPayments.slice(0, 3) : sortedPayments;
   const paidPayments = sortedPayments.filter((p) => statusOfPayment(p) === "paid");
   const totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount || 0), 0);
   const underReview = sortedPayments.filter((p) => statusOfPayment(p) === "pending").length;
@@ -1175,6 +1181,15 @@ export default function TenantDetail() {
       console.error("Couldn't waive the late fee:", err);
       setSnackbar({ message: t("Couldn't waive the late fee. Please try again."), severity: "error" });
     }
+  };
+  // Pictures of the signed contract: saved on both copies of the tenant (the tenant sees them)
+  const saveLeaseFiles = async (leaseFiles) => {
+    const patch = { leaseFiles, leaseFilesUpdatedAt: new Date().toISOString(), updatedAt: new Date() };
+    // The account is what the tenant reads; the older tenants record follows when it exists
+    await setDoc(doc(db, "users", tenantId), patch, { merge: true });
+    await setDoc(doc(db, "tenants", tenantId), patch, { merge: true }).catch((err) => console.warn("Tenant record not updated:", err?.code || err));
+    setTenant((prev) => ({ ...prev, ...patch }));
+    setSnackbar({ message: t("Contract pictures saved."), severity: "success" });
   };
   const tenantSince = formatDate(tenant.leaseStartDate || tenant.leaseStart || tenant.createdAt);
 
@@ -1284,7 +1299,7 @@ export default function TenantDetail() {
               sx={{
                 width: { xs: 56, sm: 68 },
                 height: { xs: 56, sm: 68 },
-                bgcolor: status === "Inactive" ? "action.selected" : "primary.main",
+                bgcolor: status === "Inactive" ? "grey.600" : "primary.main",
                 color: "#fff",
                 fontFamily: HEADING_FONT,
                 fontWeight: 800,
@@ -1499,18 +1514,14 @@ export default function TenantDetail() {
         <DepositPanel tenant={{ ...tenant, id: tenantId, monthlyRent: Number(monthlyRentValue) || 0 }} charges={charges} payments={payments} onDone={(message, severity = "success") => setSnackbar({ message, severity })} />
       </Box>
 
-      {/* ───── Rental contract: did they agree, and to which version ───── */}
-      {contractOf(property) && (
-        <Box sx={{ ...panelSx, p: { xs: 2.5, sm: 3 }, mb: 2.5 }}>
-          <ContractCard
-            readOnly
-            tenant={{ ...tenant, id: tenantId, monthlyRent: Number(monthlyRentValue) || 0 }}
-            property={{ ...property, id: tenant.propertyId || property?.id }}
-            ownerName={currentUser?.displayName || ""}
-            onDone={(message, severity = "success") => setSnackbar({ message, severity })}
-          />
-        </Box>
-      )}
+      {/* ───── Signed contract pictures (optional; the tenant sees them too) ───── */}
+      <Box sx={{ ...panelSx, p: { xs: 2.5, sm: 3 }, mb: 2.5 }}>
+        <SectionHeading icon={GavelOutlinedIcon}>{t("Signed contract")}</SectionHeading>
+        <Typography variant="body2" color="text.secondary" sx={{ mt: -1, mb: 2 }}>
+          {t("Pictures of the paper contract. Add new pages when the lease is renewed.")}
+        </Typography>
+        <LeaseFilesCard files={leaseFilesOf(tenant)} onChange={saveLeaseFiles} />
+      </Box>
 
       {/* ───── Curfew record ───── */}
       <CurfewRecord nights={curfewNights} showAll={showAllNights} onToggle={() => setShowAllNights((v) => !v)} />
@@ -1547,7 +1558,7 @@ export default function TenantDetail() {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {sortedPayments.map((p) => (
+                    {shownPayments.map((p) => (
                       <TableRow key={p.id} hover sx={{ "&:last-child td": { borderBottom: 0 } }}>
                         <TableCell sx={{ fontWeight: 600, whiteSpace: "nowrap" }}>{paymentPeriodOf(p) || "—"}</TableCell>
                         <TableCell sx={{ whiteSpace: "nowrap" }}>{formatDate(p.paymentDate || p.createdAt)}</TableCell>
@@ -1566,7 +1577,7 @@ export default function TenantDetail() {
 
             {/* Stacked list on phones — a 6-column table doesn't fit */}
             <Box sx={{ display: { xs: "block", sm: "none" } }}>
-              {sortedPayments.map((p) => (
+              {shownPayments.map((p) => (
                 <Box
                   key={p.id}
                   sx={{ py: 1.5, borderBottom: "1px solid", borderColor: "divider", "&:last-of-type": { borderBottom: "none", pb: 0 }, "&:first-of-type": { pt: 0 } }}
@@ -1586,6 +1597,16 @@ export default function TenantDetail() {
                 </Box>
               ))}
             </Box>
+            {sortedPayments.length >= FOLD_AT && (
+              <Button
+                onClick={() => setShowAllPayments((v) => !v)}
+                aria-expanded={showAllPayments}
+                endIcon={<ExpandMoreIcon sx={{ transform: showAllPayments ? "rotate(180deg)" : "none", transition: "transform .2s" }} />}
+                sx={{ mt: 1.5, fontWeight: 700, textTransform: "none", borderRadius: 99 }}
+              >
+                {showAllPayments ? t("Show fewer") : t("Show all {n} payments", { n: sortedPayments.length })}
+              </Button>
+            )}
           </>
         )}
       </Box>
@@ -1727,7 +1748,10 @@ export default function TenantDetail() {
                     }
                   >
                     {availableBeds.map((bed) => (
-                      <MenuItem key={bed} value={bed}>{bed}</MenuItem>
+                      <MenuItem key={bed} value={bed}>
+                        {bedNameOf(selectedFormRoom, bed)}
+                        {bedRateOf(selectedFormRoom, bed) !== (Number(selectedFormRoom?.monthlyRatePerBed) || 0) ? ` · ₱${bedRateOf(selectedFormRoom, bed).toLocaleString()}` : ""}
+                      </MenuItem>
                     ))}
                   </TextField>
                 </Box>
@@ -1893,16 +1917,7 @@ export default function TenantDetail() {
         />
       )}
 
-      <Snackbar
-        open={Boolean(snackbar)}
-        autoHideDuration={3500}
-        onClose={() => setSnackbar(null)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-      >
-        <Alert severity={snackbar?.severity || "success"} variant="filled" onClose={() => setSnackbar(null)} sx={{ width: "100%" }}>
-          {snackbar?.message}
-        </Alert>
-      </Snackbar>
+      <Toast open={Boolean(snackbar)} message={snackbar?.message} severity={snackbar?.severity || "success"} onClose={() => setSnackbar(null)} />
     </Container>
   );
 }

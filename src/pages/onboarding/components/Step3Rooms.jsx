@@ -12,6 +12,8 @@ import LayersOutlinedIcon from "@mui/icons-material/LayersOutlined";
 import ApartmentOutlinedIcon from "@mui/icons-material/ApartmentOutlined";
 import CheckIcon from "@mui/icons-material/Check";
 
+import { bedLabels, bedRateOf, bedTypesForBunks, bunkCountOf, bunksPerRoomOf } from "../../../utils/bedRates";
+import { BedLayoutPreview } from "../../../components/BedLayout";
 import { buildUniformRooms, buildPerFloorRooms, computeSummary } from "../../../utils/roomGenerator";
 import { saveProperty } from "../../services/propertyService";
 import { useAuth } from "../../../context/AuthContext";
@@ -47,12 +49,19 @@ const newGroup = (from) => ({
   numberOfRooms: from?.numberOfRooms || 4,
   capacityPerRoom: from?.capacityPerRoom || 4,
   monthlyRate: from?.monthlyRate ?? 2500,
+  bunksPerRoom: from ? bunksPerRoomOf(from) : 0,
+  upperRate: from?.upperRate ?? "",
+  lowerRate: from?.lowerRate ?? "",
 });
 const typeName = (g) => (g.roomType === "Custom" ? g.customRoomType?.trim() || "Custom room" : g.roomType);
 const rateInput = (v) => (v === "" ? "" : Math.min(1000000, Math.max(0, parseInt(String(v).replace(/\D/g, ""), 10) || 0)));
 
 // One kind of room on a floor: type, how many, beds each, rate per bed
 function GroupEditor({ group, onChange, onRemove, canRemove, errors }) {
+  const capacity = Number(group.capacityPerRoom) || 0;
+  const maxBunks = Math.floor(capacity / 2);
+  const bunks = bunksPerRoomOf(group, capacity);
+  const singles = capacity - bunks * 2;
   return (
     <Box sx={{ p: { xs: 1.5, sm: 2 }, borderRadius: "14px", border: "1px solid", borderColor: errors ? "error.main" : "divider", bgcolor: (t) => alpha(t.palette.background.paper, 0.3) }}>
       <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", sm: "minmax(0, 1.3fr) minmax(0, 1fr)" }, gap: 1.5, alignItems: "start" }}>
@@ -93,7 +102,7 @@ function GroupEditor({ group, onChange, onRemove, canRemove, errors }) {
         )}
       </Box>
 
-      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "auto minmax(0, 1fr) minmax(0, 1fr)" }, gap: 1.5, mt: 1.75, alignItems: "end" }}>
+      <Box sx={{ display: "grid", gridTemplateColumns: { xs: "repeat(2, minmax(0, 1fr))", sm: "auto repeat(3, minmax(0, 1fr))" }, gap: 1.5, mt: 1.75, alignItems: "end" }}>
         <Box sx={{ gridColumn: { xs: "1 / -1", sm: "auto" } }}>
           <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 700, display: "block", mb: 0.5 }}>{t("Rooms")}</Typography>
           <Counter value={Number(group.numberOfRooms) || 1} onChange={(v) => onChange({ numberOfRooms: v })} min={1} max={MAX_ROOMS_PER_FLOOR} label="rooms" />
@@ -111,6 +120,26 @@ function GroupEditor({ group, onChange, onRemove, canRemove, errors }) {
           ))}
         </TextField>
         <TextField
+          select
+          label={t("Double decks per room")}
+          value={bunks}
+          slotProps={{ select: { renderValue: (n) => (n === 0 ? t("None") : String(n)) } }}
+          onChange={(e) => onChange({ bunksPerRoom: Number(e.target.value) })}
+          disabled={maxBunks === 0}
+          sx={{ ...fieldSx, "& .MuiOutlinedInput-root": { borderRadius: "10px", bgcolor: "background.default" } }}
+        >
+          {Array.from({ length: maxBunks + 1 }, (_, n) => (
+            <MenuItem key={n} value={n}>
+              {n === 0
+                ? t("None · all single beds")
+                : [
+                    n === 1 ? t("1 double deck") : t("{n} double decks", { n }),
+                    capacity - n * 2 > 0 && (capacity - n * 2 === 1 ? t("1 single bed") : t("{n} single beds", { n: capacity - n * 2 })),
+                  ].filter(Boolean).join(" · ")}
+            </MenuItem>
+          ))}
+        </TextField>
+        <TextField
           label={t("Rate per bed / month")}
           value={group.monthlyRate}
           onChange={(e) => onChange({ monthlyRate: rateInput(e.target.value) })}
@@ -120,6 +149,46 @@ function GroupEditor({ group, onChange, onRemove, canRemove, errors }) {
           sx={{ ...fieldSx, "& .MuiOutlinedInput-root": { borderRadius: "10px", bgcolor: "background.default" } }}
         />
       </Box>
+
+      {/* What one room of this type looks like */}
+      {capacity > 0 && (
+        <Box sx={{ mt: 1.75, p: 1.25, borderRadius: "12px", bgcolor: (th) => alpha(th.palette.text.primary, 0.035), display: "flex", alignItems: "flex-end", flexWrap: "wrap", gap: 1.5 }}>
+          <BedLayoutPreview room={{ bedTypes: bedTypesForBunks(capacity, bunks) }} capacity={capacity} size="sm" />
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 600, lineHeight: 1.2 }}>
+            {t("Each room:")}{" "}
+            {[
+              bunks > 0 && (bunks === 1 ? t("1 double deck") : t("{n} double decks", { n: bunks })),
+              singles > 0 && (singles === 1 ? t("1 single bed") : t("{n} single beds", { n: singles })),
+            ].filter(Boolean).join(" + ")}
+          </Typography>
+        </Box>
+      )}
+
+      {bunks > 0 && (
+        <Box sx={{ mt: 1.5 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+            {singles > 0
+              ? t("Upper and lower bunks can cost differently. Leave blank to use the rate per bed; single beds use the rate per bed.")
+              : t("Upper and lower bunks can cost differently. Leave blank to use the rate per bed.")}
+          </Typography>
+          <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 1.5 }}>
+            {[
+              ["upperRate", t("Upper bunk rate")],
+              ["lowerRate", t("Lower bunk rate")],
+            ].map(([key, label]) => (
+              <TextField
+                key={key}
+                label={label}
+                value={group[key] ?? ""}
+                placeholder={String(group.monthlyRate || "")}
+                onChange={(e) => onChange({ [key]: rateInput(e.target.value) })}
+                slotProps={{ inputLabel: { shrink: true }, htmlInput: { inputMode: "numeric" }, input: { startAdornment: <InputAdornment position="start">₱</InputAdornment> } }}
+                sx={{ ...fieldSx, "& .MuiOutlinedInput-root": { borderRadius: "10px", bgcolor: "background.default" } }}
+              />
+            ))}
+          </Box>
+        </Box>
+      )}
     </Box>
   );
 }
@@ -142,7 +211,11 @@ function BuildingPreview({ rooms, floors }) {
                 <Typography variant="caption" color="text.disabled">{t("No rooms")}</Typography>
               )}
               {list.slice(0, PREVIEW_PER_ROW).map((r, j) => (
-                <Tooltip key={j} title={`Room ${r.roomName} · ${r.capacity} ${r.capacity === 1 ? "bed" : "beds"}`} disableInteractive>
+                <Tooltip
+                  key={j}
+                  title={`Room ${r.roomName} · ${r.capacity} ${r.capacity === 1 ? "bed" : "beds"} · ${bunkCountOf(r) ? t("{n} double decks", { n: bunkCountOf(r) }) : t("Single bed spaces")}`}
+                  disableInteractive
+                >
                   <Box sx={{ width: 16, height: 16, borderRadius: "4px", bgcolor: "primary.main", opacity: 0.35 + Math.min(r.capacity, 8) * 0.08 }} />
                 </Tooltip>
               ))}
@@ -209,6 +282,9 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
           roomsPerFloor: Math.max(0, Number(uniform.numberOfRooms) || 0),
           capacityPerRoom: Math.max(0, Number(uniform.capacityPerRoom) || 0),
           monthlyRate: Math.max(0, Number(uniform.monthlyRate) || 0),
+          bunksPerRoom: bunksPerRoomOf(uniform),
+          upperRate: uniform.upperRate,
+          lowerRate: uniform.lowerRate,
           namingPattern: effectivePattern,
         }).map((r) => ({ ...r, roomType: typeName(uniform) }));
       }
@@ -222,6 +298,7 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
             numberOfRooms: Math.max(0, Number(g.numberOfRooms) || 0),
             capacityPerRoom: Math.max(0, Number(g.capacityPerRoom) || 0),
             monthlyRate: Math.max(0, Number(g.monthlyRate) || 0),
+            bunksPerRoom: bunksPerRoomOf(g),
           })),
         })),
       });
@@ -233,7 +310,7 @@ export default function Step3Rooms({ wizardData = {}, updateWizardData, onBack }
 
   const summary = useMemo(() => (rooms.length ? computeSummary(rooms) : null), [rooms]);
   const totalBeds = rooms.reduce((s, r) => s + (Number(r.capacity) || 0), 0);
-  const fullRent = rooms.reduce((s, r) => s + (Number(r.capacity) || 0) * (Number(r.monthlyRatePerBed) || 0), 0);
+  const fullRent = rooms.reduce((s, r) => s + bedLabels(r.capacity).reduce((sum, bed) => sum + bedRateOf(r, bed), 0), 0);
 
   // ---- validation (shown after the first save attempt) ----
   const groupErrors = (g) => {

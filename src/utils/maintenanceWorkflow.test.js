@@ -74,3 +74,32 @@ describe("resolution notes and the tenant's answer", () => {
     expect(feedbackSummary([]).averageRating).toBeNull();
   });
 });
+
+import { cleanTenantNote, MAX_TENANT_NOTE, tenantNoteOf } from "./maintenanceWorkflow";
+import { sortTickets } from "./maintenancePrioritization";
+
+describe("tenant note on a fix", () => {
+  it("trims and caps the note", () => {
+    expect(cleanTenantNote("  ok  ")).toBe("ok");
+    expect(cleanTenantNote("x".repeat(900))).toHaveLength(MAX_TENANT_NOTE);
+    expect(tenantNoteOf({})).toBe("");
+  });
+});
+
+describe("sorting requests", () => {
+  const d = (n) => new Date(2026, 10, n).toISOString();
+  const list = [
+    { id: "a", createdAt: d(5), roomNumber: "201", status: "Pending" },
+    { id: "b", createdAt: d(1), roomNumber: "103", status: "In Progress" },
+    { id: "c", createdAt: d(9), roomNumber: "12", status: "Pending" },
+  ];
+  const ids = (l) => l.map((t) => t.id);
+  it("keeps the priority order by default and re-sorts on request", () => {
+    expect(ids(sortTickets(list))).toEqual(["a", "b", "c"]);
+    expect(ids(sortTickets(list, "oldest"))).toEqual(["b", "a", "c"]);
+    expect(ids(sortTickets(list, "newest"))).toEqual(["c", "a", "b"]);
+    expect(ids(sortTickets(list, "room"))).toEqual(["c", "b", "a"]);
+    expect(ids(sortTickets(list, "status"))).toEqual(["b", "a", "c"]);
+    expect(list.map((t) => t.id)).toEqual(["a", "b", "c"]);
+  });
+});

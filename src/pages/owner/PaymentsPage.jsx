@@ -31,7 +31,6 @@ import {
   MenuItem,
   Paper,
   Skeleton,
-  Snackbar,
   Switch,
   Tab,
   Tabs,
@@ -98,6 +97,7 @@ import { AddFeeDialog, BillBreakdown, FeeList } from "../../components/Fees";
 import BoltOutlinedIcon from "@mui/icons-material/BoltOutlined";
 // Translation is "tr" here: this file also uses "t" for tenants and the theme
 import { t as tr } from "../../i18n";
+import Toast from "../../components/Toast";
 
 // ------------------------------------------------------------
 // CONSTANTS + PURE HELPERS
@@ -2687,17 +2687,7 @@ export default function PaymentsPage() {
         </Box>
       </Dialog>
 
-      <Snackbar
-        open={toast.open}
-        autoHideDuration={3500}
-        onClose={() => setToast((t) => ({ ...t, open: false }))}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        sx={{ bottom: { xs: `calc(${BOTTOM_NAV_H + (tab === 1 ? 88 : 8)}px + env(safe-area-inset-bottom, 0px)) !important`, sm: undefined } }}
-      >
-        <Alert severity={toast.severity} variant="filled" onClose={() => setToast((t) => ({ ...t, open: false }))} sx={{ width: "100%" }}>
-          {toast.message}
-        </Alert>
-      </Snackbar>
+      <Toast open={toast.open} message={toast.message} severity={toast.severity} onClose={() => setToast((t) => ({ ...t, open: false }))} bottom={`calc(${BOTTOM_NAV_H + (tab === 1 ? 88 : 8)}px + env(safe-area-inset-bottom, 0px))`} />
     </Box>
   );
 }

@@ -2,10 +2,11 @@
 // "caretaker assignment, one is to many"). The owner picks the rule; the
 // default stays one caretaker per property and one property per caretaker.
 //
-//   one_to_one    one property per caretaker, one caretaker per property (default)
+//   one_to_one    one property per caretaker, one caretaker per property
 //   one_to_many   a caretaker can have several properties; a property has one caretaker
 //   many_to_one   a property can have several caretakers; a caretaker has one property
-//   many_to_many  both
+//   many_to_many  both (default: an owner can give a caretaker several
+//                 properties and a property several caretakers)
 //
 // A caretaker record keeps every property they look after in
 // assignedPropertyIds (with their names in assignedPropertyNames), and the one
@@ -23,11 +24,16 @@ export const ASSIGNMENT_MODES = [
   { key: "many_to_one", label: "Many caretakers, one property", hint: "A property can have several caretakers. Each caretaker looks after one property.", multiProperty: false, sharedProperty: true },
   { key: "many_to_many", label: "Many caretakers, many properties", hint: "Caretakers can share properties and look after several each.", multiProperty: true, sharedProperty: true },
 ];
-export const DEFAULT_ASSIGNMENT_MODE = "one_to_one";
-export const modeOf = (key) => ASSIGNMENT_MODES.find((m) => m.key === key) || ASSIGNMENT_MODES[0];
+export const DEFAULT_ASSIGNMENT_MODE = "many_to_many";
+export const modeOf = (key) => ASSIGNMENT_MODES.find((m) => m.key === key) || ASSIGNMENT_MODES.find((m) => m.key === DEFAULT_ASSIGNMENT_MODE);
 
 const INACTIVE = ["inactive", "archived", "deactivated", "removed"];
 const isActive = (c) => !c?.accountRemoved && !INACTIVE.includes(String(c?.status || "Active").trim().toLowerCase());
+
+/** A caretaker the owner has set to inactive (they can't sign in to work; history is kept). */
+export const isInactiveCaretaker = (c) => INACTIVE.includes(String(c?.status || "Active").trim().toLowerCase());
+/** Status fields for setting a caretaker active or inactive. */
+export const caretakerStatusFields = (active) => ({ status: active ? "Active" : "Inactive", statusChangedAt: new Date().toISOString(), updatedAt: new Date() });
 
 /** Every property a caretaker looks after (older records only have the one). */
 export function propertyIdsOf(caretaker) {
@@ -93,7 +99,7 @@ export function assignmentConflicts(mode, caretakers = []) {
 
 export const saveAssignmentMode = (ownerUid, mode) => updateDoc(doc(db, "users", ownerUid), { caretakerAssignmentMode: modeOf(mode).key });
 
-/** The owner's rule, live (defaults to one_to_one until loaded or when never set). */
+/** The owner's rule, live (defaults to many_to_many until loaded or when never set). */
 export function useAssignmentMode(ownerUid) {
   const [state, setState] = useState({ uid: "", mode: DEFAULT_ASSIGNMENT_MODE });
   useEffect(() => {

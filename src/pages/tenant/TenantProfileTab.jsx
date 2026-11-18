@@ -14,11 +14,10 @@ import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import { RULES_PREVIEW, row, cardSx, fmtDate, formatLeaseStart, initials, rise, Pill, Panel, Facts } from "./tenantParts";
 import { t } from "../../i18n";
 import LanguageSwitch from "../../components/LanguageSwitch";
-import ContractCard from "../../components/ContractCard";
-import { contractOf } from "../../utils/contract";
+import { LeaseFilesCard } from "../../components/LeaseFiles";
 import GavelOutlinedIcon from "@mui/icons-material/GavelOutlined";
 
-export default function TenantProfileTab({ contractProperty, contractTenant, notify, ackRules, hasCover, hasHouseRules, lease, previewFile, recentCurfew, rulesAcked, rulesOpen, setPreviewFile, setRulesOpen, statusTone, tenantInfo }) {
+export default function TenantProfileTab({ ackRules, hasCover, hasHouseRules, lease, previewFile, recentCurfew, rulesAcked, rulesOpen, setPreviewFile, setRulesOpen, statusTone, tenantInfo }) {
   return (
     <Box sx={{ display: "grid", gridTemplateColumns: { xs: "minmax(0, 1fr)", md: "minmax(0, 1fr) minmax(0, 1.4fr)" }, gap: { xs: 2, md: 3 }, alignItems: "start" }}>
       <Box sx={{ display: "flex", flexDirection: "column", gap: { xs: 2, md: 3 }, minWidth: 0 }}>
@@ -71,7 +70,7 @@ export default function TenantProfileTab({ contractProperty, contractTenant, not
           <Facts
             items={[
               { label: t("Room"), value: `Room ${tenantInfo.roomNumber}` },
-              { label: t("Bed"), value: tenantInfo.bedId },
+              { label: t("Bed"), value: tenantInfo.bedName || tenantInfo.bedId },
               { label: t("Lease start"), value: formatLeaseStart(tenantInfo.leaseStartDate) },
               { label: t("Lease length"), value: tenantInfo.leaseDuration },
               { label: t("My phone"), value: tenantInfo.contact },
@@ -113,12 +112,10 @@ export default function TenantProfileTab({ contractProperty, contractTenant, not
           )}
         </Panel>
 
-        {/* Rental contract from the owner: read, agree, download (panel revisions) */}
-        {contractOf(contractProperty) && (
-          <Panel title={t("Rental contract")} icon={<GavelOutlinedIcon fontSize="small" />} sx={rise(3)}>
-            <ContractCard tenant={contractTenant} property={contractProperty} onDone={notify} />
-          </Panel>
-        )}
+        {/* Pictures of the signed paper contract, added by the owner */}
+        <Panel title={t("Signed contract")} icon={<GavelOutlinedIcon fontSize="small" />} sx={rise(3)}>
+          <LeaseFilesCard files={tenantInfo.leaseFiles || []} />
+        </Panel>
         <Panel title={t("House rules & curfew")} icon={<PolicyOutlinedIcon fontSize="small" />} sx={rise(3)}>
           {!hasHouseRules ? (
             <Typography variant="body2" color="text.secondary">

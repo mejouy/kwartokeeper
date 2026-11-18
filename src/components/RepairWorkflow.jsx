@@ -380,6 +380,16 @@ export function RepairOutcome({ ticket, compact = false }) {
           {state === "reviewed" && <Tag label={t("Rated {n}/5", { n: ticket.review.rating })} tone="warning" icon={<StarRoundedIcon />} />}
         </Box>
       )}
+      {state !== "none" && state !== "awaiting" && ticket.tenantNote && !compact && (
+        <Box sx={{ mt: 1, p: 1.25, borderRadius: "10px", border: "1px solid", borderColor: "divider" }}>
+          <Typography variant="caption" color="text.secondary" sx={{ fontWeight: 800, display: "block" }}>
+            {t("Tenant's note on the fix")}
+          </Typography>
+          <Typography variant="body2" sx={{ overflowWrap: "anywhere", whiteSpace: "pre-wrap" }}>
+            {ticket.tenantNote}
+          </Typography>
+        </Box>
+      )}
       {state === "reviewed" && ticket.review.comment && !compact && (
         <Typography variant="body2" color="text.secondary" sx={{ mt: 0.75, overflowWrap: "anywhere", whiteSpace: "pre-wrap", fontStyle: "italic" }}>
           “{ticket.review.comment}”

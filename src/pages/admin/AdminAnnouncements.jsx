@@ -15,7 +15,6 @@ import {
   DialogActions,
   FormControlLabel,
   Checkbox,
-  Snackbar,
   Skeleton,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
@@ -38,6 +37,7 @@ import { ownerAccessOf } from "../../utils/ownerAccess";
 import { normalizeStatus } from "../../utils/tenantRent";
 import { HeaderCard, Panel, Pill, FilterPills } from "./adminUi";
 import { isRemovedAccount } from "../../utils/accountState";
+import Toast from "../../components/Toast";
 
 const HEAD = '"Inter", sans-serif';
 const R = { sm: "10px", md: "14px", lg: "18px", xl: "22px" };
@@ -563,17 +563,7 @@ export default function AdminAnnouncements() {
         </DialogActions>
       </Dialog>
 
-      <Snackbar
-        open={snackbar.open}
-        autoHideDuration={4000}
-        onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        sx={{ bottom: { xs: "calc(84px + env(safe-area-inset-bottom, 0px)) !important", md: 24 } }}
-      >
-        <Alert severity={snackbar.severity} variant="filled" sx={{ borderRadius: R.sm }}>
-          {snackbar.message}
-        </Alert>
-      </Snackbar>
+      <Toast open={snackbar.open} message={snackbar.message} severity={snackbar.severity} onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))} />
     </Box>
   );
 }

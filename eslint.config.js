@@ -18,6 +18,11 @@ export default defineConfig([
       globals: globals.browser,
       parserOptions: { ecmaFeatures: { jsx: true } },
     },
+    rules: {
+      // Browser built-ins with everyday names: a missing variable or prop called e.g. "history"
+      // or "status" would silently read the browser's own and break at runtime. Use window.x if meant.
+      'no-restricted-globals': ['error', 'history', 'name', 'status', 'event', 'open', 'close', 'print', 'length', 'top', 'self', 'parent', 'screen', 'stop', 'find', 'focus', 'blur', 'origin', 'frames', 'closed', 'opener', 'scroll', 'content'],
+    },
   },
   // Code that runs in Node, not the browser: Cloud Functions, scripts, tests
   {

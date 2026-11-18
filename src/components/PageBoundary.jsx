@@ -3,17 +3,14 @@
 // screen if the page crashes. Going to another page clears the error.
 import React, { Suspense } from "react";
 import { useLocation } from "react-router-dom";
-import { Box, Button, CircularProgress, Typography } from "@mui/material";
+import { Box, Button, Typography } from "@mui/material";
+import BrandLoader from "./BrandLoader";
 import ErrorOutlineRoundedIcon from "@mui/icons-material/ErrorOutlineRounded";
 import RefreshOutlinedIcon from "@mui/icons-material/RefreshOutlined";
 import { t } from "../i18n";
 
 export function PageLoader({ fullScreen = false }) {
-  return (
-    <Box sx={{ display: "grid", placeItems: "center", minHeight: fullScreen ? "100vh" : 320 }} role="status" aria-label={t("Loading")}>
-      <CircularProgress />
-    </Box>
-  );
+  return <BrandLoader fullScreen={fullScreen} />;
 }
 
 // A new version of the app was published while this tab was open: the old page files are gone

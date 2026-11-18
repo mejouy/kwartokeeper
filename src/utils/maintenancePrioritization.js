@@ -153,3 +153,33 @@ export function rankMaintenanceRequests(reports, now = new Date()) {
       return rest;
     });
 }
+
+// ─────────────────────────────────────────────────────────────────
+// How the owner or caretaker wants the list ordered (panel revisions:
+// "allow editing of priority handling ... sorting mechanism"). The AHP
+// order above stays the default; the others re-sort the ranked list.
+// ─────────────────────────────────────────────────────────────────
+export const TICKET_SORTS = [
+  { key: "priority", label: "Most urgent first" },
+  { key: "oldest", label: "Oldest first" },
+  { key: "newest", label: "Newest first" },
+  { key: "room", label: "By room" },
+  { key: "status", label: "In progress first" },
+];
+export const DEFAULT_TICKET_SORT = "priority";
+
+const timeOf = (t) => toDate(t.createdAt)?.getTime() || 0;
+const roomCompare = (a, b) => String(a.roomNumber || "").localeCompare(String(b.roomNumber || ""), undefined, { numeric: true });
+
+/** The ranked list in the chosen order (ties keep the priority order). Returns a new array. */
+export function sortTickets(tickets, sort = DEFAULT_TICKET_SORT) {
+  const list = tickets.map((t, i) => ({ t, i }));
+  const by = {
+    oldest: (a, b) => timeOf(a.t) - timeOf(b.t),
+    newest: (a, b) => timeOf(b.t) - timeOf(a.t),
+    room: (a, b) => String(a.t.propertyName || "").localeCompare(String(b.t.propertyName || "")) || roomCompare(a.t, b.t),
+    status: (a, b) => Number((b.t.status || "Pending") === "In Progress") - Number((a.t.status || "Pending") === "In Progress"),
+  }[sort];
+  if (!by) return tickets.slice();
+  return list.sort((a, b) => by(a, b) || a.i - b.i).map((x) => x.t);
+}

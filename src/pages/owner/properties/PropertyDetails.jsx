@@ -1,13 +1,37 @@
 import { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import {
-  Box, Paper, Typography, Button, Tabs, Tab, TextField,
-  CircularProgress, IconButton, Snackbar, Alert,
-  Table, TableBody, TableCell, TableContainer,
-  TableHead, TableRow, Chip, Switch,
-  Dialog, DialogTitle, DialogContent, DialogActions, InputAdornment,
-  Accordion, AccordionSummary, AccordionDetails, useMediaQuery, useTheme,
-  Menu, MenuItem, LinearProgress, Skeleton,
+  Box,
+  Paper,
+  Typography,
+  Button,
+  Tabs,
+  Tab,
+  TextField,
+  CircularProgress,
+  IconButton,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  Chip,
+  Switch,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  InputAdornment,
+  Accordion,
+  AccordionSummary,
+  AccordionDetails,
+  useMediaQuery,
+  useTheme,
+  Menu,
+  MenuItem,
+  LinearProgress,
+  Skeleton,
 } from "@mui/material";
 import { alpha } from "@mui/material/styles";
 
@@ -40,8 +64,10 @@ import AddressFields from "../../../components/AddressFields";
 import { findDuplicateProperty } from "../../../utils/duplicates";
 import { t } from "../../../i18n";
 import BedRatesDialog from "../../../components/BedRatesDialog";
-import ContractEditor from "../../../components/ContractEditor";
-import { cleanBedRates, customBedRates, rateRangeText } from "../../../utils/bedRates";
+import PropertyBillingEditor from "../../../components/PropertyBillingEditor";
+import { billingForProperty, hasPropertyRules, normalizeBilling, saveBillingSettings, useOwnerBilling, validateBilling, withPropertyRules } from "../../../utils/billingSettings";
+import { BED_LAYOUT_DOUBLE_DECK, BED_LAYOUT_SINGLE, cleanBedRates, cleanBedTypeRates, cleanBedTypes, customBedRates, customBedTypes, defaultBedTypeRates, defaultBedTypes, rateRangeText } from "../../../utils/bedRates";
+import Toast from "../../../components/Toast";
 
 // Must match the owner layout: top bar height, and bottom nav height on phones
 const BAR_H = { xs: 56, md: 72 };
@@ -227,12 +253,17 @@ const occupancyChipSx = (occupied, capacity) => {
 
 const EMPTY_ADDRESS = { street: "", barangay: "", cityMunicipality: "", province: "", region: "", regionCode: "", provinceCode: "", cityCode: "" };
 
-// "2 beds with their own rate" under a room's rate, with a button to set them
+const EMPTY_NEW_ROOM = { roomName: "", floor: 1, capacity: 2, monthlyRatePerBed: 2500, bedLayout: "single", upperRate: "", lowerRate: "" };
+
+// Custom bed spaces are configured in the rates dialog.
 function BedRatesLink({ room, onOpen }) {
-  const own = customBedRates(room).length;
+  const customBeds = new Set([
+    ...customBedRates(room).map(([bed]) => bed),
+    ...customBedTypes(room).map(([bed]) => bed),
+  ]).size;
   return (
     <Button size="small" onClick={onOpen} sx={{ mt: 0.5, ml: -0.75, fontWeight: 700, textTransform: "none", minHeight: 30, py: 0 }}>
-      {own ? t("{n} beds with their own rate · {range}", { n: own, range: rateRangeText(room) }) : t("Set rates per bed")}
+      {customBeds ? t("{n} bed spaces configured · {range}", { n: customBeds, range: rateRangeText(room) }) : t("Set bed types and rates")}
     </Button>
   );
 }
@@ -241,7 +272,7 @@ export default function PropertyDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
   const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
+  const isNarrowLayout = useMediaQuery(theme.breakpoints.down("lg"));
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -260,6 +291,10 @@ export default function PropertyDetails() {
 
   // JSON snapshot of the last loaded/saved form, used to know if anything changed
   const [savedSnapshot, setSavedSnapshot] = useState("");
+  // Property → Billing: this property's own rules, or the owner's usual ones (saved on the owner's billing rules)
+  const ownerBilling = useOwnerBilling(auth.currentUser?.uid);
+  const [billingDraft, setBillingDraft] = useState(null);
+  const [billingErrors, setBillingErrors] = useState({});
   const [roomToDelete, setRoomToDelete] = useState(null);
   const [tabValue, setTabValue] = useState(0);
   const [toast, setToast] = useState({ open: false, message: "", severity: "success" });
@@ -276,12 +311,7 @@ export default function PropertyDetails() {
 
   // New Room Modal State
   const [openAddRoomModal, setOpenAddRoomModal] = useState(false);
-  const [newRoomData, setNewRoomData] = useState({
-    roomName: "",
-    floor: 1,
-    capacity: 2,
-    monthlyRatePerBed: 2500
-  });
+  const [newRoomData, setNewRoomData] = useState(EMPTY_NEW_ROOM);
 
   // Complete Form State
   const [formData, setFormData] = useState({
@@ -303,8 +333,6 @@ export default function PropertyDetails() {
     },
     amenities: [],
     rulesText: "",
-    // Rental contract tenants agree to in the app (panel revisions, utils/contract.js)
-    contract: { enabled: false, title: "", body: "", version: 0 },
     ruleFiles: [], // Array of uploaded document objects { name, url, path }
     rooms: []
   });
@@ -355,12 +383,6 @@ export default function PropertyDetails() {
             amenities: Array.isArray(data.amenities) ? data.amenities : [],
             rulesText: Array.isArray(data.rules) ? data.rules.join("\n") : typeof data.rules === "string" ? data.rules : data.rulesText || "",
             ruleFiles: Array.isArray(data.ruleFiles) ? data.ruleFiles : [],
-            contract: {
-              enabled: Boolean(data.contract?.enabled),
-              title: String(data.contract?.title || ""),
-              body: String(data.contract?.body || ""),
-              version: Number(data.contract?.version) || 0,
-            },
             rooms: rooms
           };
           setFormData(loaded);
@@ -476,7 +498,9 @@ export default function PropertyDetails() {
       floor: Number(newRoomData.floor) || 1,
       capacity: Number(newRoomData.capacity) || 1,
       occupiedBeds: 0,
-      monthlyRatePerBed: Number(newRoomData.monthlyRatePerBed) || 0
+      monthlyRatePerBed: Number(newRoomData.monthlyRatePerBed) || 0,
+      bedTypes: defaultBedTypes(Number(newRoomData.capacity) || 1, newRoomData.bedLayout),
+      bedTypeRates: defaultBedTypeRates(newRoomData.bedLayout, newRoomData, Number(newRoomData.monthlyRatePerBed) || 0)
     };
 
     setFormData(prev => {
@@ -491,7 +515,7 @@ export default function PropertyDetails() {
     });
 
     setOpenAddRoomModal(false);
-    setNewRoomData({ roomName: "", floor: 1, capacity: 2, monthlyRatePerBed: 2500 });
+    setNewRoomData(EMPTY_NEW_ROOM);
   };
 
   // ---- Cover photo -------------------------------------------------------
@@ -610,7 +634,22 @@ export default function PropertyDetails() {
   };
 
   const isUploading = uploads.some((u) => !u.error) || coverPreparing;
-  const isDirty = !loading && (JSON.stringify(formData) !== savedSnapshot || Boolean(coverFile));
+  // The draft starts from what is saved for this property (its own rules, else the usual ones)
+  const billingFromSaved = () => {
+    const base = billingForProperty(ownerBilling, id);
+    return {
+      custom: hasPropertyRules(ownerBilling, id),
+      defaultDueMode: base.defaultDueMode,
+      defaultDueDay: base.defaultDueDay,
+      lateFee: { ...base.lateFee, amount: base.lateFee.amount ? String(base.lateFee.amount) : "", graceDays: String(base.lateFee.graceDays) },
+      moveIn: { ...base.moveIn },
+    };
+  };
+  const billing = billingDraft || billingFromSaved();
+  const billingRulesOf = (d) => ({ defaultDueMode: d.defaultDueMode, defaultDueDay: Number(d.defaultDueDay), lateFee: { ...d.lateFee, amount: Number(d.lateFee.amount) || 0, graceDays: Number(d.lateFee.graceDays) }, moveIn: d.moveIn });
+  const billingTarget = (d) => withPropertyRules(ownerBilling, id, d.custom ? billingRulesOf(d) : null, formData.propertyName);
+  const billingChanged = Boolean(billingDraft) && JSON.stringify(billingTarget(billingDraft).propertyRules) !== JSON.stringify(normalizeBilling(ownerBilling).propertyRules);
+  const isDirty = !loading && (JSON.stringify(formData) !== savedSnapshot || Boolean(coverFile) || billingChanged);
 
   // Save to Firebase
   const handleSave = async () => {
@@ -633,6 +672,11 @@ export default function PropertyDetails() {
       if (Number(r.capacity) < Number(r.occupiedBeds || 0)) return fail(`"${name}" has ${r.occupiedBeds} tenants but only ${r.capacity} beds.`, 1);
     }
     if (coverFile && !auth.currentUser) return fail("You're signed out. Sign in again and retry.");
+    if (billingChanged && billing.custom) {
+      const e = validateBilling(billingRulesOf(billing));
+      setBillingErrors(e);
+      if (Object.keys(e).length) return fail("Check the billing rules for this property.", 4);
+    }
 
     setSaving(true);
     try {
@@ -699,20 +743,6 @@ export default function PropertyDetails() {
         amenities: formData.amenities,
         rules: formData.rulesText.split("\n").map(r => r.trim()).filter(Boolean),
         ruleFiles: formData.ruleFiles,
-        // A changed contract gets a new version, so tenants are asked to agree again
-        contract: (() => {
-          const before = savedSnapshot ? JSON.parse(savedSnapshot).contract || {} : {};
-          const c = formData.contract || {};
-          const changed = c.enabled !== Boolean(before.enabled) || c.title !== (before.title || "") || c.body !== (before.body || "");
-          const textChanged = c.title !== (before.title || "") || c.body !== (before.body || "");
-          return {
-            enabled: Boolean(c.enabled && c.body.trim()),
-            title: c.title.trim(),
-            body: c.body,
-            version: textChanged || (changed && !before.version) ? (Number(before.version) || 0) + 1 : Number(before.version) || 1,
-            updatedAt: changed ? new Date().toISOString() : before.updatedAt || new Date().toISOString(),
-          };
-        })(),
         rooms: formData.rooms.map(room => ({
           ...room,
           id: room.id || `room_${Math.random()}`,
@@ -722,14 +752,23 @@ export default function PropertyDetails() {
           occupiedBeds: Number((liveRooms.get(room.id)?.occupiedBeds ?? room.occupiedBeds) || 0),
           monthlyRatePerBed: Number(room.monthlyRatePerBed || 0),
           // Beds with their own rate (only real beds, only rates that differ from the room's)
-          bedRates: cleanBedRates(room.bedRates, room.capacity, room.monthlyRatePerBed)
+          bedRates: cleanBedRates(room.bedRates, room.capacity, room.monthlyRatePerBed, room.bedTypes, room.bedTypeRates),
+          bedTypeRates: cleanBedTypeRates(room.bedTypeRates, room.monthlyRatePerBed),
+          bedTypes: cleanBedTypes(room.bedTypes, room.capacity)
         })),
         updatedAt: new Date()
       };
 
       await updateDoc(docRef, updatePayload);
+      // This property's billing rules live with the owner's billing rules (tenants and caretakers read them there)
+      if (billingChanged) {
+        // Read the latest rules first, so only this property's entry changes
+        const latest = normalizeBilling((await getDoc(doc(db, "users", auth.currentUser.uid))).data()?.billingSettings);
+        await saveBillingSettings(auth.currentUser.uid, withPropertyRules(latest, id, billingDraft.custom ? billingRulesOf(billingDraft) : null, formData.propertyName));
+        setBillingDraft(null);
+      }
 
-      const savedForm = { ...formData, coverPhotoUrl: coverUrl, contract: { ...formData.contract, version: updatePayload.contract.version } };
+      const savedForm = { ...formData, coverPhotoUrl: coverUrl };
       setFormData(savedForm);
       setSavedSnapshot(JSON.stringify(savedForm));
       setSavedDocUrls(formData.ruleFiles.map((f) => f.url).filter(Boolean));
@@ -816,7 +855,7 @@ export default function PropertyDetails() {
         {/* Desktop save: always visible, enabled once something changed */}
         <Box sx={{ display: { xs: "none", sm: "flex" }, alignItems: "center", gap: 1.5, flexShrink: 0 }}>
           <Typography variant="body2" sx={{ ...row, gap: 0.75, fontWeight: 700, color: isDirty ? "warning.dark" : "text.secondary" }}>
-            {isDirty ? <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: "warning.main" }} /> : <CheckCircleOutlineIcon sx={{ fontSize: 17, color: "success.main" }} />}
+            {isDirty ? <Box component="span" sx={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", bgcolor: "warning.main" }} /> : <CheckCircleOutlineIcon sx={{ fontSize: 17, color: "success.main" }} />}
             {isDirty ? t("Unsaved changes") : t("All changes saved")}
           </Typography>
           <Button
@@ -869,6 +908,7 @@ export default function PropertyDetails() {
           <Tab label={`Rooms & rates (${formData.rooms.length})`} />
           <Tab label={t("Rules & curfew")} />
           <Tab label={t("Amenities")} />
+          <Tab label={t("Billing")} />
         </Tabs>
       </Box>
 
@@ -980,7 +1020,7 @@ export default function PropertyDetails() {
         <Box sx={{ display: "flex", flexDirection: "column", gap: 1.5 }}>
           <Box sx={{ ...row, justifyContent: "space-between", gap: 2, mb: 0.5 }}>
             <Typography variant="body2" color="text.secondary" sx={{ minWidth: 0 }}>
-              {t("Set bed rates, capacity and floors for each room.")}
+              {t("Set bed types, rates, capacity and floors for each room.")}
             </Typography>
             <Button variant="contained" startIcon={<AddIcon />} onClick={() => setOpenAddRoomModal(true)} sx={{ borderRadius: R.sm, fontWeight: 700, flexShrink: 0, boxShadow: "none" }}>
               {t("Add room")}
@@ -1020,7 +1060,7 @@ export default function PropertyDetails() {
                   </AccordionSummary>
 
                   <AccordionDetails sx={{ p: 0, borderTop: "1px solid", borderColor: "divider" }}>
-                    {isMobile ? (
+                    {isNarrowLayout ? (
                       <Box sx={{ display: "flex", flexDirection: "column" }}>
                         {floorRooms.map((room, rIdx) => {
                           const idx = room.originalIndex;
@@ -1302,19 +1342,6 @@ export default function PropertyDetails() {
             )}
           </Section>
 
-          {/* Rental contract: tenants read it with their details filled in and agree in the app */}
-          <Section
-            title={t("Rental contract")}
-            description={t("Optional. Write the agreement for this property; tenants agree to it in the app and both of you can download it.")}
-          >
-            <ContractEditor
-              value={formData.contract}
-              onChange={(contract) => setFormData((prev) => ({ ...prev, contract }))}
-              property={{ ...formData, id }}
-              rules={formData.rulesText.split("\n").map((r) => r.trim()).filter(Boolean)}
-              fieldSx={fieldSx}
-            />
-          </Section>
         </Paper>
       )}
 
@@ -1366,6 +1393,27 @@ export default function PropertyDetails() {
         </Paper>
       )}
 
+      {/* TAB 4: BILLING — this property's own rules, or the owner's usual ones */}
+      {tabValue === 4 && (
+        <Paper elevation={0} sx={{ ...cardSx, px: { xs: 2, sm: 3.5 } }}>
+          <Section
+            first
+            title={t("Billing rules")}
+            description={t("When rent is due, the late fee and what to collect at move-in. Tenants of this property and its caretakers see bills worked out with these.")}
+          >
+            <PropertyBillingEditor
+              owner={normalizeBilling(ownerBilling)}
+              value={billing}
+              onChange={(next) => {
+                setBillingDraft(next);
+                setBillingErrors({});
+              }}
+              errors={billingErrors}
+            />
+          </Section>
+        </Paper>
+      )}
+
       {/* Dialog: Add New Room */}
       <Dialog open={openAddRoomModal} onClose={() => setOpenAddRoomModal(false)} maxWidth="xs" fullWidth slotProps={{ paper: { sx: { borderRadius: R.lg } } }}>
         <DialogTitle sx={{ fontFamily: HEAD, fontWeight: 800 }}>{t("Add new room")}</DialogTitle>
@@ -1412,6 +1460,43 @@ export default function PropertyDetails() {
                 input: { startAdornment: <InputAdornment position="start">₱</InputAdornment> },
               }}
             />
+            <TextField
+              select
+              fullWidth
+              label={t("Bed layout")}
+              value={newRoomData.bedLayout}
+              onChange={(e) => setNewRoomData(prev => ({ ...prev, bedLayout: e.target.value }))}
+              sx={fieldSx}
+            >
+              <MenuItem value={BED_LAYOUT_SINGLE}>{t("Single bed spaces")}</MenuItem>
+              <MenuItem value={BED_LAYOUT_DOUBLE_DECK}>{t("Double deck (upper/lower)")}</MenuItem>
+            </TextField>
+            {newRoomData.bedLayout === BED_LAYOUT_DOUBLE_DECK && (
+              <Box sx={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 2 }}>
+                {[
+                  ["upperRate", t("Upper bunk rate")],
+                  ["lowerRate", t("Lower bunk rate")],
+                ].map(([key, label]) => (
+                  <TextField
+                    key={key}
+                    fullWidth
+                    label={label}
+                    value={newRoomData[key]}
+                    placeholder={String(newRoomData.monthlyRatePerBed || "")}
+                    onChange={(e) => setNewRoomData(prev => ({ ...prev, [key]: e.target.value.replace(/\D/g, "") }))}
+                    sx={fieldSx}
+                    slotProps={{
+                      inputLabel: { shrink: true },
+                      htmlInput: { inputMode: "numeric" },
+                      input: { startAdornment: <InputAdornment position="start">₱</InputAdornment> },
+                    }}
+                  />
+                ))}
+              </Box>
+            )}
+            <Typography variant="caption" color="text.secondary">
+              {t("You can change each bed's type and rate later with \"Set bed types and rates\".")}
+            </Typography>
           </Box>
         </DialogContent>
         <DialogActions sx={{ p: 2 }}>
@@ -1501,19 +1586,19 @@ export default function PropertyDetails() {
 
       {/* Toast — lifted above the phone bottom bar */}
       {bedRatesRoom !== null && formData.rooms[bedRatesRoom] && (
-        <BedRatesDialog room={formData.rooms[bedRatesRoom]} onClose={() => setBedRatesRoom(null)} onSave={(bedRates) => handleRoomChange(bedRatesRoom, "bedRates", bedRates)} />
+        <BedRatesDialog
+          room={formData.rooms[bedRatesRoom]}
+          onClose={() => setBedRatesRoom(null)}
+          onSave={({ monthlyRatePerBed, bedRates, bedTypes, bedTypeRates }) => {
+            handleRoomChange(bedRatesRoom, "monthlyRatePerBed", monthlyRatePerBed);
+            handleRoomChange(bedRatesRoom, "bedRates", bedRates);
+            handleRoomChange(bedRatesRoom, "bedTypes", bedTypes);
+            handleRoomChange(bedRatesRoom, "bedTypeRates", bedTypeRates);
+          }}
+        />
       )}
 
-      <Snackbar
-        open={toast.open}
-        autoHideDuration={4000}
-        onClose={() => setToast(prev => ({ ...prev, open: false }))}
-        sx={{ bottom: { xs: `calc(${BOTTOM_NAV_H + 80}px + env(safe-area-inset-bottom, 0px)) !important`, sm: "24px !important" } }}
-      >
-        <Alert severity={toast.severity} sx={{ width: "100%", borderRadius: R.sm }}>
-          {toast.message}
-        </Alert>
-      </Snackbar>
+      <Toast open={toast.open} message={toast.message} severity={toast.severity} onClose={() => setToast((prev) => ({ ...prev, open: false }))} bottom={`calc(${BOTTOM_NAV_H + 80}px + env(safe-area-inset-bottom, 0px))`} />
     </Box>
   );
 }

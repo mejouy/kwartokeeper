@@ -10,6 +10,7 @@ import EventOutlinedIcon from "@mui/icons-material/EventOutlined";
 import AlarmOutlinedIcon from "@mui/icons-material/AlarmOutlined";
 import SellOutlinedIcon from "@mui/icons-material/SellOutlined";
 import KeyOutlinedIcon from "@mui/icons-material/KeyOutlined";
+import ApartmentOutlinedIcon from "@mui/icons-material/ApartmentOutlined";
 import { doc, onSnapshot } from "firebase/firestore";
 import DueDayField from "../../components/DueDayField";
 import { db } from "../../config/firebase";
@@ -68,10 +69,12 @@ export default function OwnerBillingRules({ ownerUid, Section, SaveButton, icon,
   };
   const setLate = (patch) => set({ lateFee: { ...draft.lateFee, ...patch } });
   const setFee = (i, patch) => set({ feeTypes: draft.feeTypes.map((f, j) => (j === i ? { ...f, ...patch } : f)) });
-  const changed = JSON.stringify(normalizeBilling(fromDraft(draft))) !== JSON.stringify(saved);
+  const changed = JSON.stringify(normalizeBilling({ ...fromDraft(draft), propertyRules: saved.propertyRules })) !== JSON.stringify(saved);
+  const customProperties = Object.entries(saved.propertyRules || {});
 
   const save = async () => {
-    const values = fromDraft(draft);
+    // Each property's own rules are set from that property; keep the latest ones
+    const values = { ...fromDraft(draft), propertyRules: saved.propertyRules };
     const e = validateBilling(values);
     setErrors(e);
     if (Object.keys(e).length) return;
@@ -109,6 +112,14 @@ export default function OwnerBillingRules({ ownerUid, Section, SaveButton, icon,
         </>
       }
     >
+      <Alert severity="info" icon={<ApartmentOutlinedIcon fontSize="inherit" />} sx={{ mb: 2.5, borderRadius: "12px" }}>
+        {customProperties.length === 0
+          ? t("These are your usual rules: every property follows them. To bill one property differently, open it and go to Billing.")
+          : t("Every property follows these, except {names}, which have their own rules (set in each property's Billing tab).", {
+              names: customProperties.map(([, r]) => r.propertyName || t("a property")).join(", "),
+            })}
+      </Alert>
+
       {/* Due date */}
       <Heading icon={EventOutlinedIcon} first>
         {t("Rent due date")}

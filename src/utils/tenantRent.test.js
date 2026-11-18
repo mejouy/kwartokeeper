@@ -1,3 +1,4 @@
+import { billingForProperty } from "./tenantRent";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("../config/firebase", () => ({ db: {}, auth: {} }));
@@ -113,5 +114,19 @@ describe("rent due day", () => {
     expect(dueRuleOf({ rentDueDay: 15 })).toEqual({ mode: "15", day: 15 });
     expect(dueRuleOf({ rentDueDay: 5 })).toEqual({ mode: "custom", day: 5 });
     expect(dueRuleOf({ rentDueDay: 12, rentDueMode: "lease" })).toEqual({ mode: "lease", day: 12 });
+  });
+});
+
+describe("billing rules per property", () => {
+  const owner = { lateFee: { enabled: true, mode: "fixed", amount: 100, graceDays: 3 }, defaultDueMode: "15", defaultDueDay: 15, propertyRules: { P2: { lateFee: { enabled: true, mode: "fixed", amount: 250, graceDays: 0 }, defaultDueMode: "custom", defaultDueDay: 5 } } };
+  it("uses a property's own rules on top of the owner's", () => {
+    expect(billingForProperty(owner, "P2").lateFee.amount).toBe(250);
+    expect(billingForProperty(owner, "P2").defaultDueDay).toBe(5);
+    expect(billingForProperty(owner, "P1").lateFee.amount).toBe(100);
+    expect(billingForProperty(owner, "").lateFee.amount).toBe(100);
+    expect(billingForProperty(null, "P2")).toBe(null);
+  });
+  it("is safe to apply twice", () => {
+    expect(billingForProperty(billingForProperty(owner, "P2"), "P2").lateFee.amount).toBe(250);
   });
 });

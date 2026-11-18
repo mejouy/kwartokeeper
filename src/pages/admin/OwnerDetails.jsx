@@ -19,7 +19,6 @@ import {
   Link as MuiLink,
   Paper,
   Skeleton,
-  Snackbar,
   Tooltip,
   TextField,
   Typography,
@@ -62,6 +61,7 @@ import { ownerAccessOf } from "../../utils/ownerAccess";
 import { occupancyOf, bedsInProperty, holdsBed } from "../../utils/occupancy";
 import { HeaderCard, Pill as AdminPill } from "./adminUi";
 import { withoutRemoved, isRemovedAccount, removedLabel } from "../../utils/accountState";
+import Toast from "../../components/Toast";
 
 const row = { display: "flex", alignItems: "center" };
 const cardSx = { bgcolor: "background.default", border: "1px solid", borderColor: "divider", borderRadius: 3 };
@@ -982,17 +982,7 @@ export default function OwnerDetails() {
         </Box>
       )}
 
-      <Snackbar
-        open={toast.open}
-        autoHideDuration={4000}
-        onClose={() => setToast((t) => ({ ...t, open: false }))}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        sx={{ bottom: { xs: `calc(${isPending ? 136 : 80}px + env(safe-area-inset-bottom)) !important`, sm: undefined } }}
-      >
-        <Alert severity="success" variant="filled" sx={{ borderRadius: 2 }}>
-          {toast.message}
-        </Alert>
-      </Snackbar>
+      <Toast open={toast.open} message={toast.message} severity="success" onClose={() => setToast((t) => ({ ...t, open: false }))} bottom={`calc(${isPending ? 136 : 80}px + env(safe-area-inset-bottom))`} />
     </Box>
   );
 }
