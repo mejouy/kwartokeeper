@@ -21,6 +21,7 @@ It runs as a web app, an Android app (Capacitor) and a Windows desktop app (Elec
 11. [Security rules](#11-security-rules)
 12. [Testing](#12-testing)
 13. [Panel revisions (final defense)](#13-panel-revisions-final-defense)
+   - [Main branch additions and updates](#main-branch-additions-and-updates)
 14. [Troubleshooting](#14-troubleshooting)
 
 ---
@@ -33,6 +34,8 @@ It runs as a web app, an Android app (Capacitor) and a Windows desktop app (Elec
 | **Owner** | Self sign-up, then admin approval | Overview, Properties, Tenants, Payments, Maintenance, Caretakers, Announcements, Reports, Account | Everything for their own properties |
 | **Caretaker** | Invited by an owner (temporary password) | Overview, Tenants, Repairs, Payments, Rooms, Curfew | Only what the owner allowed: manage tenants, log occupancy/curfew, handle repairs, view financials, change room layout |
 | **Tenant** | Registered by an owner (email link to set a password) | Overview, Payments, Repairs, My room & rules | Pay rent (with proof), report and follow repairs, confirm fixes and rate the service, read and agree to the contract |
+
+On the main branch, tenants can also view photos or a PDF of their signed lease uploaded by the owner; see [Main branch additions and updates](#main-branch-additions-and-updates).
 
 ## 2. Tech stack
 
@@ -47,6 +50,7 @@ It runs as a web app, an Android app (Capacitor) and a Windows desktop app (Elec
 | Receipt reading (OCR) | tesseract.js, runs on the device |
 | Server tasks | Firebase Cloud Functions (`functions/src`) or the free local loops (`functions/*.js`) |
 | Tests | Vitest (logic), Firebase Rules Unit Testing on the Firestore emulator (security rules) |
+| Web routing | Vercel SPA fallback (`vercel.json`) |
 
 ## 3. Project structure
 
@@ -86,6 +90,9 @@ Key logic files:
 | `utils/bedRates.js` | Separate rates per bed |
 | `utils/caretakerAssignment.js` | The owner's caretaker assignment rule (1:1, 1:many, many:1, many:many) |
 | `utils/contract.js` | Rental contract template, placeholders, agreement status, PDF |
+| `utils/leaseFiles.js` | Uploading and validating signed lease photos or PDFs |
+| `utils/roomGenerator.js` | Generating rooms with bed layouts and rates during property setup |
+| `utils/useStoredSort.js` | Remembering the owner's and caretaker's maintenance sort choice on the device |
 
 ## 4. Setting up a development copy
 
@@ -136,6 +143,32 @@ npx cap open android      # then Build > Generate Signed Bundle / APK in Android
 
 Push notifications on Android need `android/app/google-services.json` from Firebase Console.
 
+For production APK and Windows builds, update the local `main` branch first:
+
+```bash
+git fetch origin main
+git switch main
+git merge --ff-only FETCH_HEAD
+```
+
+To build a debug APK:
+
+```powershell
+npm run build
+npx cap sync android
+.\android\gradlew.bat -p android assembleDebug
+```
+
+The APK is written to `android/app/build/outputs/apk/debug/app-debug.apk`. For a signed release APK, open Android Studio with `npx cap open android` and use **Build > Generate Signed Bundle / APK**.
+
+To build the Windows installer and portable app:
+
+```bash
+npm run build:exe
+```
+
+Both EXE files are written to `dist-electron/`.
+
 ## 6. Firebase setup and deployment
 
 1. Create a Firebase project; turn on **Authentication → Email/Password** and **Cloud Firestore**.
@@ -151,6 +184,8 @@ Push notifications on Android need `android/app/google-services.json` from Fireb
 4. Make the first admin: create the user in Authentication, then in Firestore create `users/{uid}` with `role: "admin"`.
 5. Cloudinary: the cloud name and unsigned upload preset are in `src/utils/cloudinary.js`.
 6. Host the web app anywhere that serves static files (Firebase Hosting, Netlify, Vercel) from `dist/`.
+
+For Vercel, `vercel.json` sends app routes to `index.html` so direct links and browser refreshes work with the single-page app.
 
 The receipt reader (OCR) downloads its language data from the internet the first time it runs on a device, so tenants need a connection when attaching a receipt.
 
@@ -187,6 +222,8 @@ All collections are in Cloud Firestore. Main fields only.
 | `occupancy_logs/{propertyId_date}` | One night's curfew sheet: `entries{tenantId: {status}}` |
 | `curfew_records`, `notifications`, `announcements`, `owner_announcements`, `audit_logs`, `settings` | Curfew marks, in-app/push notices, announcements, caretaker activity, global settings |
 
+The main branch also stores signed lease uploads as `leaseFiles[]` on a tenant's profile. Room records can include `bedTypes{}` and `bedTypeRates{}` for single beds and double-deck upper/lower spaces, in addition to the per-bed `bedRates{}`. A property's custom billing rules are saved under the owner's `billingSettings.propertyRules`.
+
 ## 9. Repair prioritization (AHP)
 
 Repair requests are ranked with the Analytic Hierarchy Process (`src/utils/maintenancePrioritization.js`). The tenant picks a category; the category's AHP weight decides the priority tier:
@@ -201,6 +238,8 @@ Pairwise comparison matrix: Safety vs Utility = 5, Safety vs Routine = 8, Utilit
 
 A caretaker or owner can **change the priority** after checking a request. This changes its category, so the priority still comes from the AHP weights; the tenant's original category and every change (who, when, why) are kept on the request.
 
+On the main branch, owners and caretakers can also sort maintenance lists by most urgent, oldest, newest, room, or in-progress first. The selected order is remembered on that device.
+
 ## 10. Billing rules
 
 Owner → Account → **Billing rules**:
@@ -209,6 +248,8 @@ Owner → Account → **Billing rules**:
 - **Your fee types**: fees you charge often, with a usual amount; they appear first in *Add a fee*.
 - **Late fee**: fixed amount or % of rent, added once a month when rent is still unpaid N days after the due date. Rent sent on time is never charged, even if checked later. The owner can waive it for a month on the tenant's profile.
 - **Move-in payments**: advance rent and security deposit, in months of rent, suggested in *Register tenant*.
+
+On the main branch, each property can use the owner's usual billing rules or override its rent due date for new tenants, late fee, and move-in payments. Fee types remain shared across the owner's properties; existing tenants keep their own due dates.
 
 Every screen (owner, caretaker, tenant, reports) computes a month's bill with the same function, `billForMonth` in `utils/tenantRent.js`: rent, less advance rent already paid for that month, plus that month's fees and any late fee, less what was received.
 
@@ -220,10 +261,13 @@ Security deposits are held while the tenant stays and settled from the tenant's 
 
 - Owners only see and change their own properties, tenants, caretakers, payments and fees.
 - Caretakers only reach the property they are working on, and only with the permissions their owner gave them. A caretaker with several properties switches between the ones the owner assigned; they cannot add properties themselves.
+- On the main branch, an inactive caretaker keeps their account and records, but cannot access caretaker features until the owner reactivates them.
 - Tenants can never mark a payment as paid, change their own rent, room, due day or late-fee waivers.
 - Repairs: marking a request resolved needs resolution notes. Only the tenant can confirm a fix, reopen it with a reason, or rate it (once, 1–5). Owners and caretakers cannot write the tenant's answer.
 
 Rules tests in `tests/rules/firestore.rules.test.mjs` run the app's real reads and writes for every role, plus the attacks the rules must stop.
+
+GitHub Actions also runs lint, unit tests, the production build, Firestore rules tests, and Cloud Functions helper tests for pushes and pull requests targeting `dev` or `main`.
 
 ## 12. Testing
 
@@ -253,6 +297,21 @@ System changes made after the final defense, by panel suggestion:
 | Contract (rules and regulations) | Owner writes a contract per property; tenants agree in the app; PDF download | Property → *Rental contract* |
 | Editable singilan | Due day per tenant, own fee types with usual amounts, automatic late fee | Account → *Billing rules* |
 | Technical manual | This README | `README.md` |
+
+### Main branch additions and updates
+
+The table above records the panel revisions. The following additions and current workflows are present on `main`; they supplement that history:
+
+| Area | Main branch behavior |
+|---|---|
+| Room setup and bed maps | Room setup supports uniform or per-floor room groups and single or double-deck layouts. Owners and caretakers can see bed occupancy; rates can differ by bed type and by individual bed. |
+| Property billing | A property can inherit the owner's billing rules or set its own new-tenant due date, late fee, and advance/deposit amounts. Fee types remain shared at the owner level. |
+| Signed lease files | The owner can attach photos or a PDF of a signed lease during registration or later from the tenant profile; the tenant can view the files. Up to 10 files are allowed (images up to 5 MB each, PDFs up to 10 MB each). This is the current main-branch workflow; the earlier in-app contract editor and tenant agreement entry above are retained here as panel-revision history. |
+| Payment methods | Payment accounts support GCash, Cash, QR Ph, Maya, and other owner-named e-wallet/QR services, with multiple accounts per method. Bank transfers are not supported. |
+| Reports | Reports include whole-property summaries and individual reports for a tenant, caretaker, or room, including receipts, occupancy, payments, maintenance, and curfew records. |
+| Maintenance lists | Owners and caretakers can choose most urgent, oldest, newest, by room, or in-progress-first sorting; the choice is stored on the device. |
+| Caretaker access | Owners can make a caretaker inactive without deleting their account or records. Firestore rules block the inactive caretaker's access until reactivated. |
+| Vercel routing | `vercel.json` rewrites app routes to `index.html` so direct links and page refreshes work with the React single-page app. |
 
 ## 14. Troubleshooting
 
